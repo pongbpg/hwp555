@@ -1,0 +1,10 @@
+- [ ] Backend Dependencies Installed
+- [ ] Frontend Dependencies Installed
+- [ ] Database Connection Configured
+- [ ] Backend Server Running (Port 5000)
+- [ ] Frontend Development Server Running (Port 3000)
+- [ ] Login Test Completed
+- [ ] Employee Management Test Completed
+- [ ] Attendance Tracking Test Completed
+- [ ] KPI Evaluation Test Completed
+- [ ] Salary Management Test Completed
