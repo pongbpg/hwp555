@@ -8,6 +8,9 @@ export default function Layout({ onLogout }) {
         <NavLink to="/products" className={({ isActive }) => (isActive ? 'active' : '')}>
           Products
         </NavLink>
+        <NavLink to="/categories-brands" className={({ isActive }) => (isActive ? 'active' : '')}>
+          Categories & Brands
+        </NavLink>
         <NavLink to="/orders" className={({ isActive }) => (isActive ? 'active' : '')}>
           Orders
         </NavLink>

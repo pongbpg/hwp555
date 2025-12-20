@@ -9,6 +9,7 @@ const orderItemSchema = new Schema(
     variantId: { type: Schema.Types.ObjectId, required: true },
     sku: String,
     quantity: { type: Number, required: true },
+    receivedQuantity: { type: Number, default: 0 },
     unitPrice: { type: Number, default: 0 },
     batchRef: String,
     expiryDate: Date,

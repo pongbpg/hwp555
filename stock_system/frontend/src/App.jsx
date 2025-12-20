@@ -4,6 +4,7 @@ import Login from './pages/Login.jsx';
 import Products from './pages/Products.jsx';
 import Orders from './pages/Orders.jsx';
 import Insights from './pages/Insights.jsx';
+import CategoriesBrands from './pages/CategoriesBrands.jsx';
 import Layout from './pages/Layout.jsx';
 import { setAuthToken } from './api.js';
 
@@ -41,6 +42,7 @@ export default function App() {
       >
         <Route index element={<Navigate to="/products" replace />} />
         <Route path="/products" element={<Products />} />
+        <Route path="/categories-brands" element={<CategoriesBrands />} />
         <Route path="/orders" element={<Orders />} />
         <Route path="/insights" element={<Insights />} />
       </Route>

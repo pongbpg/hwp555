@@ -7,6 +7,8 @@ import { dirname, join } from 'path';
 import authRoutes from './routes/auth.js';
 import productRoutes from './routes/products.js';
 import inventoryRoutes from './routes/inventory.js';
+import categoryRoutes from './routes/categories.js';
+import brandRoutes from './routes/brands.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -28,6 +30,8 @@ mongoose
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/inventory', inventoryRoutes);
+app.use('/api/categories', categoryRoutes);
+app.use('/api/brands', brandRoutes);
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', service: 'stock-system' });
