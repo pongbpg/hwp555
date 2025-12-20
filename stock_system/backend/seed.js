@@ -1,11 +1,17 @@
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import Employee from './models/Employee.js';
 
-dotenv.config();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
-const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/hr_system';
+// Load .env from root directory
+dotenv.config({ path: join(__dirname, '../../.env') });
+
+const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/hwp555_db';
 
 async function run() {
   await mongoose.connect(mongoUri);

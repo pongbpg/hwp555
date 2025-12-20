@@ -23,7 +23,7 @@ app.use(cors());
 app.use(express.json());
 
 // Database connection
-const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/hr_system';
+const mongoUri = process.env.MONGODB_URI;
 mongoose.connect(mongoUri)
   .then(() => console.log('MongoDB connected for HR system'))
   .catch(err => console.log('MongoDB connection error:', err));

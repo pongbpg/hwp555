@@ -21,7 +21,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/hr_system';
+const mongoUri = process.env.MONGODB_URI;
 mongoose
   .connect(mongoUri)
   .then(() => console.log('MongoDB connected for stock system'))
