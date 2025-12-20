@@ -2,11 +2,17 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import authRoutes from './routes/auth.js';
 import productRoutes from './routes/products.js';
 import inventoryRoutes from './routes/inventory.js';
 
-dotenv.config();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Load .env from root directory
+dotenv.config({ path: join(__dirname, '../../.env') });
 
 const app = express();
 
@@ -32,8 +38,8 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-const PORT = process.env.PORT || 6000;
-const HOST = process.env.HOST || 'localhost';
+const PORT = process.env.STOCK_PORT || 5001;
+const HOST = process.env.STOCK_HOST || 'localhost';
 app.listen(PORT, HOST, () => {
-  console.log(`Stock backend running on http://${HOST}:${PORT}`);
+  console.log(`🚀 Stock System Backend running on http://${HOST}:${PORT}`);
 });

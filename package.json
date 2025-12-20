@@ -1,0 +1,32 @@
+{
+  "name": "hwp555-workspace",
+  "version": "1.0.0",
+  "description": "HR & Stock Management Systems",
+  "private": true,
+  "scripts": {
+    "install:all": "npm install && cd hr_system/backend && npm install && cd ../../hr_system/frontend && npm install && cd ../../stock_system/backend && npm install && cd ../../stock_system/frontend && npm install",
+    "dev": "concurrently --kill-others-on-fail \"npm run hr:backend\" \"npm run hr:frontend\" \"npm run stock:backend\" \"npm run stock:frontend\"",
+    "dev:backend": "concurrently --kill-others-on-fail \"npm run hr:backend\" \"npm run stock:backend\"",
+    "dev:frontend": "concurrently --kill-others-on-fail \"npm run hr:frontend\" \"npm run stock:frontend\"",
+    "hr:backend": "cd hr_system/backend && npm run dev",
+    "hr:frontend": "cd hr_system/frontend && npm run dev",
+    "stock:backend": "cd stock_system/backend && npm run dev",
+    "stock:frontend": "cd stock_system/frontend && npm run dev",
+    "build": "concurrently \"npm run build:hr\" \"npm run build:stock\"",
+    "build:hr": "cd hr_system/frontend && npm run build",
+    "build:stock": "cd stock_system/frontend && npm run build"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.1.2",
+    "concurrently": "^8.2.2",
+    "vite": "^7.3.0"
+  },
+  "keywords": [
+    "hr",
+    "stock",
+    "management",
+    "monorepo"
+  ],
+  "author": "",
+  "license": "ISC"
+}

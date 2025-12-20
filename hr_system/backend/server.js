@@ -2,13 +2,19 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import employeeRoutes from './routes/employees.js';
 import attendanceRoutes from './routes/attendance.js';
 import kpiRoutes from './routes/kpi.js';
 import salaryRoutes from './routes/salary.js';
 import authRoutes from './routes/auth.js';
 
-dotenv.config();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Load .env from root directory
+dotenv.config({ path: join(__dirname, '../../.env') });
 
 const app = express();
 
@@ -19,7 +25,7 @@ app.use(express.json());
 // Database connection
 const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/hr_system';
 mongoose.connect(mongoUri)
-  .then(() => console.log('MongoDB connected'))
+  .then(() => console.log('MongoDB connected for HR system'))
   .catch(err => console.log('MongoDB connection error:', err));
 
 // Routes
@@ -40,8 +46,8 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Something went wrong!' });
 });
 
-const PORT = process.env.PORT || 5000;
-const HOST = process.env.HOST || 'localhost';
+const PORT = process.env.HR_PORT || 5000;
+const HOST = process.env.HR_HOST || 'localhost';
 app.listen(PORT, HOST, () => {
-  console.log(`Server running on ${HOST}:${PORT}`);
+  console.log(`🚀 HR System Backend running on http://${HOST}:${PORT}`);
 });
