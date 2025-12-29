@@ -360,9 +360,9 @@ router.get('/insights', authenticateToken, async (req, res) => {
     const salesSince = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
     const expiryBefore = new Date(now.getTime() + expiryDays * 24 * 60 * 60 * 1000);
 
-    // คำนวณยอดขายใน 30 วันที่ผ่านมา
+    // คำนวณยอดขายใน 30 วันที่ผ่านมา (ใช้ orderDate แทน createdAt เพื่อความถูกต้อง)
     const salesData = await InventoryOrder.aggregate([
-      { $match: { type: 'sale', createdAt: { $gte: salesSince }, status: { $ne: 'cancelled' } } },
+      { $match: { type: 'sale', orderDate: { $gte: salesSince }, status: { $ne: 'cancelled' } } },
       { $unwind: '$items' },
       {
         $group: {
