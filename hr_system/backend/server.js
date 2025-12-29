@@ -9,6 +9,7 @@ import attendanceRoutes from './routes/attendance.js';
 import kpiRoutes from './routes/kpi.js';
 import salaryRoutes from './routes/salary.js';
 import authRoutes from './routes/auth.js';
+import testRoutes from './routes/test.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -34,6 +35,7 @@ app.use('/api/employees', employeeRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/kpi', kpiRoutes);
 app.use('/api/salary', salaryRoutes);
+app.use('/api/test', testRoutes); // Test routes (no authentication required)
 
 // Health check
 app.get('/api/health', (req, res) => {
