@@ -36,10 +36,10 @@ function App() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center">
-              <h1 className="text-2xl font-bold text-blue-600">HR System</h1>
+               <Link to="/"><h1 className="text-2xl font-bold text-blue-600">HR System</h1></Link>
             </div>
             <div className="hidden md:flex space-x-4">
-              <Link to="/" className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium">Dashboard</Link>
+              <Link to="/dashboard" className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium">Dashboard</Link>
               <Link to="/employees" className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium">Employees</Link>
               <Link to="/attendance" className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium">Attendance</Link>
               <Link to="/kpi" className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium">KPI</Link>
@@ -62,6 +62,7 @@ function App() {
       <div className="max-w-7xl mx-auto">
         <Routes>
           <Route path="/" element={<Dashboard user={user} />} />
+          <Route path="/dashboard" element={<Dashboard user={user} />} />
           <Route path="/employees" element={<Employees />} />
           <Route path="/attendance" element={<Attendance />} />
           <Route path="/kpi" element={<KPI />} />

@@ -60,10 +60,10 @@ export default function Insights() {
       {/* Fast movers with stock and days remaining */}
       {data.fastMovers?.length > 0 && (
         <div style={{ marginTop: 16 }}>
-          <h3>ขายดี 30 วัน (คงเหลือ / วันจะหมด)</h3>
+          <h3>ขายดี {days} วัน (คงเหลือ / วันจะหมด)</h3>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))', gap: 16 }}>
             <ChartBars
-              title="จำนวนขาย (30 วัน)"
+              title={`จำนวนขาย (${days} วัน)`}
               items={data.fastMovers.map((fm) => ({ label: `${fm.productName} • ${fm.sku}`, value: fm.quantitySold, daysRemaining: fm.daysRemaining }))}
               labelKey="label"
               valueKey="value"
@@ -117,7 +117,7 @@ export default function Insights() {
         columns={[
           ['productName', 'สินค้า'],
           ['sku', 'รหัสสินค้า'],
-          ['quantitySold', 'ขายแล้ว (30 วัน)'],
+          ['quantitySold', `ขายแล้ว (${days} วัน)`],
           ['currentStock', 'คงเหลือ'],
           ['incoming', 'กำลังจะเข้า'],
           ['daysRemaining', 'เหลือใช้ได้ (วัน)'],
@@ -125,18 +125,18 @@ export default function Insights() {
       />
 
       <Section
-        title="แนะนำการสั่งซื้อ (คำนวณจากยอดขาย)"
+        title={`แนะนำการสั่งซื้อ (คำนวณจากยอดขาย ${days} วัน)`}
         rows={data.reorderSuggestions}
         columns={[
           ['productName', 'สินค้า'],
           ['sku', 'รหัสสินค้า'],
           ['currentStock', 'คงเหลือ'],
           ['incoming', 'กำลังจะเข้า'],
-          ['quantitySold', 'ขายไป (30 วัน)'],
+          ['quantitySold', `ขายไป (${days} วัน)`],
           ['dailySalesRate', 'ขาย/วัน'],
           ['daysUntilStockOut', 'เหลือใช้ได้ (วัน)'],
           ['minOrderQty', 'สั่งขั้นต่ำ (Lead+Buffer)'],
-          ['recommendedOrderQty', 'แนะนำสั่ง (LT+Buffer+30)'],
+          ['recommendedOrderQty', `แนะนำสั่ง (LT+Buffer+${days})`],
           ['leadTimeDays', 'Lead Time (วัน)'],
           ['bufferDays', 'Buffer (วัน)'],
         ]}

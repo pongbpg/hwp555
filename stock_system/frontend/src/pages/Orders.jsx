@@ -124,6 +124,41 @@ export default function Orders() {
     }
   };
 
+  const cancelOrder = async (order) => {
+    if (!order?._id) return;
+    if (!window.confirm(`ยืนยันยกเลิก Order ${order.reference || order._id}?\nStock จะถูก rollback กลับ`)) return;
+    setError('');
+    setMessage('');
+    try {
+      const reason = window.prompt('เหตุผลในการยกเลิก (ไม่บังคับ):', '') || '';
+      await api.patch(`/inventory/orders/${order._id}/cancel`, { reason });
+      setMessage('ยกเลิก Order แล้ว');
+      loadOrders(page);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to cancel order');
+    }
+  };
+
+  const editOrder = async (order) => {
+    if (!order?._id) return;
+    const newReference = window.prompt('แก้ไขเลขอ้างอิง:', order.reference || '');
+    if (newReference === null) return; // cancelled
+    const newNotes = window.prompt('แก้ไขหมายเหตุ:', order.notes || '');
+    if (newNotes === null) return; // cancelled
+    setError('');
+    setMessage('');
+    try {
+      await api.patch(`/inventory/orders/${order._id}`, { 
+        reference: newReference, 
+        notes: newNotes 
+      });
+      setMessage('แก้ไข Order แล้ว');
+      loadOrders(page);
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to edit order');
+    }
+  };
+
   const updateItem = (idx, patch) => {
     setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
   };
@@ -178,6 +213,11 @@ export default function Orders() {
         {items.map((item, idx) => {
           const product = products.find((p) => p._id === item.productId);
           const variants = product?.variants || [];
+          // กรอง variant ที่ถูกเลือกแล้วในแถวอื่นออก
+          const selectedVariantIds = items
+            .filter((it, i) => i !== idx && it.productId === item.productId && it.variantId)
+            .map((it) => it.variantId);
+          const availableVariants = variants.filter((v) => !selectedVariantIds.includes(v._id));
           return (
             <div key={idx} className="card" style={{ border: '1px dashed #e5e7eb', padding: 12 }}>
               <div style={{ marginBottom: 8, fontSize: '0.875rem', color: '#666' }}>แถวที่ {idx + 1}</div>
@@ -196,7 +236,7 @@ export default function Orders() {
                 <div>
                   <label style={{ fontSize: '0.75rem', color: '#666', marginBottom: 4, display: 'block' }}>เวอร์ชัน</label>
                   <SearchableSelect
-                    options={variants.map((v) => ({
+                    options={availableVariants.map((v) => ({
                       ...v,
                       displayName: `${v.sku || v.name || 'Variant'} (stock: ${v.stockOnHand})`
                     }))}
@@ -274,23 +314,45 @@ export default function Orders() {
                 <th>Status</th>
                 <th>Items</th>
                 <th>Total</th>
-                <th>Details</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {orders.map((o) => (
                 <>
-                  <tr key={o._id}>
-                    <td>{o.createdAt ? new Date(o.createdAt).toLocaleString() : '-'}</td>
+                  <tr key={o._id} style={o.status === 'cancelled' ? { opacity: 0.5, textDecoration: 'line-through' } : {}}>
+                    <td>{o.orderDate ? new Date(o.orderDate).toLocaleDateString() : (o.createdAt ? new Date(o.createdAt).toLocaleDateString() : '-')}</td>
                     <td>{o.type}</td>
                     <td>{o.reference || '-'}</td>
-                    <td>{o.status || '-'}</td>
+                    <td>
+                      <span style={{
+                        padding: '2px 8px',
+                        borderRadius: 4,
+                        fontSize: '0.75rem',
+                        background: o.status === 'completed' ? '#d1fae5' : o.status === 'cancelled' ? '#fee2e2' : '#fef3c7',
+                        color: o.status === 'completed' ? '#065f46' : o.status === 'cancelled' ? '#991b1b' : '#92400e'
+                      }}>
+                        {o.status || '-'}
+                      </span>
+                    </td>
                     <td>{o.items?.length ?? 0}</td>
                     <td>{calcOrderTotal(o)}</td>
                     <td>
-                      <button type="button" className="button secondary" onClick={() => toggleExpand(o._id)}>
-                        {expandedOrders.has(o._id) ? 'ซ่อน' : 'รายละเอียด'}
-                      </button>
+                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                        <button type="button" className="button secondary" style={{ padding: '4px 8px', fontSize: '0.75rem' }} onClick={() => toggleExpand(o._id)}>
+                          {expandedOrders.has(o._id) ? 'ซ่อน' : 'ดู'}
+                        </button>
+                        {o.status !== 'cancelled' && (
+                          <>
+                            <button type="button" className="button secondary" style={{ padding: '4px 8px', fontSize: '0.75rem' }} onClick={() => editOrder(o)}>
+                              ✏️ แก้ไข
+                            </button>
+                            <button type="button" className="button secondary" style={{ padding: '4px 8px', fontSize: '0.75rem', color: '#dc2626' }} onClick={() => cancelOrder(o)}>
+                              ❌ ยกเลิก
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </td>
                   </tr>
                   {expandedOrders.has(o._id) && (

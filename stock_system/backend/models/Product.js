@@ -11,7 +11,7 @@ const batchSchema = new Schema(
     expiryDate: Date,
     receivedAt: { type: Date, default: Date.now },
   },
-  { _id: false }
+  { _id: true }
 );
 
 const variantSchema = new Schema(

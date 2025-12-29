@@ -77,19 +77,26 @@ const applyStockChange = (variant, item, type) => {
       throw new Error(`Insufficient stock for SKU ${variant.sku}`);
     }
 
-    const snapshot = {
-      stockOnHand: variant.stockOnHand,
-      batches: (variant.batches || []).map((batch) => (batch.toObject ? batch.toObject() : { ...batch })),
-    };
-
+    // ลด stockOnHand ก่อน
     variant.stockOnHand = (variant.stockOnHand || 0) - qty;
-    const remaining = consumeBatches(variant, qty);
 
-    if (remaining > 0 && !variant.allowBackorder) {
-      variant.stockOnHand = snapshot.stockOnHand;
-      variant.batches = snapshot.batches;
-      throw new Error(`Insufficient batch quantities for SKU ${variant.sku}`);
+    // ถ้ามี batches ให้ consume ตาม FIFO (First Expire, First Out)
+    if (variant.batches && variant.batches.length > 0) {
+      const snapshot = {
+        stockOnHand: variant.stockOnHand + qty, // เก็บค่าเดิมก่อนลด
+        batches: variant.batches.map((batch) => (batch.toObject ? batch.toObject() : { ...batch })),
+      };
+
+      const remaining = consumeBatches(variant, qty);
+
+      // ถ้า consume batches ไม่พอและไม่อนุญาต backorder ให้ rollback
+      if (remaining > 0 && !variant.allowBackorder) {
+        variant.stockOnHand = snapshot.stockOnHand;
+        variant.batches = snapshot.batches;
+        throw new Error(`Insufficient batch quantities for SKU ${variant.sku}`);
+      }
     }
+    // ถ้าไม่มี batches tracking ก็แค่ลด stockOnHand อย่างเดียว (ทำไปแล้วด้านบน)
     return;
   }
 
@@ -103,7 +110,7 @@ const applyStockChange = (variant, item, type) => {
 
 router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr'), async (req, res) => {
   try {
-    const { type, items, reference, channel, notes, totals } = req.body || {};
+    const { type, items, reference, channel, notes, totals, orderDate } = req.body || {};
 
     if (!type) return res.status(400).json({ error: 'Order type is required' });
     if (!items || items.length === 0) return res.status(400).json({ error: 'At least one item is required' });
@@ -146,6 +153,7 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr')
     const order = new InventoryOrder({
       type,
       status: req.body.status || (type === 'purchase' ? 'pending' : 'completed'),
+      orderDate: orderDate ? new Date(orderDate) : new Date(),
       reference,
       channel,
       notes,
@@ -201,6 +209,17 @@ router.patch('/orders/:id/receive', authenticateToken, authorizeRoles('owner', '
       variant.stockOnHand = (variant.stockOnHand || 0) + delta;
       variant.incoming = Math.max(0, (variant.incoming || 0) - delta);
       item.receivedQuantity = newReceived;
+
+      // เพิ่ม batch เมื่อรับของ ถ้ามีข้อมูล batchRef, expiryDate, หรือ unitPrice
+      if (item.batchRef || item.expiryDate || item.unitPrice) {
+        variant.batches.push({
+          batchRef: item.batchRef || `RCV-${order._id}-${Date.now()}`,
+          cost: item.unitPrice || 0,
+          quantity: delta,
+          expiryDate: item.expiryDate,
+          receivedAt: new Date(),
+        });
+      }
     }
 
     // Save all products
@@ -211,6 +230,84 @@ router.patch('/orders/:id/receive', authenticateToken, authorizeRoles('owner', '
     // Update order status
     const allReceived = order.items.every((it) => (it.receivedQuantity || 0) >= (it.quantity || 0));
     order.status = allReceived ? 'completed' : 'pending';
+    await order.save();
+
+    res.json(order);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ยกเลิก order (rollback stock)
+router.patch('/orders/:id/cancel', authenticateToken, authorizeRoles('owner', 'admin', 'hr'), async (req, res) => {
+  try {
+    const order = await InventoryOrder.findById(req.params.id);
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+    if (order.status === 'cancelled') return res.status(400).json({ error: 'Order is already cancelled' });
+
+    const productCache = new Map();
+
+    for (const item of order.items) {
+      const productId = String(item.productId);
+      let product = productCache.get(productId);
+      if (!product) {
+        product = await Product.findById(productId);
+        if (!product) continue; // skip if product deleted
+        productCache.set(productId, product);
+      }
+      const variant = selectVariant(product, item.variantId, item.sku);
+      if (!variant) continue;
+
+      const qty = Number(item.quantity) || 0;
+      const receivedQty = Number(item.receivedQuantity) || 0;
+
+      if (order.type === 'purchase') {
+        // Rollback: ลด incoming ที่ยังไม่รับ และลด stockOnHand ที่รับแล้ว
+        const pendingQty = qty - receivedQty;
+        variant.incoming = Math.max(0, (variant.incoming || 0) - pendingQty);
+        variant.stockOnHand = Math.max(0, (variant.stockOnHand || 0) - receivedQty);
+        // Note: ไม่ลบ batches เพราะอาจถูก consume ไปแล้ว
+      } else if (order.type === 'sale') {
+        // Rollback: คืน stock กลับ
+        variant.stockOnHand = (variant.stockOnHand || 0) + qty;
+      } else if (order.type === 'adjustment') {
+        // Rollback: ลบจำนวนที่ปรับไป
+        variant.stockOnHand = (variant.stockOnHand || 0) - qty;
+      }
+    }
+
+    // Save all products
+    for (const p of productCache.values()) {
+      await p.save();
+    }
+
+    order.status = 'cancelled';
+    order.cancelledAt = new Date();
+    order.cancelledBy = req.user?._id;
+    order.cancelReason = req.body.reason || '';
+    await order.save();
+
+    res.json(order);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// แก้ไข order (เฉพาะ reference, notes, channel)
+router.patch('/orders/:id', authenticateToken, authorizeRoles('owner', 'admin', 'hr'), async (req, res) => {
+  try {
+    const order = await InventoryOrder.findById(req.params.id);
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+    if (order.status === 'cancelled') return res.status(400).json({ error: 'Cannot edit cancelled order' });
+
+    const { reference, notes, channel, orderDate } = req.body;
+    
+    if (reference !== undefined) order.reference = reference;
+    if (notes !== undefined) order.notes = notes;
+    if (channel !== undefined) order.channel = channel;
+    if (orderDate !== undefined) order.orderDate = new Date(orderDate);
+
+    order.updatedBy = req.user?._id;
     await order.save();
 
     res.json(order);
@@ -366,7 +463,7 @@ router.get('/insights', authenticateToken, async (req, res) => {
 
         if (daysUntilStockOut < minimumDays) {
           // คำนวณจำนวนที่ควรสั่ง
-          const daysToOrder = leadTimeDays + bufferDays + 30; // สั่งให้พอใช้ lead time + buffer + 30 วัน
+          const daysToOrder = leadTimeDays + bufferDays + days; // สั่งให้พอใช้ lead time + buffer + days ที่เลือก
           const minCoverQty = Math.ceil(Math.max(0, dailySalesRate * minimumDays - currentStock));
           const recommendedOrderQty = Math.ceil(dailySalesRate * daysToOrder - currentStock);
 
