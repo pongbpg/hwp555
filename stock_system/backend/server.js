@@ -43,7 +43,7 @@ app.use((err, _req, res, _next) => {
 });
 
 const PORT = process.env.STOCK_PORT || 5001;
-const HOST = process.env.STOCK_HOST || 'localhost';
+const HOST = process.env.STOCK_HOST || '0.0.0.0';
 app.listen(PORT, HOST, () => {
   console.log(`🚀 Stock System Backend running on http://${HOST}:${PORT}`);
 });
