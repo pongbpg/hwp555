@@ -269,10 +269,19 @@ router.patch('/orders/:id/receive', authenticateToken, authorizeRoles('owner', '
         variant.cost = item.unitPrice;
       }
 
+      // สร้างเลขล็อตอัตโนมัติ (ถ้าไม่ได้ระบุ)
+      const generateBatchRef = () => {
+        const now = new Date();
+        const dateStr = now.toISOString().slice(2, 10).replace(/-/g, ''); // YYMMDD
+        const timeStr = now.toISOString().slice(11, 16).replace(':', ''); // HHMM
+        const random = Math.random().toString(36).substring(2, 6).toUpperCase();
+        return `LOT${dateStr}-${timeStr}-${random}`;
+      };
+
       // เพิ่ม batch เมื่อรับของ ถ้ามีข้อมูล batchRef, expiryDate, หรือ unitPrice
       if (item.batchRef || item.expiryDate || item.unitPrice) {
         variant.batches.push({
-          batchRef: item.batchRef || `RCV-${order._id}-${Date.now()}`,
+          batchRef: item.batchRef || generateBatchRef(),
           cost: item.unitPrice || 0,
           quantity: delta,
           expiryDate: item.expiryDate,
