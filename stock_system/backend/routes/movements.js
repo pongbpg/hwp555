@@ -20,7 +20,12 @@ router.get('/', authenticateToken, async (req, res) => {
     if (startDate || endDate) {
       filters.createdAt = {};
       if (startDate) filters.createdAt.$gte = new Date(startDate);
-      if (endDate) filters.createdAt.$lte = new Date(endDate);
+      if (endDate) {
+        // เพิ่ม 1 วันเพื่อให้รวมทั้งวัน endDate (ถึง 23:59:59)
+        const end = new Date(endDate);
+        end.setDate(end.getDate() + 1);
+        filters.createdAt.$lt = end;
+      }
     }
 
     const skip = (Number(page) - 1) * Number(limit);

@@ -12,7 +12,7 @@ const employeeSchema = new mongoose.Schema(
     hireDate: { type: Date, required: true },
     status: { type: String, enum: ['active', 'inactive', 'on-leave'], default: 'active' },
     password: { type: String, required: true },
-    role: { type: String, enum: ['owner', 'admin', 'hr', 'accountant', 'employee'], default: 'employee' },
+    role: { type: String, enum: ['owner', 'admin', 'hr', 'accountant', 'stock', 'employee'], default: 'employee' },
   },
   { timestamps: true }
 );

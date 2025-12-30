@@ -18,39 +18,73 @@ const Protected = ({ children }) => {
   return children;
 };
 
+// Protected route for analytics (Dashboard, Insights, Alerts)
+const AnalyticsRoute = ({ children, user }) => {
+  const canView = user && ['owner', 'stock'].includes(user.role);
+  if (!canView) return <Navigate to="/products" replace />;
+  return children;
+};
+
 export default function App() {
   const [token, setToken] = useState(localStorage.getItem('token'));
+  const [user, setUser] = useState(() => {
+    const saved = localStorage.getItem('user');
+    return saved ? JSON.parse(saved) : null;
+  });
   const navigate = useNavigate();
 
   useEffect(() => {
     if (token) setAuthToken(token);
   }, [token]);
 
+  const handleLogin = (newToken, userData) => {
+    setToken(newToken);
+    setUser(userData);
+    localStorage.setItem('user', JSON.stringify(userData));
+  };
+
   const handleLogout = () => {
     localStorage.removeItem('token');
+    localStorage.removeItem('user');
     setToken(null);
+    setUser(null);
     navigate('/login');
   };
 
+  // Determine default route based on role
+  const defaultRoute = user && ['owner', 'stock'].includes(user.role) ? '/dashboard' : '/products';
+
   return (
     <Routes>
-      <Route path="/login" element={<Login onLogin={setToken} />} />
+      <Route path="/login" element={<Login onLogin={handleLogin} />} />
       <Route
         path="/"
         element={
           <Protected>
-            <Layout onLogout={handleLogout} />
+            <Layout onLogout={handleLogout} user={user} />
           </Protected>
         }
       >
-        <Route index element={<Navigate to="/dashboard" replace />} />
-        <Route path="/dashboard" element={<Dashboard />} />
+        <Route index element={<Navigate to={defaultRoute} replace />} />
+        <Route path="/dashboard" element={
+          <AnalyticsRoute user={user}>
+            <Dashboard />
+          </AnalyticsRoute>
+        } />
         <Route path="/products" element={<Products />} />
         <Route path="/categories-brands" element={<CategoriesBrands />} />
         <Route path="/orders" element={<Orders />} />
         <Route path="/movements" element={<Movements />} />
-        <Route path="/alerts" element={<Alerts />} />
-        <Route path="/insights" element={<Insights />} />
+        <Route path="/alerts" element={
+          <AnalyticsRoute user={user}>
+            <Alerts />
+          </AnalyticsRoute>
+        } />
+        <Route path="/insights" element={
+          <AnalyticsRoute user={user}>
+            <Insights />
+          </AnalyticsRoute>
+        } />
       </Route>
     </Routes>
   );

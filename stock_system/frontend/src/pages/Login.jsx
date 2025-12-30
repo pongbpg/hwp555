@@ -13,11 +13,13 @@ export default function Login({ onLogin }) {
     setError('');
     try {
       const res = await api.post('/auth/login', { email, password });
-      const token = res.data.token;
+      const { token, employee } = res.data;
       localStorage.setItem('token', token);
       setAuthToken(token);
-      onLogin(token);
-      navigate('/dashboard');
+      onLogin(token, employee);
+      // Navigate based on role
+      const defaultRoute = ['owner', 'stock'].includes(employee?.role) ? '/dashboard' : '/products';
+      navigate(defaultRoute);
     } catch (err) {
       setError(err.response?.data?.error || 'Login failed');
     }

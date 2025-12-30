@@ -109,7 +109,7 @@ const applyStockChange = (variant, item, type) => {
   throw new Error('Unsupported order type');
 };
 
-router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr'), async (req, res) => {
+router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr', 'stock'), async (req, res) => {
   try {
     const { type, items, reference, channel, notes, totals, orderDate } = req.body || {};
 
@@ -201,7 +201,7 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr')
 });
 
 // รับของสำหรับใบสั่งซื้อ
-router.patch('/orders/:id/receive', authenticateToken, authorizeRoles('owner', 'admin', 'hr'), async (req, res) => {
+router.patch('/orders/:id/receive', authenticateToken, authorizeRoles('owner', 'admin', 'hr', 'stock'), async (req, res) => {
   try {
     const order = await InventoryOrder.findById(req.params.id);
     if (!order) return res.status(404).json({ error: 'Order not found' });
@@ -240,6 +240,11 @@ router.patch('/orders/:id/receive', authenticateToken, authorizeRoles('owner', '
       variant.stockOnHand = (variant.stockOnHand || 0) + delta;
       variant.incoming = Math.max(0, (variant.incoming || 0) - delta);
       item.receivedQuantity = newReceived;
+      
+      // อัพเดท cost ของ variant จาก unitPrice (ถ้ามี)
+      if (item.unitPrice && item.unitPrice > 0) {
+        variant.cost = item.unitPrice;
+      }
 
       // เพิ่ม batch เมื่อรับของ ถ้ามีข้อมูล batchRef, expiryDate, หรือ unitPrice
       if (item.batchRef || item.expiryDate || item.unitPrice) {
@@ -407,7 +412,7 @@ router.get('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr'),
   }
 });
 
-router.get('/insights', authenticateToken, async (req, res) => {
+router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), async (req, res) => {
   try {
     const now = new Date();
     const days = Number(req.query.days) || 30;
@@ -518,8 +523,8 @@ router.get('/insights', authenticateToken, async (req, res) => {
         const minimumDays = leadTimeDays + bufferDays;
 
         if (daysUntilStockOut < minimumDays) {
-          // คำนวณจำนวนที่ควรสั่ง
-          const daysToOrder = leadTimeDays + bufferDays + days; // สั่งให้พอใช้ lead time + buffer + days ที่เลือก
+          // คำนวณจำนวนที่ควรสั่ง (เพียงพอสำหรับ lead time + buffer)
+          const daysToOrder = minimumDays; // สั่งให้พอใช้ lead time + buffer
           const minCoverQty = Math.ceil(Math.max(0, dailySalesRate * minimumDays - currentStock));
           const recommendedOrderQty = Math.ceil(dailySalesRate * daysToOrder - currentStock);
 
@@ -626,9 +631,21 @@ router.get('/insights', authenticateToken, async (req, res) => {
 });
 
 // ============= Dashboard Summary =============
-router.get('/dashboard', authenticateToken, async (_req, res) => {
+router.get('/dashboard', authenticateToken, authorizeRoles('owner', 'stock'), async (_req, res) => {
   try {
     const products = await Product.find({ status: 'active' }).lean();
+    
+    // Fetch categories and brands for name lookup
+    const [categoriesList, brandsList] = await Promise.all([
+      Category.find({}).lean(),
+      Brand.find({}).lean()
+    ]);
+    
+    // Create lookup maps (id -> name)
+    const categoryMap = {};
+    categoriesList.forEach(cat => { categoryMap[cat._id.toString()] = cat.name; });
+    const brandMap = {};
+    brandsList.forEach(brand => { brandMap[brand._id.toString()] = brand.name; });
     
     let totalProducts = 0;
     let totalVariants = 0;
@@ -636,6 +653,7 @@ router.get('/dashboard', authenticateToken, async (_req, res) => {
     let totalValue = 0;
     let lowStockCount = 0;
     let outOfStockCount = 0;
+    let normalStockCount = 0;
     const categoryStock = {};
     const brandStock = {};
     
@@ -655,21 +673,25 @@ router.get('/dashboard', authenticateToken, async (_req, res) => {
           outOfStockCount++;
         } else if (stock <= reorderPoint) {
           lowStockCount++;
+        } else {
+          normalStockCount++;
         }
         
-        // Group by category
-        const cat = product.category || 'ไม่ระบุ';
-        if (!categoryStock[cat]) categoryStock[cat] = { stock: 0, value: 0, count: 0 };
-        categoryStock[cat].stock += stock;
-        categoryStock[cat].value += stock * cost;
-        categoryStock[cat].count++;
+        // Group by category (lookup name from map)
+        const catId = product.category || '';
+        const catName = categoryMap[catId] || 'ไม่ระบุ';
+        if (!categoryStock[catName]) categoryStock[catName] = { stock: 0, value: 0, count: 0 };
+        categoryStock[catName].stock += stock;
+        categoryStock[catName].value += stock * cost;
+        categoryStock[catName].count++;
         
-        // Group by brand
-        const brand = product.brand || 'ไม่ระบุ';
-        if (!brandStock[brand]) brandStock[brand] = { stock: 0, value: 0, count: 0 };
-        brandStock[brand].stock += stock;
-        brandStock[brand].value += stock * cost;
-        brandStock[brand].count++;
+        // Group by brand (lookup name from map)
+        const brandId = product.brand || '';
+        const brandName = brandMap[brandId] || 'ไม่ระบุ';
+        if (!brandStock[brandName]) brandStock[brandName] = { stock: 0, value: 0, count: 0 };
+        brandStock[brandName].stock += stock;
+        brandStock[brandName].value += stock * cost;
+        brandStock[brandName].count++;
       });
     });
     
@@ -679,6 +701,38 @@ router.get('/dashboard', authenticateToken, async (_req, res) => {
     const ordersToday = await InventoryOrder.countDocuments({ createdAt: { $gte: today } });
     const pendingOrders = await InventoryOrder.countDocuments({ status: 'pending' });
     
+    // Movement summary (7 days)
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const StockMovement = (await import('../models/StockMovement.js')).default;
+    
+    const movementByType = await StockMovement.aggregate([
+      { $match: { createdAt: { $gte: sevenDaysAgo } } },
+      { $group: { _id: '$movementType', count: { $sum: 1 }, totalQuantity: { $sum: '$quantity' } } }
+    ]);
+    
+    // Movement trend (7 days)
+    const movementTrend = await StockMovement.aggregate([
+      { $match: { createdAt: { $gte: sevenDaysAgo } } },
+      { $group: { _id: { $dateToString: { format: '%m/%d', date: '$createdAt' } }, count: { $sum: 1 } } },
+      { $sort: { _id: 1 } }
+    ]);
+    
+    // Alert counts
+    const now = new Date();
+    const expiryBefore = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    let nearExpiryCount = 0;
+    
+    products.forEach((product) => {
+      (product.variants || []).forEach((variant) => {
+        (variant.batches || []).forEach((batch) => {
+          if (batch.expiryDate && new Date(batch.expiryDate) <= expiryBefore && new Date(batch.expiryDate) >= now) {
+            nearExpiryCount++;
+          }
+        });
+      });
+    });
+    
     res.json({
       summary: {
         totalProducts,
@@ -687,9 +741,22 @@ router.get('/dashboard', authenticateToken, async (_req, res) => {
         totalValue: Math.round(totalValue * 100) / 100,
         lowStockCount,
         outOfStockCount,
+        normalStockCount,
         ordersToday,
         pendingOrders,
       },
+      alerts: {
+        total: outOfStockCount + lowStockCount + nearExpiryCount,
+        critical: outOfStockCount,
+        warning: lowStockCount + nearExpiryCount,
+        outOfStock: outOfStockCount,
+        lowStock: lowStockCount,
+        nearExpiry: nearExpiryCount,
+      },
+      movements: {
+        byType: movementByType,
+      },
+      movementTrend: movementTrend.map(m => ({ date: m._id, count: m.count })),
       byCategory: Object.entries(categoryStock)
         .map(([name, data]) => ({ name, ...data }))
         .sort((a, b) => b.stock - a.stock),
@@ -703,7 +770,7 @@ router.get('/dashboard', authenticateToken, async (_req, res) => {
 });
 
 // ============= Alerts API =============
-router.get('/alerts', authenticateToken, async (req, res) => {
+router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async (req, res) => {
   try {
     const { days = 30 } = req.query;
     const now = new Date();

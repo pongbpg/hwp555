@@ -206,6 +206,7 @@ export default function Employees() {
               <option value="employee">Employee</option>
               <option value="hr">HR</option>
               <option value="accountant">Accountant</option>
+              <option value="stock">Stock</option>
               <option value="admin">Admin</option>
               <option value="owner">Owner</option>
             </select>

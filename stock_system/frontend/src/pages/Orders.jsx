@@ -2,7 +2,14 @@ import { useEffect, useState } from 'react';
 import api from '../api.js';
 import SearchableSelect from '../components/SearchableSelect.jsx';
 
-const defaultItem = { productId: '', variantId: '', quantity: 1, type: 'sale' };
+// คำนวณวันหมดอายุ default (+2 ปี)
+const getDefaultExpiryDate = () => {
+  const d = new Date();
+  d.setFullYear(d.getFullYear() + 2);
+  return d.toISOString().split('T')[0];
+};
+
+const defaultItem = { productId: '', variantId: '', quantity: 1, unitPrice: 0, type: 'sale', expiryDate: getDefaultExpiryDate(), batchRef: '' };
 
 export default function Orders() {
   const [products, setProducts] = useState([]);
@@ -22,6 +29,7 @@ export default function Orders() {
   const [expandedOrders, setExpandedOrders] = useState(new Set());
   const [receiveEdits, setReceiveEdits] = useState({});
   const [receiving, setReceiving] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [filterType, setFilterType] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
 
@@ -91,7 +99,9 @@ export default function Orders() {
       (sum, it) => sum + (Number(it.unitPrice) || 0) * (Number(it.quantity) || 0),
       0
     );
-    return o.totals?.grandTotal ?? byItems;
+    // ใช้ grandTotal ถ้ามีค่า > 0, ไม่งั้นใช้ byItems
+    const grandTotal = o.totals?.grandTotal || 0;
+    return grandTotal > 0 ? grandTotal : byItems;
   };
 
   const handleReceiveChange = (orderId, idx, val) => {
@@ -159,11 +169,13 @@ export default function Orders() {
     setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
   };
 
-  const addItem = () => setItems((prev) => [...prev, defaultItem]);
+  const addItem = () => setItems((prev) => [...prev, { ...defaultItem, expiryDate: getDefaultExpiryDate() }]);
   const removeItem = (idx) => setItems((prev) => prev.filter((_, i) => i !== idx));
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (submitting) return; // ป้องกันกดซ้ำ
+    setSubmitting(true);
     setError('');
     setMessage('');
     try {
@@ -171,14 +183,28 @@ export default function Orders() {
         type,
         reference,
         orderDate,
-        items: items.map((it) => ({ ...it, quantity: Number(it.quantity) || 0 })),
+        items: items.map((it) => ({
+          productId: it.productId,
+          variantId: it.variantId,
+          quantity: Number(it.quantity) || 0,
+          unitPrice: Number(it.unitPrice) || 0,
+          batchRef: it.batchRef || undefined,
+          expiryDate: it.expiryDate || undefined,
+        })),
       };
       await api.post('/inventory/orders', payload);
       setMessage('Order recorded');
+      // Reset form
+      setItems([{ ...defaultItem, expiryDate: getDefaultExpiryDate() }]);
+      setReference('');
+      setType('sale');
+      setOrderDate(new Date().toISOString().split('T')[0]);
       setPage(1);
       loadOrders(1);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to record');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -251,7 +277,7 @@ export default function Orders() {
               return (
                 <div key={idx} className="border border-dashed border-gray-300 rounded-lg p-4 bg-gray-50">
                   <div className="text-xs text-gray-500 mb-2">รายการที่ {idx + 1}</div>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">สินค้า</label>
                       <SearchableSelect
@@ -287,7 +313,43 @@ export default function Orders() {
                         onChange={(e) => updateItem(idx, { quantity: e.target.value })}
                       />
                     </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">💰 ราคา/หน่วย</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                        value={item.unitPrice}
+                        onChange={(e) => updateItem(idx, { unitPrice: e.target.value })}
+                        placeholder="0.00"
+                      />
+                    </div>
                   </div>
+                  {/* Purchase Order: เพิ่มช่อง Batch และ วันหมดอายุ */}
+                  {type === 'purchase' && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">เลขล็อต (Batch Ref)</label>
+                        <input
+                          type="text"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                          value={item.batchRef || ''}
+                          onChange={(e) => updateItem(idx, { batchRef: e.target.value })}
+                          placeholder="เช่น LOT-2025-001"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-1">📅 วันหมดอายุ</label>
+                        <input
+                          type="date"
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                          value={item.expiryDate || ''}
+                          onChange={(e) => updateItem(idx, { expiryDate: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                  )}
                   {items.length > 1 && (
                     <button
                       type="button"
@@ -307,11 +369,16 @@ export default function Orders() {
               type="button"
               className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-4 py-2 rounded-lg"
               onClick={addItem}
+              disabled={submitting}
             >
               + เพิ่มแถว
             </button>
-            <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium">
-              ส่ง
+            <button 
+              type="submit" 
+              className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={submitting}
+            >
+              {submitting ? 'กำลังบันทึก...' : 'ส่ง'}
             </button>
           </div>
         </form>
@@ -422,7 +489,7 @@ export default function Orders() {
                   </tr>
                   {expandedOrders.has(o._id) && (
                     <tr>
-                      <td colSpan={7}>
+                      <td colSpan={9}>
                         <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 m-2">
                           <div className="flex gap-6 mb-3 text-sm text-gray-600">
                             <div>
@@ -440,6 +507,8 @@ export default function Orders() {
                               <tr className="border-b border-gray-300">
                                 <th className="text-left py-2 px-2">สินค้า</th>
                                 <th className="text-left py-2 px-2">SKU</th>
+                                <th className="text-left py-2 px-2">ล็อต</th>
+                                <th className="text-left py-2 px-2">หมดอายุ</th>
                                 <th className="text-right py-2 px-2 w-20">จำนวน</th>
                                 <th className="text-right py-2 px-2 w-24">รับแล้ว</th>
                                 <th className="text-right py-2 px-2 w-20">ค้างรับ</th>
@@ -452,6 +521,10 @@ export default function Orders() {
                                 <tr key={idx} className="border-b border-gray-100">
                                   <td className="py-2 px-2">{it.productName || '-'}</td>
                                   <td className="py-2 px-2 font-mono text-gray-600">{it.sku || '-'}</td>
+                                  <td className="py-2 px-2 text-gray-600">{it.batchRef || '-'}</td>
+                                  <td className="py-2 px-2 text-gray-600">
+                                    {it.expiryDate ? new Date(it.expiryDate).toLocaleDateString('th-TH') : '-'}
+                                  </td>
                                   <td className="py-2 px-2 text-right">{it.quantity ?? 0}</td>
                                   <td className="py-2 px-2 text-right">
                                     {o.type === 'purchase' ? (
