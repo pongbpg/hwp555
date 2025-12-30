@@ -12,7 +12,6 @@ export default function Orders() {
   const [orderDate, setOrderDate] = useState(new Date().toISOString().split('T')[0]);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  // Orders listing state
   const [orders, setOrders] = useState([]);
   const [ordersError, setOrdersError] = useState('');
   const [ordersLoading, setOrdersLoading] = useState(false);
@@ -23,7 +22,6 @@ export default function Orders() {
   const [expandedOrders, setExpandedOrders] = useState(new Set());
   const [receiveEdits, setReceiveEdits] = useState({});
   const [receiving, setReceiving] = useState(false);
-  // Filters for orders listing
   const [filterType, setFilterType] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
 
@@ -79,7 +77,6 @@ export default function Orders() {
       else next.add(id);
       return next;
     });
-    // prime receive edits
     const order = orders.find((o) => o._id === id);
     if (order?.type === 'purchase' && order.items) {
       setReceiveEdits((prev) => ({
@@ -90,9 +87,11 @@ export default function Orders() {
   };
 
   const calcOrderTotal = (o) => {
-    const byItems = (o.items || []).reduce((sum, it) => sum + ((Number(it.unitPrice) || 0) * (Number(it.quantity) || 0)), 0);
-    const grand = o.totals?.grandTotal;
-    return grand ?? byItems;
+    const byItems = (o.items || []).reduce(
+      (sum, it) => sum + (Number(it.unitPrice) || 0) * (Number(it.quantity) || 0),
+      0
+    );
+    return o.totals?.grandTotal ?? byItems;
   };
 
   const handleReceiveChange = (orderId, idx, val) => {
@@ -142,16 +141,13 @@ export default function Orders() {
   const editOrder = async (order) => {
     if (!order?._id) return;
     const newReference = window.prompt('แก้ไขเลขอ้างอิง:', order.reference || '');
-    if (newReference === null) return; // cancelled
+    if (newReference === null) return;
     const newNotes = window.prompt('แก้ไขหมายเหตุ:', order.notes || '');
-    if (newNotes === null) return; // cancelled
+    if (newNotes === null) return;
     setError('');
     setMessage('');
     try {
-      await api.patch(`/inventory/orders/${order._id}`, { 
-        reference: newReference, 
-        notes: newNotes 
-      });
+      await api.patch(`/inventory/orders/${order._id}`, { reference: newReference, notes: newNotes });
       setMessage('แก้ไข Order แล้ว');
       loadOrders(page);
     } catch (err) {
@@ -164,7 +160,6 @@ export default function Orders() {
   };
 
   const addItem = () => setItems((prev) => [...prev, defaultItem]);
-
   const removeItem = (idx) => setItems((prev) => prev.filter((_, i) => i !== idx));
 
   const handleSubmit = async (e) => {
@@ -180,7 +175,6 @@ export default function Orders() {
       };
       await api.post('/inventory/orders', payload);
       setMessage('Order recorded');
-      // Refresh orders list to include newly recorded order
       setPage(1);
       loadOrders(1);
     } catch (err) {
@@ -188,97 +182,151 @@ export default function Orders() {
     }
   };
 
+  const getStatusBadge = (status) => {
+    const classes = {
+      completed: 'bg-green-100 text-green-700',
+      cancelled: 'bg-red-100 text-red-700',
+      pending: 'bg-yellow-100 text-yellow-700',
+    };
+    return classes[status] || 'bg-gray-100 text-gray-700';
+  };
+
   return (
-    <div className="card">
-      <h2>Orders / Movements</h2>
-      <form className="form-grid" style={{ gap: 16 }} onSubmit={handleSubmit}>
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-bold text-gray-800">📋 คำสั่งซื้อ / ขาย</h1>
+      </div>
 
-        <div>
-          <label>วันที่</label>
-          <input className="input" type="date" value={orderDate} onChange={(e) => setOrderDate(e.target.value)} />
-        </div>
-        <div>
-          <label>ประเภท</label>
-          <select className="input" value={type} onChange={(e) => setType(e.target.value)}>
-            <option value="sale">Sale (ขาย)</option>
-            <option value="purchase">Purchase (ซื้อ)</option>
-            <option value="adjustment">Adjustment (ปรับปรุง)</option>
-          </select>
-        </div>
-        <div>
-          <label>เลขอ้างอิง</label>
-          <input className="input" value={reference} onChange={(e) => setReference(e.target.value)} placeholder="SO-001 or PO-001" />
-        </div>
+      {message && <div className="bg-green-50 border border-green-200 text-green-700 p-4 rounded-lg">{message}</div>}
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg">{error}</div>}
 
-        {items.map((item, idx) => {
-          const product = products.find((p) => p._id === item.productId);
-          const variants = product?.variants || [];
-          // กรอง variant ที่ถูกเลือกแล้วในแถวอื่นออก
-          const selectedVariantIds = items
-            .filter((it, i) => i !== idx && it.productId === item.productId && it.variantId)
-            .map((it) => it.variantId);
-          const availableVariants = variants.filter((v) => !selectedVariantIds.includes(v._id));
-          return (
-            <div key={idx} className="card" style={{ border: '1px dashed #e5e7eb', padding: 12 }}>
-              <div style={{ marginBottom: 8, fontSize: '0.875rem', color: '#666' }}>แถวที่ {idx + 1}</div>
-              <div className="form-grid" style={{ gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))', gap: 8, marginBottom: 8 }}>
-                <div>
-                  <label style={{ fontSize: '0.75rem', color: '#666', marginBottom: 4, display: 'block' }}>สินค้า</label>
-                  <SearchableSelect
-                    options={products}
-                    value={item.productId}
-                    onChange={(val) => updateItem(idx, { productId: val, variantId: '' })}
-                    placeholder="ค้นหาสินค้า..."
-                    getLabel={(p) => p.name}
-                    getId={(p) => p._id}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: '0.75rem', color: '#666', marginBottom: 4, display: 'block' }}>เวอร์ชัน</label>
-                  <SearchableSelect
-                    options={availableVariants.map((v) => ({
-                      ...v,
-                      displayName: `${v.sku || v.name || 'Variant'} (stock: ${v.stockOnHand})`
-                    }))}
-                    value={item.variantId}
-                    onChange={(val) => updateItem(idx, { variantId: val })}
-                    placeholder="ค้นหา SKU..."
-                    getLabel={(v) => v.displayName}
-                    getId={(v) => v._id}
-                  />
-                </div>
-                <div>
-                  <label style={{ fontSize: '0.75rem', color: '#666', marginBottom: 4, display: 'block' }}>จำนวน</label>
-                  <input className="input" type="number" min="0" value={item.quantity} onChange={(e) => updateItem(idx, { quantity: e.target.value })} />
-                </div>
-              </div>
-              {items.length > 1 && (
-                <button type="button" className="button secondary" onClick={() => removeItem(idx)} style={{ fontSize: '0.875rem', padding: '4px 8px' }}>
-                  🗑 ลบแถว
-                </button>
-              )}
+      {/* Create Order Form */}
+      <div className="bg-white rounded-xl shadow p-6">
+        <h2 className="text-lg font-semibold text-gray-800 mb-4">สร้าง Order ใหม่</h2>
+        <form onSubmit={handleSubmit}>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">วันที่</label>
+              <input
+                type="date"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                value={orderDate}
+                onChange={(e) => setOrderDate(e.target.value)}
+              />
             </div>
-          );
-        })}
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button type="button" className="button secondary" onClick={addItem}>
-            + เพิ่มแถว
-          </button>
-          <button className="button" type="submit">
-            ส่ง
-          </button>
-        </div>
-        {message && <div style={{ color: 'green' }}>{message}</div>}
-        {error && <div style={{ color: 'crimson' }}>{error}</div>}
-      </form>
-  
-      <div style={{ marginTop: 24 }}>
-        <h2>Order Records</h2>
-        <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">ประเภท</label>
+              <select
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                value={type}
+                onChange={(e) => setType(e.target.value)}
+              >
+                <option value="sale">Sale (ขาย)</option>
+                <option value="purchase">Purchase (ซื้อ)</option>
+                <option value="adjustment">Adjustment (ปรับปรุง)</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">เลขอ้างอิง</label>
+              <input
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                value={reference}
+                onChange={(e) => setReference(e.target.value)}
+                placeholder="SO-001 or PO-001"
+              />
+            </div>
+          </div>
+
+          {/* Items */}
+          <div className="space-y-3 mb-4">
+            {items.map((item, idx) => {
+              const product = products.find((p) => p._id === item.productId);
+              const variants = product?.variants || [];
+              const selectedVariantIds = items
+                .filter((it, i) => i !== idx && it.productId === item.productId && it.variantId)
+                .map((it) => it.variantId);
+              const availableVariants = variants.filter((v) => !selectedVariantIds.includes(v._id));
+
+              return (
+                <div key={idx} className="border border-dashed border-gray-300 rounded-lg p-4 bg-gray-50">
+                  <div className="text-xs text-gray-500 mb-2">รายการที่ {idx + 1}</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">สินค้า</label>
+                      <SearchableSelect
+                        options={products}
+                        value={item.productId}
+                        onChange={(val) => updateItem(idx, { productId: val, variantId: '' })}
+                        placeholder="ค้นหาสินค้า..."
+                        getLabel={(p) => p.name}
+                        getId={(p) => p._id}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">เวอร์ชัน</label>
+                      <SearchableSelect
+                        options={availableVariants.map((v) => ({
+                          ...v,
+                          displayName: `${v.sku || v.name || 'Variant'} (stock: ${v.stockOnHand})`,
+                        }))}
+                        value={item.variantId}
+                        onChange={(val) => updateItem(idx, { variantId: val })}
+                        placeholder="ค้นหา SKU..."
+                        getLabel={(v) => v.displayName}
+                        getId={(v) => v._id}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">จำนวน</label>
+                      <input
+                        type="number"
+                        min="0"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                        value={item.quantity}
+                        onChange={(e) => updateItem(idx, { quantity: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                  {items.length > 1 && (
+                    <button
+                      type="button"
+                      className="mt-3 text-red-600 hover:text-red-700 text-sm"
+                      onClick={() => removeItem(idx)}
+                    >
+                      🗑 ลบแถว
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              type="button"
+              className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-4 py-2 rounded-lg"
+              onClick={addItem}
+            >
+              + เพิ่มแถว
+            </button>
+            <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium">
+              ส่ง
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {/* Orders List */}
+      <div className="bg-white rounded-xl shadow p-6">
+        <h2 className="text-lg font-semibold text-gray-800 mb-4">Order Records</h2>
+
+        {/* Filters */}
+        <div className="flex flex-wrap gap-4 mb-4">
           <div>
-            <label style={{ fontSize: '0.875rem', display: 'block', marginBottom: 4 }}>ประเภท</label>
-            <select 
-              className="input" 
+            <label className="block text-xs text-gray-500 mb-1">ประเภท</label>
+            <select
+              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
               value={filterType}
               onChange={(e) => handleFilterChange(e.target.value, filterStatus)}
             >
@@ -289,65 +337,82 @@ export default function Orders() {
             </select>
           </div>
           <div>
-            <label style={{ fontSize: '0.875rem', display: 'block', marginBottom: 4 }}>สถานะ</label>
-            <select 
-              className="input" 
+            <label className="block text-xs text-gray-500 mb-1">สถานะ</label>
+            <select
+              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
               value={filterStatus}
               onChange={(e) => handleFilterChange(filterType, e.target.value)}
             >
               <option value="">ทั้งหมด</option>
-              <option value="pending">Pending (รอดำเนิน)</option>
+              <option value="pending">Pending (รอดำเนินการ)</option>
               <option value="completed">Completed (เสร็จสิ้น)</option>
               <option value="cancelled">Cancelled (ยกเลิก)</option>
             </select>
           </div>
         </div>
-        {ordersLoading && <div>Loading orders...</div>}
-        {ordersError && <div style={{ color: 'crimson' }}>{ordersError}</div>}
-        <div style={{ overflowX: 'auto' }}>
-          <table className="table">
+
+        {ordersLoading && <p className="text-gray-600">Loading orders...</p>}
+        {ordersError && <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-lg mb-4">{ordersError}</div>}
+
+        <div className="overflow-x-auto">
+          <table className="w-full">
             <thead>
-              <tr>
-                <th>Date</th>
-                <th>Type</th>
-                <th>Reference</th>
-                <th>Status</th>
-                <th>Items</th>
-                <th>Total</th>
-                <th>Actions</th>
+              <tr className="border-b border-gray-200">
+                <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">Date</th>
+                <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">Type</th>
+                <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">Reference</th>
+                <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">Status</th>
+                <th className="text-center py-2 px-3 text-sm font-semibold text-gray-600">Items</th>
+                <th className="text-right py-2 px-3 text-sm font-semibold text-gray-600">Total</th>
+                <th className="text-center py-2 px-3 text-sm font-semibold text-gray-600">Actions</th>
               </tr>
             </thead>
             <tbody>
               {orders.map((o) => (
                 <>
-                  <tr key={o._id} style={o.status === 'cancelled' ? { opacity: 0.5, textDecoration: 'line-through' } : {}}>
-                    <td>{o.orderDate ? new Date(o.orderDate).toLocaleDateString() : (o.createdAt ? new Date(o.createdAt).toLocaleDateString() : '-')}</td>
-                    <td>{o.type}</td>
-                    <td>{o.reference || '-'}</td>
-                    <td>
-                      <span style={{
-                        padding: '2px 8px',
-                        borderRadius: 4,
-                        fontSize: '0.75rem',
-                        background: o.status === 'completed' ? '#d1fae5' : o.status === 'cancelled' ? '#fee2e2' : '#fef3c7',
-                        color: o.status === 'completed' ? '#065f46' : o.status === 'cancelled' ? '#991b1b' : '#92400e'
-                      }}>
+                  <tr
+                    key={o._id}
+                    className={`border-b border-gray-100 hover:bg-gray-50 ${o.status === 'cancelled' ? 'opacity-50 line-through' : ''}`}
+                  >
+                    <td className="py-2 px-3 text-sm">
+                      {o.orderDate
+                        ? new Date(o.orderDate).toLocaleDateString('th-TH')
+                        : o.createdAt
+                        ? new Date(o.createdAt).toLocaleDateString('th-TH')
+                        : '-'}
+                    </td>
+                    <td className="py-2 px-3 text-sm capitalize">{o.type}</td>
+                    <td className="py-2 px-3 text-sm">{o.reference || '-'}</td>
+                    <td className="py-2 px-3 text-sm">
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadge(o.status)}`}>
                         {o.status || '-'}
                       </span>
                     </td>
-                    <td>{o.items?.length ?? 0}</td>
-                    <td>{calcOrderTotal(o)}</td>
-                    <td>
-                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                        <button type="button" className="button secondary" style={{ padding: '4px 8px', fontSize: '0.75rem' }} onClick={() => toggleExpand(o._id)}>
+                    <td className="py-2 px-3 text-sm text-center">{o.items?.length ?? 0}</td>
+                    <td className="py-2 px-3 text-sm text-right">{calcOrderTotal(o).toLocaleString()}</td>
+                    <td className="py-2 px-3 text-sm">
+                      <div className="flex gap-1 justify-center flex-wrap">
+                        <button
+                          type="button"
+                          className="px-2 py-1 text-xs bg-gray-200 hover:bg-gray-300 rounded"
+                          onClick={() => toggleExpand(o._id)}
+                        >
                           {expandedOrders.has(o._id) ? 'ซ่อน' : 'ดู'}
                         </button>
                         {o.status !== 'cancelled' && (
                           <>
-                            <button type="button" className="button secondary" style={{ padding: '4px 8px', fontSize: '0.75rem' }} onClick={() => editOrder(o)}>
+                            <button
+                              type="button"
+                              className="px-2 py-1 text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 rounded"
+                              onClick={() => editOrder(o)}
+                            >
                               ✏️ แก้ไข
                             </button>
-                            <button type="button" className="button secondary" style={{ padding: '4px 8px', fontSize: '0.75rem', color: '#dc2626' }} onClick={() => cancelOrder(o)}>
+                            <button
+                              type="button"
+                              className="px-2 py-1 text-xs bg-red-100 hover:bg-red-200 text-red-700 rounded"
+                              onClick={() => cancelOrder(o)}
+                            >
                               ❌ ยกเลิก
                             </button>
                           </>
@@ -358,61 +423,66 @@ export default function Orders() {
                   {expandedOrders.has(o._id) && (
                     <tr>
                       <td colSpan={7}>
-                        <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, padding: 12 }}>
-                          <div style={{ display: 'flex', gap: 16, marginBottom: 8, color: '#555', fontSize: '0.875rem' }}>
-                            <div><strong>Reference:</strong> {o.reference || '-'}</div>
-                            <div><strong>Channel:</strong> {o.channel || '-'}</div>
-                            <div><strong>Notes:</strong> {o.notes || '-'}</div>
+                        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 m-2">
+                          <div className="flex gap-6 mb-3 text-sm text-gray-600">
+                            <div>
+                              <strong>Reference:</strong> {o.reference || '-'}
+                            </div>
+                            <div>
+                              <strong>Channel:</strong> {o.channel || '-'}
+                            </div>
+                            <div>
+                              <strong>Notes:</strong> {o.notes || '-'}
+                            </div>
                           </div>
-                          <table className="table" style={{ marginTop: 8 }}>
+                          <table className="w-full text-sm">
                             <thead>
-                              <tr>
-                                <th>สินค้า</th>
-                                <th>SKU</th>
-                                <th style={{ width: 100 }}>จำนวน</th>
-                                <th style={{ width: 100 }}>รับแล้ว</th>
-                                <th style={{ width: 100 }}>ค้างรับ</th>
-                                <th style={{ width: 120 }}>ราคา/หน่วย</th>
-                                <th style={{ width: 140 }}>ราคารวม</th>
+                              <tr className="border-b border-gray-300">
+                                <th className="text-left py-2 px-2">สินค้า</th>
+                                <th className="text-left py-2 px-2">SKU</th>
+                                <th className="text-right py-2 px-2 w-20">จำนวน</th>
+                                <th className="text-right py-2 px-2 w-24">รับแล้ว</th>
+                                <th className="text-right py-2 px-2 w-20">ค้างรับ</th>
+                                <th className="text-right py-2 px-2 w-24">ราคา/หน่วย</th>
+                                <th className="text-right py-2 px-2 w-28">ราคารวม</th>
                               </tr>
                             </thead>
                             <tbody>
                               {(o.items || []).map((it, idx) => (
-                                <tr key={idx}>
-                                  <td>{it.productName || '-'}</td>
-                                  <td>{it.sku || '-'}</td>
-                                  <td>{it.quantity ?? 0}</td>
-                                  <td>
+                                <tr key={idx} className="border-b border-gray-100">
+                                  <td className="py-2 px-2">{it.productName || '-'}</td>
+                                  <td className="py-2 px-2 font-mono text-gray-600">{it.sku || '-'}</td>
+                                  <td className="py-2 px-2 text-right">{it.quantity ?? 0}</td>
+                                  <td className="py-2 px-2 text-right">
                                     {o.type === 'purchase' ? (
                                       <input
                                         type="number"
                                         min="0"
                                         max={it.quantity ?? 0}
-                                        className="input"
-                                        style={{ width: '100px' }}
-                                        value={
-                                          receiveEdits[o._id]?.[idx] !== undefined
-                                            ? receiveEdits[o._id][idx]
-                                            : (it.receivedQuantity ?? 0)
-                                        }
+                                        className="w-20 px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-right"
+                                        value={receiveEdits[o._id]?.[idx] ?? it.receivedQuantity ?? 0}
                                         onChange={(e) => handleReceiveChange(o._id, idx, e.target.value)}
                                       />
                                     ) : (
                                       it.quantity ?? 0
                                     )}
                                   </td>
-                                  <td>{Math.max(0, (it.quantity ?? 0) - (receiveEdits[o._id]?.[idx] ?? it.receivedQuantity ?? 0))}</td>
-                                  <td>{it.unitPrice ?? 0}</td>
-                                  <td>{((Number(it.unitPrice) || 0) * (Number(it.quantity) || 0)).toFixed(2)}</td>
+                                  <td className="py-2 px-2 text-right">
+                                    {Math.max(0, (it.quantity ?? 0) - (receiveEdits[o._id]?.[idx] ?? it.receivedQuantity ?? 0))}
+                                  </td>
+                                  <td className="py-2 px-2 text-right">{it.unitPrice ?? 0}</td>
+                                  <td className="py-2 px-2 text-right">
+                                    {((Number(it.unitPrice) || 0) * (Number(it.quantity) || 0)).toFixed(2)}
+                                  </td>
                                 </tr>
                               ))}
                             </tbody>
                           </table>
                           {o.type === 'purchase' && (
-                            <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-end' }}>
+                            <div className="mt-3 flex justify-end">
                               <button
                                 type="button"
-                                className="button"
+                                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium disabled:opacity-50"
                                 onClick={() => submitReceive(o)}
                                 disabled={receiving}
                               >
@@ -428,23 +498,27 @@ export default function Orders() {
               ))}
               {orders.length === 0 && !ordersLoading && (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', color: '#666' }}>No orders</td>
+                  <td colSpan={7} className="py-8 text-center text-gray-500">
+                    No orders
+                  </td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
+
+        {/* Pagination */}
         {totalCount > pageSize && (
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 12 }}>
+          <div className="flex gap-2 items-center mt-4">
             <button
               type="button"
-              className="button secondary"
+              className="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-sm disabled:opacity-50"
               disabled={page <= 1}
               onClick={() => setPage((p) => Math.max(1, p - 1))}
             >
               ← Prev
             </button>
-            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            <div className="flex gap-1 flex-wrap">
               {Array.from({ length: totalPages }).map((_, i) => {
                 const num = i + 1;
                 const isActive = num === page;
@@ -453,12 +527,9 @@ export default function Orders() {
                     key={num}
                     type="button"
                     onClick={() => setPage(num)}
-                    className="button secondary"
-                    style={{
-                      padding: '4px 8px',
-                      background: isActive ? '#0066cc' : undefined,
-                      color: isActive ? '#fff' : undefined,
-                    }}
+                    className={`px-3 py-1 rounded text-sm ${
+                      isActive ? 'bg-blue-600 text-white' : 'bg-gray-200 hover:bg-gray-300'
+                    }`}
                   >
                     {num}
                   </button>
@@ -467,7 +538,7 @@ export default function Orders() {
             </div>
             <button
               type="button"
-              className="button secondary"
+              className="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-sm disabled:opacity-50"
               disabled={page >= totalPages}
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             >

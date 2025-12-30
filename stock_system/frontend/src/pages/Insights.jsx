@@ -4,7 +4,13 @@ import ChartBars from '../components/ChartBars.jsx';
 import StatCard from '../components/StatCard.jsx';
 
 export default function Insights() {
-  const [data, setData] = useState({ lowStock: [], nearExpiry: [], fastMovers: [], reorderSuggestions: [], meta: { days: 30, top: 10, counts: {} } });
+  const [data, setData] = useState({
+    lowStock: [],
+    nearExpiry: [],
+    fastMovers: [],
+    reorderSuggestions: [],
+    meta: { days: 30, top: 10, counts: {} },
+  });
   const [error, setError] = useState('');
   const [days, setDays] = useState(30);
   const [topN, setTopN] = useState(10);
@@ -24,47 +30,86 @@ export default function Insights() {
   }, []);
 
   return (
-    <div className="card">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <h2 style={{ margin: 0 }}>สรุปสต็อก</h2>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <label style={{ fontSize: '0.875rem' }}>ช่วงวัน</label>
-          <select className="input" value={days} onChange={(e) => setDays(Number(e.target.value))}>
-            <option value={15}>15</option>
-            <option value={30}>30</option>
-            <option value={60}>60</option>
-            <option value={90}>90</option>
-          </select>
-          <label style={{ fontSize: '0.875rem' }}>Top</label>
-          <select className="input" value={topN} onChange={(e) => setTopN(Number(e.target.value))}>
-            <option value={10}>10</option>
-            <option value={20}>20</option>
-            <option value={30}>30</option>
-            <option value={50}>50</option>
-          </select>
-          <button className="button secondary" onClick={load}>
-            โหลดใหม่
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-wrap justify-between items-center gap-4">
+        <h1 className="text-2xl font-bold text-gray-800">📊 สรุปสต็อก</h1>
+        <div className="flex gap-3 items-center flex-wrap">
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-gray-600">ช่วงวัน</label>
+            <select
+              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+              value={days}
+              onChange={(e) => setDays(Number(e.target.value))}
+            >
+              <option value={15}>15</option>
+              <option value={30}>30</option>
+              <option value={60}>60</option>
+              <option value={90}>90</option>
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-gray-600">Top</label>
+            <select
+              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+              value={topN}
+              onChange={(e) => setTopN(Number(e.target.value))}
+            >
+              <option value={10}>10</option>
+              <option value={20}>20</option>
+              <option value={30}>30</option>
+              <option value={50}>50</option>
+            </select>
+          </div>
+          <button
+            className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-4 py-2 rounded-lg"
+            onClick={load}
+          >
+            🔄 โหลดใหม่
           </button>
         </div>
       </div>
-      {error && <div style={{ color: 'crimson' }}>{error}</div>}
 
-      {/* Summary cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 12, marginTop: 12 }}>
-        <StatCard title="สต็อกต่ำ" value={fmtNumber.format(data.meta?.counts?.lowStock || 0)} color="#ef4444" />
-        <StatCard title="ใกล้หมดอายุ" value={fmtNumber.format(data.meta?.counts?.nearExpiry || 0)} color="#f59e0b" />
-        <StatCard title="ขายดี" value={fmtNumber.format(data.meta?.counts?.fastMovers || 0)} color="#10b981" />
-        <StatCard title="แนะนำสั่งซื้อ" value={fmtNumber.format(data.meta?.counts?.reorderSuggestions || 0)} color="#3b82f6" />
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg">{error}</div>}
+
+      {/* Summary Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          title="สต็อกต่ำ"
+          value={fmtNumber.format(data.meta?.counts?.lowStock || 0)}
+          color="red"
+        />
+        <StatCard
+          title="ใกล้หมดอายุ"
+          value={fmtNumber.format(data.meta?.counts?.nearExpiry || 0)}
+          color="orange"
+        />
+        <StatCard
+          title="ขายดี"
+          value={fmtNumber.format(data.meta?.counts?.fastMovers || 0)}
+          color="green"
+        />
+        <StatCard
+          title="แนะนำสั่งซื้อ"
+          value={fmtNumber.format(data.meta?.counts?.reorderSuggestions || 0)}
+          color="blue"
+        />
       </div>
 
-      {/* Fast movers with stock and days remaining */}
+      {/* Fast Movers Charts */}
       {data.fastMovers?.length > 0 && (
-        <div style={{ marginTop: 16 }}>
-          <h3>ขายดี {days} วัน (คงเหลือ / วันจะหมด)</h3>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))', gap: 16 }}>
+        <div className="bg-white rounded-xl shadow p-6">
+          <h2 className="text-lg font-semibold text-gray-800 mb-4">
+            ขายดี {days} วัน (คงเหลือ / วันจะหมด)
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <ChartBars
               title={`จำนวนขาย (${days} วัน)`}
-              items={data.fastMovers.map((fm) => ({ label: `${fm.productName} • ${fm.sku}`, value: fm.quantitySold, daysRemaining: fm.daysRemaining }))}
+              items={data.fastMovers.map((fm) => ({
+                label: `${fm.productName} • ${fm.sku}`,
+                value: fm.quantitySold,
+                daysRemaining: fm.daysRemaining,
+              }))}
               labelKey="label"
               valueKey="value"
               secondaryValueKey="daysRemaining"
@@ -72,7 +117,11 @@ export default function Insights() {
             />
             <ChartBars
               title="คงคลังปัจจุบัน"
-              items={data.fastMovers.map((fm) => ({ label: `${fm.productName} • ${fm.sku}`, value: fm.currentStock, daysRemaining: fm.daysRemaining }))}
+              items={data.fastMovers.map((fm) => ({
+                label: `${fm.productName} • ${fm.sku}`,
+                value: fm.currentStock,
+                daysRemaining: fm.daysRemaining,
+              }))}
               labelKey="label"
               valueKey="value"
               secondaryValueKey="daysRemaining"
@@ -80,7 +129,10 @@ export default function Insights() {
             />
             <ChartBars
               title="เหลือใช้ได้ (วัน)"
-              items={data.fastMovers.map((fm) => ({ label: `${fm.productName} • ${fm.sku}`, value: fm.daysRemaining }))}
+              items={data.fastMovers.map((fm) => ({
+                label: `${fm.productName} • ${fm.sku}`,
+                value: fm.daysRemaining,
+              }))}
               labelKey="label"
               valueKey="value"
               maxBars={10}
@@ -89,8 +141,9 @@ export default function Insights() {
         </div>
       )}
 
+      {/* Low Stock Section */}
       <Section
-        title="สต็อกต่ำ / ใกล้หมด"
+        title="🔴 สต็อกต่ำ / ใกล้หมด"
         rows={data.lowStock}
         columns={[
           ['productName', 'สินค้า'],
@@ -100,8 +153,10 @@ export default function Insights() {
           ['leadTimeDays', 'Lead Time (วัน)'],
         ]}
       />
+
+      {/* Near Expiry Section */}
       <Section
-        title="ใกล้หมดอายุ"
+        title="🟡 ใกล้หมดอายุ"
         rows={data.nearExpiry}
         columns={[
           ['productName', 'สินค้า'],
@@ -111,8 +166,10 @@ export default function Insights() {
           ['quantity', 'จำนวน'],
         ]}
       />
+
+      {/* Fast Movers Section */}
       <Section
-        title="ขายดี"
+        title="🟢 ขายดี"
         rows={data.fastMovers}
         columns={[
           ['productName', 'สินค้า'],
@@ -124,8 +181,9 @@ export default function Insights() {
         ]}
       />
 
+      {/* Reorder Suggestions Section */}
       <Section
-        title={`แนะนำการสั่งซื้อ (คำนวณจากยอดขาย ${days} วัน)`}
+        title={`🔵 แนะนำการสั่งซื้อ (คำนวณจากยอดขาย ${days} วัน)`}
         rows={data.reorderSuggestions}
         columns={[
           ['productName', 'สินค้า'],
@@ -148,22 +206,26 @@ export default function Insights() {
 function Section({ title, rows, columns }) {
   if (!rows || rows.length === 0) return null;
   return (
-    <div style={{ marginTop: 16 }}>
-      <h3>{title}</h3>
-      <div style={{ overflowX: 'auto' }}>
-        <table className="table">
+    <div className="bg-white rounded-xl shadow p-6">
+      <h2 className="text-lg font-semibold text-gray-800 mb-4">{title}</h2>
+      <div className="overflow-x-auto">
+        <table className="w-full">
           <thead>
-            <tr>
+            <tr className="border-b border-gray-200">
               {columns.map(([key, label]) => (
-                <th key={key}>{label}</th>
+                <th key={key} className="text-left py-2 px-3 text-sm font-semibold text-gray-600">
+                  {label}
+                </th>
               ))}
             </tr>
           </thead>
           <tbody>
             {rows.map((row, idx) => (
-              <tr key={idx}>
+              <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
                 {columns.map(([key]) => (
-                  <td key={key}>{String(row[key] ?? '')}</td>
+                  <td key={key} className="py-2 px-3 text-sm">
+                    {String(row[key] ?? '-')}
+                  </td>
                 ))}
               </tr>
             ))}

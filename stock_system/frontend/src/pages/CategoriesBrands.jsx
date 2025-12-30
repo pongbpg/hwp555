@@ -7,25 +7,23 @@ export default function CategoriesBrands() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState('categories');
-  
+
   // Category form states
   const [newCategory, setNewCategory] = useState({ name: '', prefix: '', description: '' });
   const [savingCategory, setSavingCategory] = useState(false);
   const [editingCategory, setEditingCategory] = useState(null);
-  
+
   // Brand form states
   const [newBrand, setNewBrand] = useState({ name: '', prefix: '', description: '' });
   const [savingBrand, setSavingBrand] = useState(false);
   const [editingBrand, setEditingBrand] = useState(null);
 
-  // Load data
   const loadCategories = async () => {
     try {
       const res = await api.get('/categories');
       setCategories(res.data || []);
     } catch (err) {
       setError('Failed to load categories');
-      console.error(err);
     }
   };
 
@@ -35,7 +33,6 @@ export default function CategoriesBrands() {
       setBrands(res.data || []);
     } catch (err) {
       setError('Failed to load brands');
-      console.error(err);
     }
   };
 
@@ -129,298 +126,327 @@ export default function CategoriesBrands() {
   };
 
   return (
-    <div className="card">
-      <h2>จัดการหมวดหมู่และยี่ห้อ</h2>
-      {error && <div style={{ color: 'crimson', marginBottom: 12 }}>{error}</div>}
-      {loading && <span>Loading...</span>}
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-bold text-gray-800">🏷️ จัดการหมวดหมู่และยี่ห้อ</h1>
+        {loading && <span className="text-gray-500">Loading...</span>}
+      </div>
+
+      {error && <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg">{error}</div>}
 
       {/* Tab Navigation */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 24, borderBottom: '1px solid #e0e0e0' }}>
-        <button
-          onClick={() => setActiveTab('categories')}
-          style={{
-            padding: '8px 16px',
-            border: 'none',
-            background: 'none',
-            cursor: 'pointer',
-            fontWeight: activeTab === 'categories' ? 'bold' : 'normal',
-            borderBottom: activeTab === 'categories' ? '3px solid #0066cc' : 'none',
-            color: activeTab === 'categories' ? '#0066cc' : '#666',
-            marginBottom: -1,
-          }}
-        >
-          หมวดหมู่
-        </button>
-        <button
-          onClick={() => setActiveTab('brands')}
-          style={{
-            padding: '8px 16px',
-            border: 'none',
-            background: 'none',
-            cursor: 'pointer',
-            fontWeight: activeTab === 'brands' ? 'bold' : 'normal',
-            borderBottom: activeTab === 'brands' ? '3px solid #0066cc' : 'none',
-            color: activeTab === 'brands' ? '#0066cc' : '#666',
-            marginBottom: -1,
-          }}
-        >
-          ยี่ห้อ
-        </button>
+      <div className="border-b border-gray-200">
+        <div className="flex gap-4">
+          <button
+            onClick={() => setActiveTab('categories')}
+            className={`px-4 py-2 -mb-px font-medium transition-colors ${
+              activeTab === 'categories'
+                ? 'text-blue-600 border-b-2 border-blue-600'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            📁 หมวดหมู่
+          </button>
+          <button
+            onClick={() => setActiveTab('brands')}
+            className={`px-4 py-2 -mb-px font-medium transition-colors ${
+              activeTab === 'brands'
+                ? 'text-blue-600 border-b-2 border-blue-600'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            🏢 ยี่ห้อ
+          </button>
+        </div>
       </div>
 
       {/* Categories Tab */}
       {activeTab === 'categories' && (
-        <div>
-          <h3>เพิ่มหมวดหมู่ใหม่</h3>
-          <form onSubmit={handleCreateCategory} style={{ marginBottom: 24 }}>
-            <div className="form-grid" style={{ gridTemplateColumns: '1fr 120px 2fr auto', gap: 12 }}>
-              <div>
-                <label style={{ display: 'block', marginBottom: 4, fontSize: '0.875rem' }}>ชื่อหมวดหมู่ *</label>
-                <input
-                  className="input"
-                  placeholder="เช่น Electronics, Clothing"
-                  value={newCategory.name}
-                  onChange={(e) => setNewCategory({ ...newCategory, name: e.target.value })}
-                  required
-                />
+        <div className="space-y-6">
+          {/* Add Category Form */}
+          <div className="bg-white rounded-xl shadow p-6">
+            <h3 className="text-lg font-semibold text-gray-800 mb-4">เพิ่มหมวดหมู่ใหม่</h3>
+            <form onSubmit={handleCreateCategory}>
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อหมวดหมู่ *</label>
+                  <input
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="เช่น Electronics, Clothing"
+                    value={newCategory.name}
+                    onChange={(e) => setNewCategory({ ...newCategory, name: e.target.value })}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Prefix</label>
+                  <input
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none uppercase"
+                    placeholder="เช่น ELEC"
+                    value={newCategory.prefix}
+                    onChange={(e) => setNewCategory({ ...newCategory, prefix: e.target.value.toUpperCase() })}
+                    maxLength={10}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">รายละเอียด</label>
+                  <input
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="รายละเอียดเพิ่มเติม"
+                    value={newCategory.description}
+                    onChange={(e) => setNewCategory({ ...newCategory, description: e.target.value })}
+                  />
+                </div>
+                <div className="flex items-end">
+                  <button
+                    type="submit"
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium disabled:opacity-50"
+                    disabled={savingCategory}
+                  >
+                    {savingCategory ? 'Saving...' : 'เพิ่ม'}
+                  </button>
+                </div>
               </div>
-              <div>
-                <label style={{ display: 'block', marginBottom: 4, fontSize: '0.875rem' }}>Prefix</label>
-                <input
-                  className="input"
-                  placeholder="เช่น ELEC"
-                  value={newCategory.prefix}
-                  onChange={(e) => setNewCategory({ ...newCategory, prefix: e.target.value.toUpperCase() })}
-                  maxLength={10}
-                  style={{ textTransform: 'uppercase' }}
-                />
-              </div>
-              <div>
-                <label style={{ display: 'block', marginBottom: 4, fontSize: '0.875rem' }}>รายละเอียด</label>
-                <input
-                  className="input"
-                  placeholder="รายละเอียดเพิ่มเติม"
-                  value={newCategory.description}
-                  onChange={(e) => setNewCategory({ ...newCategory, description: e.target.value })}
-                />
-              </div>
-              <div>
-                <button className="button" type="submit" disabled={savingCategory} style={{ marginTop: 22 }}>
-                  {savingCategory ? 'Saving...' : 'เพิ่ม'}
-                </button>
-              </div>
-            </div>
-          </form>
+            </form>
+          </div>
 
-          <h3>รายการหมวดหมู่</h3>
-          <div style={{ overflowX: 'auto' }}>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>ชื่อ</th>
-                  <th>รายละเอียด</th>
-                  <th>การกระทำ</th>
-                </tr>
-              </thead>
-              <tbody>
-                {categories.map((cat) =>
-                  editingCategory?._id === cat._id ? (
-                    <tr key={cat._id}>
-                      <td>
-                        <input
-                          className="input"
-                          value={editingCategory.name}
-                          onChange={(e) => setEditingCategory({ ...editingCategory, name: e.target.value })}
-                          style={{ width: '100%' }}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          className="input"
-                          value={editingCategory.prefix || ''}
-                          onChange={(e) => setEditingCategory({ ...editingCategory, prefix: e.target.value.toUpperCase() })}
-                          style={{ width: '100%', textTransform: 'uppercase' }}
-                          maxLength={10}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          className="input"
-                          value={editingCategory.description}
-                          onChange={(e) => setEditingCategory({ ...editingCategory, description: e.target.value })}
-                          style={{ width: '100%' }}
-                        />
-                      </td>
-                      <td>
-                        <button
-                          onClick={() => handleUpdateCategory(cat._id)}
-                          disabled={savingCategory}
-                          style={{ marginRight: 8, padding: '4px 8px' }}
-                          className="button"
-                        >
-                          {savingCategory ? 'Saving...' : 'บันทึก'}
-                        </button>
-                        <button
-                          onClick={() => setEditingCategory(null)}
-                          style={{ padding: '4px 8px', background: '#ccc', border: 'none', cursor: 'pointer', borderRadius: 4 }}
-                        >
-                          ยกเลิก
-                        </button>
+          {/* Categories List */}
+          <div className="bg-white rounded-xl shadow p-6">
+            <h3 className="text-lg font-semibold text-gray-800 mb-4">รายการหมวดหมู่</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-gray-200">
+                    <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">ชื่อ</th>
+                    <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">Prefix</th>
+                    <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">รายละเอียด</th>
+                    <th className="text-center py-2 px-3 text-sm font-semibold text-gray-600">การกระทำ</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {categories.map((cat) =>
+                    editingCategory?._id === cat._id ? (
+                      <tr key={cat._id} className="border-b border-gray-100 bg-blue-50">
+                        <td className="py-2 px-3">
+                          <input
+                            className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none"
+                            value={editingCategory.name}
+                            onChange={(e) => setEditingCategory({ ...editingCategory, name: e.target.value })}
+                          />
+                        </td>
+                        <td className="py-2 px-3">
+                          <input
+                            className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none uppercase"
+                            value={editingCategory.prefix || ''}
+                            onChange={(e) => setEditingCategory({ ...editingCategory, prefix: e.target.value.toUpperCase() })}
+                            maxLength={10}
+                          />
+                        </td>
+                        <td className="py-2 px-3">
+                          <input
+                            className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none"
+                            value={editingCategory.description || ''}
+                            onChange={(e) => setEditingCategory({ ...editingCategory, description: e.target.value })}
+                          />
+                        </td>
+                        <td className="py-2 px-3">
+                          <div className="flex gap-2 justify-center">
+                            <button
+                              onClick={() => handleUpdateCategory(cat._id)}
+                              disabled={savingCategory}
+                              className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded disabled:opacity-50"
+                            >
+                              {savingCategory ? 'Saving...' : 'บันทึก'}
+                            </button>
+                            <button
+                              onClick={() => setEditingCategory(null)}
+                              className="px-3 py-1 bg-gray-200 hover:bg-gray-300 text-gray-700 text-sm rounded"
+                            >
+                              ยกเลิก
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : (
+                      <tr key={cat._id} className="border-b border-gray-100 hover:bg-gray-50">
+                        <td className="py-2 px-3 text-sm">{cat.name}</td>
+                        <td className="py-2 px-3 text-sm font-mono text-gray-600">{cat.prefix || '-'}</td>
+                        <td className="py-2 px-3 text-sm text-gray-600">{cat.description || '-'}</td>
+                        <td className="py-2 px-3">
+                          <div className="flex gap-2 justify-center">
+                            <button
+                              onClick={() => setEditingCategory(cat)}
+                              className="px-3 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 text-sm rounded"
+                            >
+                              แก้ไข
+                            </button>
+                            <button
+                              onClick={() => handleDeleteCategory(cat._id)}
+                              className="px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 text-sm rounded"
+                            >
+                              ลบ
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  )}
+                  {categories.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="py-8 text-center text-gray-500">
+                        ไม่มีหมวดหมู่
                       </td>
                     </tr>
-                  ) : (
-                    <tr key={cat._id}>
-                      <td>{cat.name}</td>
-                      <td>{cat.prefix || '-'}</td>
-                      <td>{cat.description}</td>
-                      <td>
-                        <button
-                          onClick={() => setEditingCategory(cat)}
-                          style={{ marginRight: 8, padding: '4px 8px', cursor: 'pointer', background: '#e3f2fd', border: '1px solid #0066cc', borderRadius: 4, color: '#0066cc' }}
-                        >
-                          แก้ไข
-                        </button>
-                        <button
-                          onClick={() => handleDeleteCategory(cat._id)}
-                          style={{ padding: '4px 8px', cursor: 'pointer', background: '#ffebee', border: '1px solid crimson', borderRadius: 4, color: 'crimson' }}
-                        >
-                          ลบ
-                        </button>
-                      </td>
-                    </tr>
-                  )
-                )}
-              </tbody>
-            </table>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
 
       {/* Brands Tab */}
       {activeTab === 'brands' && (
-        <div>
-          <h3>เพิ่มยี่ห้อใหม่</h3>
-          <form onSubmit={handleCreateBrand} style={{ marginBottom: 24 }}>
-            <div className="form-grid" style={{ gridTemplateColumns: '1fr 120px 2fr auto', gap: 12 }}>
-              <div>
-                <label style={{ display: 'block', marginBottom: 4, fontSize: '0.875rem' }}>ชื่อยี่ห้อ *</label>
-                <input
-                  className="input"
-                  placeholder="เช่น Sony, Samsung, Nike"
-                  value={newBrand.name}
-                  onChange={(e) => setNewBrand({ ...newBrand, name: e.target.value })}
-                  required
-                />
+        <div className="space-y-6">
+          {/* Add Brand Form */}
+          <div className="bg-white rounded-xl shadow p-6">
+            <h3 className="text-lg font-semibold text-gray-800 mb-4">เพิ่มยี่ห้อใหม่</h3>
+            <form onSubmit={handleCreateBrand}>
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อยี่ห้อ *</label>
+                  <input
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="เช่น Sony, Samsung, Nike"
+                    value={newBrand.name}
+                    onChange={(e) => setNewBrand({ ...newBrand, name: e.target.value })}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Prefix</label>
+                  <input
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none uppercase"
+                    placeholder="เช่น SONY"
+                    value={newBrand.prefix}
+                    onChange={(e) => setNewBrand({ ...newBrand, prefix: e.target.value.toUpperCase() })}
+                    maxLength={10}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">รายละเอียด</label>
+                  <input
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                    placeholder="รายละเอียดเพิ่มเติม"
+                    value={newBrand.description}
+                    onChange={(e) => setNewBrand({ ...newBrand, description: e.target.value })}
+                  />
+                </div>
+                <div className="flex items-end">
+                  <button
+                    type="submit"
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium disabled:opacity-50"
+                    disabled={savingBrand}
+                  >
+                    {savingBrand ? 'Saving...' : 'เพิ่ม'}
+                  </button>
+                </div>
               </div>
-              <div>
-                <label style={{ display: 'block', marginBottom: 4, fontSize: '0.875rem' }}>Prefix</label>
-                <input
-                  className="input"
-                  placeholder="เช่น SONY"
-                  value={newBrand.prefix}
-                  onChange={(e) => setNewBrand({ ...newBrand, prefix: e.target.value.toUpperCase() })}
-                  maxLength={10}
-                  style={{ textTransform: 'uppercase' }}
-                />
-              </div>
-              <div>
-                <label style={{ display: 'block', marginBottom: 4, fontSize: '0.875rem' }}>รายละเอียด</label>
-                <input
-                  className="input"
-                  placeholder="รายละเอียดเพิ่มเติม"
-                  value={newBrand.description}
-                  onChange={(e) => setNewBrand({ ...newBrand, description: e.target.value })}
-                />
-              </div>
-              <div>
-                <button className="button" type="submit" disabled={savingBrand} style={{ marginTop: 22 }}>
-                  {savingBrand ? 'Saving...' : 'เพิ่ม'}
-                </button>
-              </div>
-            </div>
-          </form>
+            </form>
+          </div>
 
-          <h3>รายการยี่ห้อ</h3>
-          <div style={{ overflowX: 'auto' }}>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>ชื่อ</th>
-                  <th>Prefix</th>
-                  <th>รายละเอียด</th>
-                  <th>การกระทำ</th>
-                </tr>
-              </thead>
-              <tbody>
-                {brands.map((brand) =>
-                  editingBrand?._id === brand._id ? (
-                    <tr key={brand._id}>
-                      <td>
-                        <input
-                          className="input"
-                          value={editingBrand.name}
-                          onChange={(e) => setEditingBrand({ ...editingBrand, name: e.target.value })}
-                          style={{ width: '100%' }}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          className="input"
-                          value={editingBrand.prefix || ''}
-                          onChange={(e) => setEditingBrand({ ...editingBrand, prefix: e.target.value.toUpperCase() })}
-                          style={{ width: '100%', textTransform: 'uppercase' }}
-                          maxLength={10}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          className="input"
-                          value={editingBrand.description}
-                          onChange={(e) => setEditingBrand({ ...editingBrand, description: e.target.value })}
-                          style={{ width: '100%' }}
-                        />
-                      </td>
-                      <td>
-                        <button
-                          onClick={() => handleUpdateBrand(brand._id)}
-                          disabled={savingBrand}
-                          style={{ marginRight: 8, padding: '4px 8px' }}
-                          className="button"
-                        >
-                          {savingBrand ? 'Saving...' : 'บันทึก'}
-                        </button>
-                        <button
-                          onClick={() => setEditingBrand(null)}
-                          style={{ padding: '4px 8px', background: '#ccc', border: 'none', cursor: 'pointer', borderRadius: 4 }}
-                        >
-                          ยกเลิก
-                        </button>
+          {/* Brands List */}
+          <div className="bg-white rounded-xl shadow p-6">
+            <h3 className="text-lg font-semibold text-gray-800 mb-4">รายการยี่ห้อ</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-gray-200">
+                    <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">ชื่อ</th>
+                    <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">Prefix</th>
+                    <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">รายละเอียด</th>
+                    <th className="text-center py-2 px-3 text-sm font-semibold text-gray-600">การกระทำ</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {brands.map((brand) =>
+                    editingBrand?._id === brand._id ? (
+                      <tr key={brand._id} className="border-b border-gray-100 bg-blue-50">
+                        <td className="py-2 px-3">
+                          <input
+                            className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none"
+                            value={editingBrand.name}
+                            onChange={(e) => setEditingBrand({ ...editingBrand, name: e.target.value })}
+                          />
+                        </td>
+                        <td className="py-2 px-3">
+                          <input
+                            className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none uppercase"
+                            value={editingBrand.prefix || ''}
+                            onChange={(e) => setEditingBrand({ ...editingBrand, prefix: e.target.value.toUpperCase() })}
+                            maxLength={10}
+                          />
+                        </td>
+                        <td className="py-2 px-3">
+                          <input
+                            className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none"
+                            value={editingBrand.description || ''}
+                            onChange={(e) => setEditingBrand({ ...editingBrand, description: e.target.value })}
+                          />
+                        </td>
+                        <td className="py-2 px-3">
+                          <div className="flex gap-2 justify-center">
+                            <button
+                              onClick={() => handleUpdateBrand(brand._id)}
+                              disabled={savingBrand}
+                              className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded disabled:opacity-50"
+                            >
+                              {savingBrand ? 'Saving...' : 'บันทึก'}
+                            </button>
+                            <button
+                              onClick={() => setEditingBrand(null)}
+                              className="px-3 py-1 bg-gray-200 hover:bg-gray-300 text-gray-700 text-sm rounded"
+                            >
+                              ยกเลิก
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : (
+                      <tr key={brand._id} className="border-b border-gray-100 hover:bg-gray-50">
+                        <td className="py-2 px-3 text-sm">{brand.name}</td>
+                        <td className="py-2 px-3 text-sm font-mono text-gray-600">{brand.prefix || '-'}</td>
+                        <td className="py-2 px-3 text-sm text-gray-600">{brand.description || '-'}</td>
+                        <td className="py-2 px-3">
+                          <div className="flex gap-2 justify-center">
+                            <button
+                              onClick={() => setEditingBrand(brand)}
+                              className="px-3 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 text-sm rounded"
+                            >
+                              แก้ไข
+                            </button>
+                            <button
+                              onClick={() => handleDeleteBrand(brand._id)}
+                              className="px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 text-sm rounded"
+                            >
+                              ลบ
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  )}
+                  {brands.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="py-8 text-center text-gray-500">
+                        ไม่มียี่ห้อ
                       </td>
                     </tr>
-                  ) : (
-                    <tr key={brand._id}>
-                      <td>{brand.name}</td>
-                      <td>{brand.prefix || '-'}</td>
-                      <td>{brand.description}</td>
-                      <td>
-                        <button
-                          onClick={() => setEditingBrand(brand)}
-                          style={{ marginRight: 8, padding: '4px 8px', cursor: 'pointer', background: '#e3f2fd', border: '1px solid #0066cc', borderRadius: 4, color: '#0066cc' }}
-                        >
-                          แก้ไข
-                        </button>
-                        <button
-                          onClick={() => handleDeleteBrand(brand._id)}
-                          style={{ padding: '4px 8px', cursor: 'pointer', background: '#ffebee', border: '1px solid crimson', borderRadius: 4, color: 'crimson' }}
-                        >
-                          ลบ
-                        </button>
-                      </td>
-                    </tr>
-                  )
-                )}
-              </tbody>
-            </table>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}

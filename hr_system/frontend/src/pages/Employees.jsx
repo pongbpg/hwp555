@@ -14,7 +14,7 @@ export default function Employees() {
     position: '',
     department: '',
     salary: '',
-    hireDate: '',
+    hireDate: new Date().toISOString().split('T')[0],
     role: 'employee',
     password: 'password123',
   });
@@ -53,7 +53,7 @@ export default function Employees() {
         position: '',
         department: '',
         salary: '',
-        hireDate: '',
+        hireDate: new Date().toISOString().split('T')[0],
         role: 'employee',
         password: 'password123',
       });

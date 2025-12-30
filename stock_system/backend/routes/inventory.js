@@ -4,6 +4,7 @@ import InventoryOrder from '../models/InventoryOrder.js';
 import Category from '../models/Category.js';
 import Brand from '../models/Brand.js';
 import { authenticateToken, authorizeRoles } from '../middleware/auth.js';
+import { recordMovement } from './movements.js';
 
 const router = express.Router();
 
@@ -116,6 +117,7 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr')
     if (!items || items.length === 0) return res.status(400).json({ error: 'At least one item is required' });
 
     const orderItems = [];
+    const movementRecords = []; // เก็บข้อมูลสำหรับบันทึก movement
 
     for (const rawItem of items) {
       const product = await Product.findById(rawItem.productId);
@@ -126,12 +128,27 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr')
 
       const unitPrice = rawItem.unitPrice ?? variant.price ?? 0;
       const qty = Number(rawItem.quantity) || 0;
+      const previousStock = variant.stockOnHand || 0;
 
       if (type === 'purchase') {
         // สำหรับใบสั่งซื้อ: เพิ่ม incoming ไว้ก่อน รอรับของจึงบวกสต็อกจริง
         variant.incoming = (variant.incoming || 0) + qty;
       } else {
         applyStockChange(variant, { ...rawItem, quantity: qty }, type);
+        
+        // เก็บข้อมูลสำหรับ movement (ยกเว้น purchase เพราะยังไม่รับของ)
+        movementRecords.push({
+          movementType: type === 'sale' ? 'out' : 'adjust',
+          product,
+          variant,
+          quantity: type === 'sale' ? -qty : qty,
+          previousStock,
+          newStock: variant.stockOnHand,
+          reference,
+          batchRef: rawItem.batchRef,
+          expiryDate: rawItem.expiryDate,
+          unitCost: variant.cost || 0,
+        });
       }
 
       orderItems.push({
@@ -163,6 +180,18 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr')
     });
 
     await order.save();
+    
+    // บันทึก movement records
+    const userName = `${req.user?.firstName || ''} ${req.user?.lastName || ''}`.trim() || req.user?.username;
+    for (const rec of movementRecords) {
+      await recordMovement({
+        ...rec,
+        orderId: order._id,
+        userId: req.user._id,
+        userName,
+      });
+    }
+    
     res.status(201).json(order);
   } catch (error) {
     const lowered = (error.message || '').toLowerCase();
@@ -188,6 +217,7 @@ router.patch('/orders/:id/receive', authenticateToken, authorizeRoles('owner', '
 
     // load products once per productId
     const productCache = new Map();
+    const movementRecords = []; // เก็บข้อมูลสำหรับบันทึก movement
 
     for (const item of order.items) {
       const key = String(item.variantId);
@@ -206,6 +236,7 @@ router.patch('/orders/:id/receive', authenticateToken, authorizeRoles('owner', '
       const variant = selectVariant(product, item.variantId, item.sku);
       if (!variant) return res.status(404).json({ error: 'Variant not found on the product' });
 
+      const previousStock = variant.stockOnHand || 0;
       variant.stockOnHand = (variant.stockOnHand || 0) + delta;
       variant.incoming = Math.max(0, (variant.incoming || 0) - delta);
       item.receivedQuantity = newReceived;
@@ -220,6 +251,20 @@ router.patch('/orders/:id/receive', authenticateToken, authorizeRoles('owner', '
           receivedAt: new Date(),
         });
       }
+      
+      // เก็บข้อมูลสำหรับ movement
+      movementRecords.push({
+        movementType: 'in',
+        product,
+        variant,
+        quantity: delta,
+        previousStock,
+        newStock: variant.stockOnHand,
+        reference: order.reference,
+        batchRef: item.batchRef,
+        expiryDate: item.expiryDate,
+        unitCost: item.unitPrice || variant.cost || 0,
+      });
     }
 
     // Save all products
@@ -231,6 +276,17 @@ router.patch('/orders/:id/receive', authenticateToken, authorizeRoles('owner', '
     const allReceived = order.items.every((it) => (it.receivedQuantity || 0) >= (it.quantity || 0));
     order.status = allReceived ? 'completed' : 'pending';
     await order.save();
+    
+    // บันทึก movement records
+    const userName = `${req.user?.firstName || ''} ${req.user?.lastName || ''}`.trim() || req.user?.username;
+    for (const rec of movementRecords) {
+      await recordMovement({
+        ...rec,
+        orderId: order._id,
+        userId: req.user._id,
+        userName,
+      });
+    }
 
     res.json(order);
   } catch (error) {
@@ -562,6 +618,176 @@ router.get('/insights', authenticateToken, async (req, res) => {
           fastMovers: fastMovers.length,
           reorderSuggestions: reorderSuggestions.length,
         },
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============= Dashboard Summary =============
+router.get('/dashboard', authenticateToken, async (_req, res) => {
+  try {
+    const products = await Product.find({ status: 'active' }).lean();
+    
+    let totalProducts = 0;
+    let totalVariants = 0;
+    let totalStock = 0;
+    let totalValue = 0;
+    let lowStockCount = 0;
+    let outOfStockCount = 0;
+    const categoryStock = {};
+    const brandStock = {};
+    
+    products.forEach((product) => {
+      totalProducts++;
+      (product.variants || []).forEach((variant) => {
+        if (variant.status !== 'active') return;
+        totalVariants++;
+        const stock = variant.stockOnHand || 0;
+        const cost = variant.cost || 0;
+        const reorderPoint = variant.reorderPoint || 0;
+        
+        totalStock += stock;
+        totalValue += stock * cost;
+        
+        if (stock <= 0) {
+          outOfStockCount++;
+        } else if (stock <= reorderPoint) {
+          lowStockCount++;
+        }
+        
+        // Group by category
+        const cat = product.category || 'ไม่ระบุ';
+        if (!categoryStock[cat]) categoryStock[cat] = { stock: 0, value: 0, count: 0 };
+        categoryStock[cat].stock += stock;
+        categoryStock[cat].value += stock * cost;
+        categoryStock[cat].count++;
+        
+        // Group by brand
+        const brand = product.brand || 'ไม่ระบุ';
+        if (!brandStock[brand]) brandStock[brand] = { stock: 0, value: 0, count: 0 };
+        brandStock[brand].stock += stock;
+        brandStock[brand].value += stock * cost;
+        brandStock[brand].count++;
+      });
+    });
+    
+    // วันนี้มี orders กี่รายการ
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const ordersToday = await InventoryOrder.countDocuments({ createdAt: { $gte: today } });
+    const pendingOrders = await InventoryOrder.countDocuments({ status: 'pending' });
+    
+    res.json({
+      summary: {
+        totalProducts,
+        totalVariants,
+        totalStock,
+        totalValue: Math.round(totalValue * 100) / 100,
+        lowStockCount,
+        outOfStockCount,
+        ordersToday,
+        pendingOrders,
+      },
+      byCategory: Object.entries(categoryStock)
+        .map(([name, data]) => ({ name, ...data }))
+        .sort((a, b) => b.stock - a.stock),
+      byBrand: Object.entries(brandStock)
+        .map(([name, data]) => ({ name, ...data }))
+        .sort((a, b) => b.stock - a.stock),
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============= Alerts API =============
+router.get('/alerts', authenticateToken, async (req, res) => {
+  try {
+    const { days = 30 } = req.query;
+    const now = new Date();
+    const expiryBefore = new Date(now.getTime() + Number(days) * 24 * 60 * 60 * 1000);
+    
+    const products = await Product.find({ status: 'active' }).lean();
+    
+    const lowStockAlerts = [];
+    const outOfStockAlerts = [];
+    const nearExpiryAlerts = [];
+    
+    products.forEach((product) => {
+      (product.variants || []).forEach((variant) => {
+        if (variant.status !== 'active') return;
+        const stock = variant.stockOnHand || 0;
+        const reorderPoint = variant.reorderPoint || 0;
+        
+        // Out of stock
+        if (stock <= 0) {
+          outOfStockAlerts.push({
+            type: 'out-of-stock',
+            severity: 'critical',
+            productId: product._id,
+            productName: product.name,
+            variantId: variant._id,
+            sku: variant.sku,
+            stockOnHand: stock,
+            reorderPoint,
+            message: `${product.name} (${variant.sku}) หมดสต็อก`,
+          });
+        }
+        // Low stock
+        else if (stock <= reorderPoint) {
+          lowStockAlerts.push({
+            type: 'low-stock',
+            severity: 'warning',
+            productId: product._id,
+            productName: product.name,
+            variantId: variant._id,
+            sku: variant.sku,
+            stockOnHand: stock,
+            reorderPoint,
+            message: `${product.name} (${variant.sku}) สต็อกต่ำ: ${stock} / ${reorderPoint}`,
+          });
+        }
+        
+        // Near expiry batches
+        (variant.batches || []).forEach((batch) => {
+          if (batch.expiryDate && new Date(batch.expiryDate) <= expiryBefore && new Date(batch.expiryDate) >= now) {
+            const daysLeft = Math.ceil((new Date(batch.expiryDate) - now) / (1000 * 60 * 60 * 24));
+            nearExpiryAlerts.push({
+              type: 'near-expiry',
+              severity: daysLeft <= 7 ? 'critical' : 'warning',
+              productId: product._id,
+              productName: product.name,
+              variantId: variant._id,
+              sku: variant.sku,
+              batchRef: batch.batchRef,
+              expiryDate: batch.expiryDate,
+              quantity: batch.quantity,
+              daysLeft,
+              message: `${product.name} (${variant.sku}) ล็อต ${batch.batchRef || 'N/A'} หมดอายุใน ${daysLeft} วัน`,
+            });
+          }
+        });
+      });
+    });
+    
+    // Sort by severity
+    const allAlerts = [
+      ...outOfStockAlerts,
+      ...nearExpiryAlerts.sort((a, b) => a.daysLeft - b.daysLeft),
+      ...lowStockAlerts.sort((a, b) => a.stockOnHand - b.stockOnHand),
+    ];
+    
+    res.json({
+      alerts: allAlerts,
+      counts: {
+        total: allAlerts.length,
+        critical: allAlerts.filter((a) => a.severity === 'critical').length,
+        warning: allAlerts.filter((a) => a.severity === 'warning').length,
+        outOfStock: outOfStockAlerts.length,
+        lowStock: lowStockAlerts.length,
+        nearExpiry: nearExpiryAlerts.length,
       },
     });
   } catch (error) {

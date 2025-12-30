@@ -43,6 +43,21 @@ variantSchema.virtual('totalBatchQuantity').get(function () {
   return (this.batches || []).reduce((sum, batch) => sum + (batch.quantity || 0), 0);
 });
 
+// Virtual สำหรับตรวจสอบสต็อกต่ำ
+variantSchema.virtual('isLowStock').get(function () {
+  const threshold = this.reorderPoint || 0;
+  return (this.stockOnHand || 0) <= threshold;
+});
+
+variantSchema.virtual('stockStatus').get(function () {
+  const stock = this.stockOnHand || 0;
+  const reorder = this.reorderPoint || 0;
+  if (stock <= 0) return 'out-of-stock';
+  if (stock <= reorder) return 'low-stock';
+  if (stock <= reorder * 2) return 'warning';
+  return 'in-stock';
+});
+
 variantSchema.set('toObject', { virtuals: true });
 variantSchema.set('toJSON', { virtuals: true });
 

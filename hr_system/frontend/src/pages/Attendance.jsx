@@ -15,7 +15,7 @@ export default function Attendance({ user }) {
 
   const [formData, setFormData] = useState({
     employeeId: canManageAll ? '' : (user?.id || ''),
-    date: '',
+    date: new Date().toISOString().split('T')[0],
     endDate: '',
     leaveType: 'annual',
     isHalfDay: false,
@@ -62,7 +62,7 @@ export default function Attendance({ user }) {
       await attendanceAPI.create(submitData);
       setFormData({
         employeeId: canManageAll ? '' : (user?.id || ''),
-        date: '',
+        date: new Date().toISOString().split('T')[0],
         endDate: '',
         leaveType: 'annual',
         isHalfDay: false,

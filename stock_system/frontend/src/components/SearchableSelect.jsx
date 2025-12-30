@@ -1,56 +1,46 @@
 import { useState, useRef, useEffect } from 'react';
 
-export default function SearchableSelect({ 
-  options, 
-  value, 
-  onChange, 
+export default function SearchableSelect({
+  options,
+  value,
+  onChange,
   placeholder = 'ค้นหา...',
-  getLabel = (opt) => opt.name,
-  getId = (opt) => opt._id
+  getLabel = (opt) => opt.name || opt.label,
+  getId = (opt) => opt._id || opt.value,
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [isOpen, setIsOpen] = useState(false);
-  const inputRef = useRef(null);
   const containerRef = useRef(null);
 
-  // Filter options based on search term
   const filteredOptions = options.filter((opt) => {
-    const label = getLabel(opt);
-    const id = getId(opt);
-    return (
-      label.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      id.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    const label = String(getLabel(opt) || '').toLowerCase();
+    const id = String(getId(opt) || '').toLowerCase();
+    return label.includes(searchTerm.toLowerCase()) || id.includes(searchTerm.toLowerCase());
   });
 
-  // Get the selected option
   const selectedOption = options.find((opt) => getId(opt) === value);
 
-  // Handle selection
   const handleSelect = (opt) => {
     onChange(getId(opt));
     setSearchTerm('');
     setIsOpen(false);
   };
 
-  // Handle click outside
   useEffect(() => {
     const handleClickOutside = (e) => {
       if (containerRef.current && !containerRef.current.contains(e.target)) {
         setIsOpen(false);
       }
     };
-
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   return (
-    <div ref={containerRef} style={{ position: 'relative' }}>
+    <div ref={containerRef} className="relative">
       <input
-        ref={inputRef}
         type="text"
-        className="input"
+        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
         placeholder={placeholder}
         value={isOpen ? searchTerm : selectedOption ? getLabel(selectedOption) : ''}
         onChange={(e) => {
@@ -61,53 +51,23 @@ export default function SearchableSelect({
           setIsOpen(true);
           setSearchTerm('');
         }}
-        style={{ width: '100%' }}
       />
       {isOpen && (
-        <div
-          style={{
-            position: 'absolute',
-            top: '100%',
-            left: 0,
-            right: 0,
-            backgroundColor: 'white',
-            border: '1px solid #e0e0e0',
-            borderRadius: '4px',
-            maxHeight: '200px',
-            overflowY: 'auto',
-            zIndex: 1000,
-            marginTop: '4px',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-          }}
-        >
+        <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg max-h-52 overflow-y-auto z-50 shadow-lg">
           {filteredOptions.length > 0 ? (
             filteredOptions.map((opt) => (
               <div
                 key={getId(opt)}
                 onClick={() => handleSelect(opt)}
-                style={{
-                  padding: '8px 12px',
-                  cursor: 'pointer',
-                  backgroundColor: getId(opt) === value ? '#e3f2fd' : 'white',
-                  borderBottom: '1px solid #f0f0f0',
-                  transition: 'background-color 0.2s',
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = getId(opt) === value ? '#e3f2fd' : '#f5f5f5';
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = getId(opt) === value ? '#e3f2fd' : 'white';
-                }}
+                className={`px-3 py-2 cursor-pointer border-b border-gray-100 last:border-b-0 transition-colors ${
+                  getId(opt) === value ? 'bg-blue-50' : 'hover:bg-gray-50'
+                }`}
               >
-                <div style={{ fontSize: '0.875rem', fontWeight: 500 }}>
-                  {getLabel(opt)}
-                </div>
+                <span className="text-sm text-gray-700">{getLabel(opt)}</span>
               </div>
             ))
           ) : (
-            <div style={{ padding: '12px', textAlign: 'center', color: '#999', fontSize: '0.875rem' }}>
-              ไม่มีผลลัพธ์
-            </div>
+            <div className="px-3 py-2 text-sm text-gray-400 text-center">ไม่พบรายการ</div>
           )}
         </div>
       )}
