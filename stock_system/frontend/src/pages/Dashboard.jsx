@@ -231,7 +231,17 @@ export default function Dashboard() {
       const res = await api.get('/inventory/dashboard');
       setData(res.data);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to load dashboard');
+      const status = err.response?.status;
+      const message = err.response?.data?.error;
+      if (status === 403) {
+        setError('คุณไม่มีสิทธิ์เข้าถึงหน้านี้');
+      } else if (status === 401) {
+        setError('กรุณาเข้าสู่ระบบใหม่');
+      } else if (!message || message.includes('Failed')) {
+        setError('ไม่สามารถโหลดข้อมูลได้ กรุณาลองใหม่อีกครั้ง');
+      } else {
+        setError(message);
+      }
     } finally {
       setLoading(false);
     }
@@ -251,10 +261,11 @@ export default function Dashboard() {
 
   if (error) {
     return (
-      <div className="bg-white rounded-xl shadow p-6">
-        <p className="text-red-600 mb-4">{error}</p>
-        <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg" onClick={loadData}>
-          ลองอีกครั้ง
+      <div className="bg-white rounded-xl shadow p-8 text-center">
+        <div className="text-6xl mb-4">⚠️</div>
+        <p className="text-gray-600 mb-4">{error}</p>
+        <button className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg" onClick={loadData}>
+          🔄 ลองอีกครั้ง
         </button>
       </div>
     );

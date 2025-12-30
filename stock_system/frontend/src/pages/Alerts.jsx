@@ -27,7 +27,17 @@ export default function Alerts() {
       setAlerts(res.data.alerts || []);
       setCounts(res.data.counts || {});
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to load alerts');
+      const status = err.response?.status;
+      const message = err.response?.data?.error;
+      if (status === 403) {
+        setError('คุณไม่มีสิทธิ์เข้าถึงหน้านี้');
+      } else if (status === 401) {
+        setError('กรุณาเข้าสู่ระบบใหม่');
+      } else if (!message || message.includes('Failed')) {
+        setError('ไม่สามารถโหลดข้อมูลได้ กรุณาลองใหม่อีกครั้ง');
+      } else {
+        setError(message);
+      }
     } finally {
       setLoading(false);
     }
@@ -71,7 +81,13 @@ export default function Alerts() {
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg">{error}</div>
+        <div className="bg-amber-50 border border-amber-200 text-amber-700 p-4 rounded-lg flex items-center gap-3">
+          <span className="text-2xl">⚠️</span>
+          <span>{error}</span>
+          <button onClick={() => loadAlerts()} className="ml-auto bg-amber-600 hover:bg-amber-700 text-white px-3 py-1 rounded text-sm">
+            🔄 ลองใหม่
+          </button>
+        </div>
       )}
 
       {/* Summary Cards */}
