@@ -228,7 +228,7 @@ export const sendStockAlertFlexMessage = async (alerts, userId = null) => {
             },
             {
               type: 'text',
-              text: `${alert.reorderPoint} ชิ้น`,
+              text: `${alert.suggestedReorderPoint ?? alert.reorderPoint ?? 0} ชิ้น`,
               size: 'sm',
               align: 'end',
             },
@@ -333,6 +333,7 @@ export const sendStockAlertText = async (alerts, userId = null) => {
     message += `   คงเหลือ: ${alert.currentStock} ชิ้น\n`;
     message += `   ขายเฉลี่ย/วัน: ${alert.avgDailySales.toFixed(1)}\n`;
     message += `   สต็อกเพียงพอ: ~${alert.daysOfStock} วัน\n`;
+    message += `   จุดสั่งซื้อ: ${alert.suggestedReorderPoint ?? alert.reorderPoint ?? 0} ชิ้น\n`;
     message += `   แนะนำสั่งซื้อ: ${alert.suggestedOrder} ชิ้น\n`;
   }
 

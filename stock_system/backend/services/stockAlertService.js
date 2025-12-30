@@ -73,8 +73,13 @@ export const checkVariantStockRisk = async (product, variant, avgDailySales = nu
   // คำนวณจำนวนวันที่สต็อกจะเพียงพอ
   const daysOfStock = Math.floor(currentStock / avgDailySales);
 
-  // คำนวณ Safety Stock = ยอดขายระหว่าง lead time + buffer
-  const safetyStock = Math.ceil(avgDailySales * (leadTimeDays + bufferDays));
+  // คำนวณ Safety Stock = ยอดขายระหว่าง buffer days (ตามสูตรใน calculateSuggestedReorderPoint)
+  const safetyStock = Math.ceil(avgDailySales * bufferDays);
+
+  // คำนวณ Reorder Point ที่แนะนำ (เพื่อให้ตรงกับ calculateSuggestedReorderPoint)
+  const computedReorderPoint = Math.ceil(avgDailySales * leadTimeDays + safetyStock);
+  // คำนวณ Reorder Quantity ที่แนะนำ
+  const computedReorderQty = Math.ceil(avgDailySales * (leadTimeDays + bufferDays));
 
   // ตรวจสอบว่าต้องแจ้งเตือนหรือไม่
   const shouldAlert =
@@ -88,9 +93,10 @@ export const checkVariantStockRisk = async (product, variant, avgDailySales = nu
   }
 
   // คำนวณจำนวนที่แนะนำให้สั่งซื้อ
+  // เลือกใช้ค่าที่ตั้งไว้ใน variant.reorderQty เป็นขั้นต่ำ แต่ยังคงคำนวณค่าแนะนำจากยอดขายเฉลี่ย
   const suggestedOrder = Math.max(
     reorderQty,
-    Math.ceil(avgDailySales * (leadTimeDays + bufferDays)) - currentStock
+    computedReorderQty - currentStock
   );
 
   // กำหนด stock status
@@ -108,11 +114,15 @@ export const checkVariantStockRisk = async (product, variant, avgDailySales = nu
     variantName: variant.name,
     sku: variant.sku,
     currentStock,
+    // ให้ field `reorderPoint` ยังคงเก็บค่าที่ user กำหนดใน variant (ถ้ามี)
     reorderPoint,
+    // ส่งค่าที่คำนวณแนะนำด้วยเพื่อให้ client/notifications แสดงค่าเดียวกับการคำนวณ
+    suggestedReorderPoint: computedReorderPoint,
     leadTimeDays,
     avgDailySales,
     daysOfStock,
     safetyStock,
+    computedReorderQty,
     suggestedOrder: Math.max(0, suggestedOrder),
     stockStatus,
     category: product.category,
