@@ -1,6 +1,7 @@
 import express from 'express';
 import Product from '../models/Product.js';
 import InventoryOrder from '../models/InventoryOrder.js';
+import StockMovement from '../models/StockMovement.js';
 import Category from '../models/Category.js';
 import Brand from '../models/Brand.js';
 import { authenticateToken, authorizeRoles } from '../middleware/auth.js';
@@ -798,6 +799,20 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
     const now = new Date();
     const expiryBefore = new Date(now.getTime() + Number(days) * 24 * 60 * 60 * 1000);
     
+    // ดึงยอดขาย 30 วันย้อนหลังเพื่อคำนวณ daily sales rate
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const movements = await StockMovement.find({
+      movementType: 'out',
+      createdAt: { $gte: thirtyDaysAgo },
+    }).lean();
+    
+    // สร้าง map ของยอดขายต่อ variant
+    const salesByVariant = new Map();
+    movements.forEach((m) => {
+      const key = String(m.variantId);
+      salesByVariant.set(key, (salesByVariant.get(key) || 0) + Math.abs(m.quantity || 0));
+    });
+    
     const products = await Product.find({ status: 'active' }).lean();
     
     const lowStockAlerts = [];
@@ -809,6 +824,17 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
         if (variant.status !== 'active') return;
         const stock = variant.stockOnHand || 0;
         const reorderPoint = variant.reorderPoint || 0;
+        const leadTimeDays = variant.leadTimeDays || 7;
+        const bufferDays = 7;
+        
+        // คำนวณ daily sales rate
+        const variantKey = String(variant._id);
+        const quantitySold = salesByVariant.get(variantKey) || 0;
+        const dailySalesRate = quantitySold / 30;
+        
+        // คำนวณวันที่สต็อกจะหมด
+        const daysUntilStockOut = dailySalesRate > 0 ? stock / dailySalesRate : 999;
+        const minimumDays = leadTimeDays + bufferDays;
         
         // Out of stock
         if (stock <= 0) {
@@ -821,21 +847,27 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
             sku: variant.sku,
             stockOnHand: stock,
             reorderPoint,
+            dailySalesRate: Math.round(dailySalesRate * 100) / 100,
+            daysUntilStockOut: 0,
             message: `${product.name} (${variant.sku}) หมดสต็อก`,
           });
         }
-        // Low stock
-        else if (stock <= reorderPoint) {
+        // Low stock - ใช้ทั้ง reorderPoint และ การคำนวณจาก daily sales
+        else if (stock <= reorderPoint || (dailySalesRate > 0 && daysUntilStockOut < minimumDays)) {
+          const severity = daysUntilStockOut <= 7 ? 'critical' : 'warning';
           lowStockAlerts.push({
             type: 'low-stock',
-            severity: 'warning',
+            severity,
             productId: product._id,
             productName: product.name,
             variantId: variant._id,
             sku: variant.sku,
             stockOnHand: stock,
             reorderPoint,
-            message: `${product.name} (${variant.sku}) สต็อกต่ำ: ${stock} / ${reorderPoint}`,
+            dailySalesRate: Math.round(dailySalesRate * 100) / 100,
+            daysUntilStockOut: Math.round(daysUntilStockOut * 10) / 10,
+            leadTimeDays,
+            message: `${product.name} (${variant.sku}) สต็อกต่ำ: ${stock} ชิ้น (เหลือ ${Math.round(daysUntilStockOut)} วัน)`,
           });
         }
         
@@ -865,7 +897,7 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
     const allAlerts = [
       ...outOfStockAlerts,
       ...nearExpiryAlerts.sort((a, b) => a.daysLeft - b.daysLeft),
-      ...lowStockAlerts.sort((a, b) => a.stockOnHand - b.stockOnHand),
+      ...lowStockAlerts.sort((a, b) => a.daysUntilStockOut - b.daysUntilStockOut),
     ];
     
     res.json({
