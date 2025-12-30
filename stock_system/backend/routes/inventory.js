@@ -808,18 +808,24 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
     const now = new Date();
     const expiryBefore = new Date(now.getTime() + Number(days) * 24 * 60 * 60 * 1000);
     
-    // ดึงยอดขาย 30 วันย้อนหลังเพื่อคำนวณ daily sales rate
+    // ดึงยอดขาย 30 วันย้อนหลังจาก InventoryOrder (เหมือน Insights API)
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-    const movements = await StockMovement.find({
-      movementType: 'out',
-      createdAt: { $gte: thirtyDaysAgo },
-    }).lean();
+    const salesData = await InventoryOrder.aggregate([
+      { $match: { type: 'sale', orderDate: { $gte: thirtyDaysAgo }, status: { $ne: 'cancelled' } } },
+      { $unwind: '$items' },
+      {
+        $group: {
+          _id: { variantId: '$items.variantId' },
+          quantitySold: { $sum: '$items.quantity' },
+        },
+      },
+    ]);
     
     // สร้าง map ของยอดขายต่อ variant
     const salesByVariant = new Map();
-    movements.forEach((m) => {
-      const key = String(m.variantId);
-      salesByVariant.set(key, (salesByVariant.get(key) || 0) + Math.abs(m.quantity || 0));
+    salesData.forEach((s) => {
+      const key = String(s._id.variantId);
+      salesByVariant.set(key, s.quantitySold || 0);
     });
     
     const products = await Product.find({ status: 'active' }).lean();
