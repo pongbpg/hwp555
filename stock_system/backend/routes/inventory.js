@@ -5,6 +5,7 @@ import Category from '../models/Category.js';
 import Brand from '../models/Brand.js';
 import { authenticateToken, authorizeRoles } from '../middleware/auth.js';
 import { recordMovement } from './movements.js';
+import { checkAndAlertAfterSale } from '../services/stockAlertService.js';
 
 const router = express.Router();
 
@@ -190,6 +191,27 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
         userId: req.user._id,
         userName,
       });
+    }
+    
+    // ตรวจสอบและแจ้งเตือน LINE หากสินค้าใกล้หมด (สำหรับการขาย)
+    let stockAlertResult = null;
+    if (type === 'sale') {
+      const soldItems = orderItems.map((item) => ({
+        productId: item.productId,
+        variantId: item.variantId,
+        quantity: item.quantity,
+      }));
+      
+      // ตรวจสอบและส่งแจ้งเตือนแบบ async (ไม่ block response)
+      checkAndAlertAfterSale(soldItems, { sendNotification: true })
+        .then((result) => {
+          if (result.alertCount > 0) {
+            console.log(`📢 Stock alert sent for ${result.alertCount} items`);
+          }
+        })
+        .catch((err) => {
+          console.error('Error checking stock alerts:', err);
+        });
     }
     
     res.status(201).json(order);
