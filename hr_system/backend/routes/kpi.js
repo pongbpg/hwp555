@@ -5,8 +5,8 @@ import { authenticateToken, authorizeRoles } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Get all KPI records
-router.get('/', authenticateToken, async (req, res) => {
+// Get all KPI records (only HR and Owner can access)
+router.get('/', authenticateToken, authorizeRoles('owner', 'hr'), async (req, res) => {
   try {
     const { employeeId, month, year } = req.query;
     let query = {};
@@ -22,8 +22,8 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
-// Get KPI by employee
-router.get('/employee/:id', authenticateToken, async (req, res) => {
+// Get KPI by employee (only HR and Owner can access)
+router.get('/employee/:id', authenticateToken, authorizeRoles('owner', 'hr'), async (req, res) => {
   try {
     const kpis = await KPI.find({ employeeId: req.params.id }).populate('employeeId');
     res.json(kpis);
@@ -32,8 +32,18 @@ router.get('/employee/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Create KPI record
-router.post('/', authenticateToken, authorizeRoles('owner', 'admin', 'accountant'), async (req, res) => {
+// Get own KPI (for Dashboard - any employee can see their own KPI)
+router.get('/my', authenticateToken, async (req, res) => {
+  try {
+    const kpis = await KPI.find({ employeeId: req.user._id }).populate('employeeId', 'firstName lastName email');
+    res.json(kpis);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create KPI record (only HR and Owner can create)
+router.post('/', authenticateToken, authorizeRoles('owner', 'hr'), async (req, res) => {
   try {
     const { employeeId, month, year, metrics, comments } = req.body;
 
@@ -67,8 +77,8 @@ router.post('/', authenticateToken, authorizeRoles('owner', 'admin', 'accountant
   }
 });
 
-// Update KPI
-router.put('/:id', authenticateToken, authorizeRoles('owner', 'admin', 'accountant'), async (req, res) => {
+// Update KPI (only HR and Owner can update)
+router.put('/:id', authenticateToken, authorizeRoles('owner', 'hr'), async (req, res) => {
   try {
     const { metrics, comments } = req.body;
 
@@ -100,8 +110,8 @@ router.put('/:id', authenticateToken, authorizeRoles('owner', 'admin', 'accounta
   }
 });
 
-// Delete KPI
-router.delete('/:id', authenticateToken, authorizeRoles('owner', 'admin'), async (req, res) => {
+// Delete KPI (only HR and Owner can delete)
+router.delete('/:id', authenticateToken, authorizeRoles('owner', 'hr'), async (req, res) => {
   try {
     const kpi = await KPI.findByIdAndDelete(req.params.id);
     if (!kpi) {

@@ -18,7 +18,8 @@ export default function Salary() {
   });
 
   const user = JSON.parse(localStorage.getItem('user'));
-  const canManage = ['owner', 'admin', 'accountant'].includes(user?.role);
+  // Only Accountant and Owner can manage salary
+  const canManage = ['owner', 'accountant'].includes(user?.role);
 
   useEffect(() => {
     fetchData();

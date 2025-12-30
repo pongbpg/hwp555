@@ -13,6 +13,11 @@ function App() {
   const [user, setUser] = useState(JSON.parse(localStorage.getItem('user')));
   const navigate = useNavigate();
 
+  // Permission checks
+  const canViewKpi = user && ['owner', 'hr'].includes(user.role);
+  const canViewSalary = user && ['owner', 'accountant'].includes(user.role);
+  const canManageEmployees = user && ['owner', 'hr'].includes(user.role);
+
   const handleLogout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
@@ -40,10 +45,16 @@ function App() {
             </div>
             <div className="hidden md:flex space-x-4">
               <Link to="/dashboard" className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium">Dashboard</Link>
-              <Link to="/employees" className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium">Employees</Link>
-              <Link to="/attendance" className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium">Attendance</Link>
-              <Link to="/kpi" className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium">KPI</Link>
-              <Link to="/salary" className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium">Salary</Link>
+              {canManageEmployees && (
+                <Link to="/employees" className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium">Employees</Link>
+              )}
+              <Link to="/attendance" className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium">การลา</Link>
+              {canViewKpi && (
+                <Link to="/kpi" className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium">KPI</Link>
+              )}
+              {canViewSalary && (
+                <Link to="/salary" className="text-gray-700 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium">Salary</Link>
+              )}
             </div>
             <div className="flex items-center space-x-4">
               <span className="text-gray-700 text-sm">{user.firstName} {user.lastName}</span>
@@ -63,10 +74,10 @@ function App() {
         <Routes>
           <Route path="/" element={<Dashboard user={user} />} />
           <Route path="/dashboard" element={<Dashboard user={user} />} />
-          <Route path="/employees" element={<Employees />} />
-          <Route path="/attendance" element={<Attendance />} />
-          <Route path="/kpi" element={<KPI />} />
-          <Route path="/salary" element={<Salary />} />
+          <Route path="/employees" element={canManageEmployees ? <Employees /> : <Dashboard user={user} />} />
+          <Route path="/attendance" element={<Attendance user={user} />} />
+          <Route path="/kpi" element={canViewKpi ? <KPI /> : <Dashboard user={user} />} />
+          <Route path="/salary" element={canViewSalary ? <Salary /> : <Dashboard user={user} />} />
         </Routes>
       </div>
     </div>

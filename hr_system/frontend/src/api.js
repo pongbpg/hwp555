@@ -31,14 +31,18 @@ export const employeeAPI = {
 export const attendanceAPI = {
   getAll: (params) => api.get('/attendance', { params }),
   getByEmployee: (id) => api.get(`/attendance/employee/${id}`),
+  getSummary: (year) => api.get('/attendance/summary', { params: { year } }),
+  getBalance: (year) => api.get('/attendance/balance', { params: { year } }),
   create: (data) => api.post('/attendance', data),
   update: (id, data) => api.put(`/attendance/${id}`, data),
+  updateStatus: (id, status) => api.put(`/attendance/${id}/status`, { status }),
   delete: (id) => api.delete(`/attendance/${id}`),
 };
 
 export const kpiAPI = {
   getAll: (params) => api.get('/kpi', { params }),
   getByEmployee: (id) => api.get(`/kpi/employee/${id}`),
+  getMy: () => api.get('/kpi/my'),
   create: (data) => api.post('/kpi', data),
   update: (id, data) => api.put(`/kpi/${id}`, data),
   delete: (id) => api.delete(`/kpi/${id}`),

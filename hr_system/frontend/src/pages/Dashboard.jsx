@@ -4,16 +4,20 @@ import { Link } from 'react-router-dom';
 const API_URL = import.meta.env.VITE_HR_API_BASE_URL || 'http://localhost:5000/api';
 
 export default function Dashboard({ user }) {
-  const canManage = ['owner', 'admin', 'hr'].includes(user?.role);
-  const canViewSalary = ['owner', 'admin', 'accountant'].includes(user?.role);
+  const canManage = ['owner', 'hr'].includes(user?.role);
+  const canViewSalary = ['owner', 'accountant'].includes(user?.role);
+  const canViewAllKpi = ['owner', 'hr'].includes(user?.role);
 
   const [employees, setEmployees] = useState([]);
   const [allKpis, setAllKpis] = useState([]);
+  const [leaveSummary, setLeaveSummary] = useState(null);
+  const [myLeaveBalance, setMyLeaveBalance] = useState(null);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [selectedEmployeeData, setSelectedEmployeeData] = useState(null);
   const [attendanceData, setAttendanceData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState(null);
+  const currentYear = new Date().getFullYear();
 
   useEffect(() => {
     const fetchEmployees = async () => {
@@ -34,7 +38,10 @@ export default function Dashboard({ user }) {
 
     const fetchAllKpis = async () => {
       try {
-        const response = await fetch(`${API_URL}/kpi`, {
+        // If user can view all KPIs (HR/Owner), fetch all; otherwise fetch only own
+        const canViewAll = ['owner', 'hr'].includes(user?.role);
+        const endpoint = canViewAll ? `${API_URL}/kpi` : `${API_URL}/kpi/my`;
+        const response = await fetch(endpoint, {
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('token')}`
           }
@@ -50,8 +57,38 @@ export default function Dashboard({ user }) {
       }
     };
 
+    const fetchLeaveSummary = async () => {
+      try {
+        const canViewAll = ['owner', 'hr'].includes(user?.role);
+        if (canViewAll) {
+          const response = await fetch(`${API_URL}/attendance/summary?year=${currentYear}`, {
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('token')}`
+            }
+          });
+          if (response.ok) {
+            const data = await response.json();
+            setLeaveSummary(data);
+          }
+        } else {
+          const response = await fetch(`${API_URL}/attendance/balance?year=${currentYear}`, {
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('token')}`
+            }
+          });
+          if (response.ok) {
+            const data = await response.json();
+            setMyLeaveBalance(data);
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching leave summary:', error);
+      }
+    };
+
     fetchEmployees();
     fetchAllKpis();
+    fetchLeaveSummary();
   }, []);
 
   const calculateStats = (kpis) => {
@@ -255,8 +292,8 @@ export default function Dashboard({ user }) {
         </p>
       </div>
 
-      {/* Summary Statistics */}
-      {stats && (
+      {/* Summary Statistics - Only for HR and Owner */}
+      {canViewAllKpi && stats && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
           <div className="bg-white rounded-lg shadow-md p-4">
             <p className="text-gray-600 text-sm">Avg KPI Score</p>
@@ -297,46 +334,127 @@ export default function Dashboard({ user }) {
           <p className="text-green-100 text-sm mt-2">Track attendance & leave</p>
         </Link>
 
-        <Link to="/kpi" className="bg-gradient-to-br from-purple-500 to-purple-600 text-white rounded-lg shadow-lg p-6 hover:shadow-xl transition cursor-pointer">
-          <div className="text-3xl font-bold mb-2">📊</div>
-          <h3 className="text-xl font-semibold">KPI Scores</h3>
-          <p className="text-purple-100 text-sm mt-2">Evaluate performance</p>
-        </Link>
+        {canViewAllKpi && (
+          <Link to="/kpi" className="bg-gradient-to-br from-purple-500 to-purple-600 text-white rounded-lg shadow-lg p-6 hover:shadow-xl transition cursor-pointer">
+            <div className="text-3xl font-bold mb-2">📊</div>
+            <h3 className="text-xl font-semibold">KPI Scores</h3>
+            <p className="text-purple-100 text-sm mt-2">Evaluate performance</p>
+          </Link>
+        )}
 
-        <Link to="/salary" className="bg-gradient-to-br from-orange-500 to-orange-600 text-white rounded-lg shadow-lg p-6 hover:shadow-xl transition cursor-pointer">
-          <div className="text-3xl font-bold mb-2">💰</div>
-          <h3 className="text-xl font-semibold">{canViewSalary ? 'Salary' : 'My Salary'}</h3>
-          <p className="text-orange-100 text-sm mt-2">{canViewSalary ? 'Manage salary & payments' : 'View my salary'}</p>
-        </Link>
+        {canViewSalary && (
+          <Link to="/salary" className="bg-gradient-to-br from-orange-500 to-orange-600 text-white rounded-lg shadow-lg p-6 hover:shadow-xl transition cursor-pointer">
+            <div className="text-3xl font-bold mb-2">💰</div>
+            <h3 className="text-xl font-semibold">Salary</h3>
+            <p className="text-orange-100 text-sm mt-2">Manage salary & payments</p>
+          </Link>
+        )}
       </div>
 
       {/* Performance Overview & Individual Analysis */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Employee Selection & Individual Performance */}
         <div className="lg:col-span-2 bg-white rounded-lg shadow-md p-6">
-          <h2 className="text-2xl font-bold text-gray-800 mb-4">Employee Performance Analysis</h2>
+          <h2 className="text-2xl font-bold text-gray-800 mb-4">
+            {canViewAllKpi ? 'Employee Performance Analysis' : 'My Performance'}
+          </h2>
 
-          {/* Employee Selector */}
-          <div className="mb-6">
-            <label className="block text-sm font-semibold text-gray-700 mb-2">Select Employee</label>
-            <select
-              value={selectedEmployee || ''}
-              onChange={(e) => handleEmployeeSelect(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="">-- Choose an employee --</option>
-              {employees.map(emp => (
-                <option key={emp._id} value={emp._id}>
-                  {emp.firstName} {emp.lastName} - {emp.position}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* Employee Selector - Only for HR and Owner */}
+          {canViewAllKpi && (
+            <div className="mb-6">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Select Employee</label>
+              <select
+                value={selectedEmployee || ''}
+                onChange={(e) => handleEmployeeSelect(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="">-- Choose an employee --</option>
+                {employees.map(emp => (
+                  <option key={emp._id} value={emp._id}>
+                    {emp.firstName} {emp.lastName} - {emp.position}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
-          {/* Individual Employee Performance */}
-          {loading && <p className="text-gray-600">Loading...</p>}
+          {/* Show own KPI for regular employees */}
+          {!canViewAllKpi && allKpis.length > 0 && (
+            <div className="space-y-6">
+              {allKpis[0] && (
+                <div className={`p-4 rounded-lg ${getPerformanceBg(allKpis[0].score)}`}>
+                  <div className="flex justify-between items-start mb-4">
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-800">Latest KPI Score</h3>
+                      <p className="text-sm text-gray-600">{allKpis[0].month} {allKpis[0].year}</p>
+                    </div>
+                    <div className={`text-4xl font-bold ${getPerformanceColor(allKpis[0].score)}`}>
+                      {allKpis[0].score}
+                    </div>
+                  </div>
+                  <div className="space-y-4 mt-4">
+                    <div>
+                      <div className="flex justify-between text-sm mb-1">
+                        <span className="font-semibold">Productivity</span>
+                        <span className="font-semibold">{allKpis[0].metrics?.productivity || 0}</span>
+                      </div>
+                      {renderScoreBar(allKpis[0].metrics?.productivity || 0)}
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-sm mb-1">
+                        <span className="font-semibold">Quality</span>
+                        <span className="font-semibold">{allKpis[0].metrics?.quality || 0}</span>
+                      </div>
+                      {renderScoreBar(allKpis[0].metrics?.quality || 0)}
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-sm mb-1">
+                        <span className="font-semibold">Teamwork</span>
+                        <span className="font-semibold">{allKpis[0].metrics?.teamwork || 0}</span>
+                      </div>
+                      {renderScoreBar(allKpis[0].metrics?.teamwork || 0)}
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-sm mb-1">
+                        <span className="font-semibold">Punctuality</span>
+                        <span className="font-semibold">{allKpis[0].metrics?.punctuality || 0}</span>
+                      </div>
+                      {renderScoreBar(allKpis[0].metrics?.punctuality || 0)}
+                    </div>
+                  </div>
+                  {allKpis[0].comments && (
+                    <div className="mt-4 pt-4 border-t border-gray-300">
+                      <p className="text-sm text-gray-700"><strong>Comments:</strong> {allKpis[0].comments}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+              {allKpis.length > 1 && (
+                <div>
+                  <h4 className="text-lg font-semibold text-gray-800 mb-3">KPI History</h4>
+                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                    {allKpis.slice(1).map((kpi, idx) => (
+                      <div key={idx} className="p-3 border border-gray-200 rounded-lg hover:bg-gray-50">
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm text-gray-600">{kpi.month} {kpi.year}</span>
+                          <span className={`font-semibold ${getPerformanceColor(kpi.score)}`}>{kpi.score}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
-          {selectedEmployeeData && selectedEmployeeData.length > 0 && !loading && (
+          {!canViewAllKpi && allKpis.length === 0 && (
+            <p className="text-gray-600 text-center py-8">No KPI data available for you yet</p>
+          )}
+
+          {/* Individual Employee Performance - Only for HR and Owner */}
+          {canViewAllKpi && loading && <p className="text-gray-600">Loading...</p>}
+
+          {canViewAllKpi && selectedEmployeeData && selectedEmployeeData.length > 0 && !loading && (
             <div className="space-y-6">
               {/* Latest KPI */}
               {selectedEmployeeData[0] && (
@@ -410,18 +528,19 @@ export default function Dashboard({ user }) {
             </div>
           )}
 
-          {selectedEmployee && selectedEmployeeData && selectedEmployeeData.length === 0 && !loading && (
+          {canViewAllKpi && selectedEmployee && selectedEmployeeData && selectedEmployeeData.length === 0 && !loading && (
             <p className="text-gray-600 text-center py-8">No KPI data available for this employee</p>
           )}
 
-          {!selectedEmployee && (
+          {canViewAllKpi && !selectedEmployee && (
             <p className="text-gray-600 text-center py-8">Select an employee to view their performance data</p>
           )}
         </div>
 
-        {/* All Employees Performance List */}
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <h2 className="text-2xl font-bold text-gray-800 mb-4">All Employees</h2>
+        {/* All Employees Performance List - Only for HR and Owner */}
+        {canViewAllKpi && (
+          <div className="bg-white rounded-lg shadow-md p-6">
+            <h2 className="text-2xl font-bold text-gray-800 mb-4">All Employees</h2>
           <div className="space-y-3 max-h-96 overflow-y-auto">
             {employees.map(emp => {
               const empLatestKpi = allKpis.find(k => k?.employeeId?._id === emp._id);
@@ -453,10 +572,11 @@ export default function Dashboard({ user }) {
             })}
           </div>
         </div>
+        )}
       </div>
 
-      {/* Attendance Stats for Selected Employee */}
-      {selectedEmployee && attendanceData && attendanceData.length > 0 && (
+      {/* Attendance Stats for Selected Employee - Only for HR and Owner */}
+      {canViewAllKpi && selectedEmployee && attendanceData && attendanceData.length > 0 && (
         <div className="mt-8 bg-white rounded-lg shadow-md p-6">
           <h2 className="text-2xl font-bold text-gray-800 mb-4">Attendance Summary</h2>
           {(() => {
@@ -489,6 +609,129 @@ export default function Dashboard({ user }) {
         </div>
       )}
 
+      {/* Leave Summary Section - HR/Owner sees all employees, others see own balance */}
+      {canManage && leaveSummary && leaveSummary.summaries && (
+        <div className="bg-white rounded-lg shadow-md p-6 mt-8">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-2xl font-bold text-gray-800">📊 สรุปการลาพนักงาน ปี {currentYear}</h2>
+            <div className="text-sm text-gray-500">
+              สิทธิ์: พักร้อน {leaveSummary.leaveQuota?.annual || 10} วัน | ป่วย {leaveSummary.leaveQuota?.sick || 30} วัน | กิจ {leaveSummary.leaveQuota?.personal || 5} วัน
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-100 border-b">
+                <tr>
+                  <th className="px-4 py-3 text-left font-semibold">พนักงาน</th>
+                  <th className="px-4 py-3 text-center font-semibold">🏖️ พักร้อน</th>
+                  <th className="px-4 py-3 text-center font-semibold">🏥 ลาป่วย</th>
+                  <th className="px-4 py-3 text-center font-semibold">📋 ลากิจ</th>
+                  <th className="px-4 py-3 text-center font-semibold">รวมใช้ไป</th>
+                  <th className="px-4 py-3 text-center font-semibold">% ใช้สิทธิ์</th>
+                </tr>
+              </thead>
+              <tbody>
+                {leaveSummary.summaries.map((emp, idx) => (
+                  <tr key={emp.employee._id} className={`border-b hover:bg-gray-50 ${idx === 0 && emp.totalUsed > 0 ? 'bg-red-50' : ''}`}>
+                    <td className="px-4 py-3 font-medium">
+                      {emp.employee.firstName} {emp.employee.lastName}
+                      {idx === 0 && emp.totalUsed > 0 && <span className="ml-2 text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full">ลาเยอะสุด</span>}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <span className={`font-semibold ${emp.annual.used > emp.annual.quota * 0.8 ? 'text-red-600' : 'text-blue-600'}`}>
+                        {emp.annual.used}
+                      </span>
+                      <span className="text-gray-400">/{emp.annual.quota}</span>
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <span className={`font-semibold ${emp.sick.used > emp.sick.quota * 0.8 ? 'text-red-600' : 'text-red-500'}`}>
+                        {emp.sick.used}
+                      </span>
+                      <span className="text-gray-400">/{emp.sick.quota}</span>
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <span className={`font-semibold ${emp.personal.used > emp.personal.quota * 0.8 ? 'text-red-600' : 'text-purple-600'}`}>
+                        {emp.personal.used}
+                      </span>
+                      <span className="text-gray-400">/{emp.personal.quota}</span>
+                    </td>
+                    <td className="px-4 py-3 text-center font-bold text-gray-700">
+                      {emp.totalUsed} วัน
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <div className="flex items-center justify-center gap-2">
+                        <div className="w-20 bg-gray-200 rounded-full h-2">
+                          <div 
+                            className={`h-2 rounded-full ${parseFloat(emp.usagePercent) > 80 ? 'bg-red-500' : parseFloat(emp.usagePercent) > 50 ? 'bg-yellow-500' : 'bg-green-500'}`}
+                            style={{ width: `${Math.min(parseFloat(emp.usagePercent), 100)}%` }}
+                          ></div>
+                        </div>
+                        <span className={`font-semibold text-sm ${parseFloat(emp.usagePercent) > 80 ? 'text-red-600' : 'text-gray-600'}`}>
+                          {emp.usagePercent}%
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {leaveSummary.summaries.length === 0 && (
+            <p className="text-center text-gray-500 py-4">ยังไม่มีข้อมูลการลาในปีนี้</p>
+          )}
+        </div>
+      )}
+
+      {/* My Leave Balance - For regular employees */}
+      {!canManage && myLeaveBalance && (
+        <div className="bg-white rounded-lg shadow-md p-6 mt-8">
+          <h2 className="text-2xl font-bold text-gray-800 mb-4">📋 สิทธิ์วันลาของฉัน ปี {currentYear}</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <div className="flex justify-between items-start">
+                <div>
+                  <p className="text-blue-600 font-semibold">ลาพักร้อน</p>
+                  <p className="text-3xl font-bold text-blue-800 mt-2">
+                    {myLeaveBalance.remaining?.annual ?? 0}
+                    <span className="text-lg font-normal text-blue-600">/{myLeaveBalance.annual?.quota ?? 10}</span>
+                  </p>
+                </div>
+                <span className="text-3xl">🏖️</span>
+              </div>
+              <p className="text-sm text-blue-600 mt-2">ใช้ไป {myLeaveBalance.annual?.used ?? 0} วัน</p>
+            </div>
+
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+              <div className="flex justify-between items-start">
+                <div>
+                  <p className="text-red-600 font-semibold">ลาป่วย</p>
+                  <p className="text-3xl font-bold text-red-800 mt-2">
+                    {myLeaveBalance.remaining?.sick ?? 0}
+                    <span className="text-lg font-normal text-red-600">/{myLeaveBalance.sick?.quota ?? 30}</span>
+                  </p>
+                </div>
+                <span className="text-3xl">🏥</span>
+              </div>
+              <p className="text-sm text-red-600 mt-2">ใช้ไป {myLeaveBalance.sick?.used ?? 0} วัน</p>
+            </div>
+
+            <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+              <div className="flex justify-between items-start">
+                <div>
+                  <p className="text-purple-600 font-semibold">ลากิจ</p>
+                  <p className="text-3xl font-bold text-purple-800 mt-2">
+                    {myLeaveBalance.remaining?.personal ?? 0}
+                    <span className="text-lg font-normal text-purple-600">/{myLeaveBalance.personal?.quota ?? 5}</span>
+                  </p>
+                </div>
+                <span className="text-3xl">📋</span>
+              </div>
+              <p className="text-sm text-purple-600 mt-2">ใช้ไป {myLeaveBalance.personal?.used ?? 0} วัน</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="bg-white rounded-lg shadow-md p-6 mt-8">
         <h2 className="text-2xl font-bold text-gray-800 mb-4">System Features</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -502,8 +745,8 @@ export default function Dashboard({ user }) {
           <div className="flex items-start">
             <span className="text-2xl mr-3">✓</span>
             <div>
-              <h4 className="font-semibold text-gray-700">Attendance Tracking</h4>
-              <p className="text-gray-600 text-sm">Record attendance, late arrivals, and leave requests</p>
+              <h4 className="font-semibold text-gray-700">Leave Management</h4>
+              <p className="text-gray-600 text-sm">Request and approve annual, sick, and personal leaves</p>
             </div>
           </div>
           <div className="flex items-start">

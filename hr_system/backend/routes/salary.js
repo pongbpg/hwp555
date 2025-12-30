@@ -5,18 +5,13 @@ import { authenticateToken, canViewSalary, authorizeRoles } from '../middleware/
 
 const router = express.Router();
 
-// Get all salary records (filtered by role)
-router.get('/', authenticateToken, async (req, res) => {
+// Get all salary records (only Accountant and Owner can access)
+router.get('/', authenticateToken, authorizeRoles('owner', 'accountant'), async (req, res) => {
   try {
     const { employeeId, month, year } = req.query;
     let query = {};
 
-    const allowedRoles = ['owner', 'admin', 'accountant'];
-    
-    // If not privileged role, only show own salary
-    if (!allowedRoles.includes(req.user.role)) {
-      query.employeeId = req.user._id;
-    } else if (employeeId) {
+    if (employeeId) {
       query.employeeId = employeeId;
     }
 
@@ -30,8 +25,8 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
-// Get salary by employee
-router.get('/employee/:id', authenticateToken, canViewSalary, async (req, res) => {
+// Get salary by employee (only Accountant and Owner can access)
+router.get('/employee/:id', authenticateToken, authorizeRoles('owner', 'accountant'), async (req, res) => {
   try {
     const salaries = await Salary.find({ employeeId: req.params.id }).populate('employeeId');
     res.json(salaries);
@@ -40,8 +35,8 @@ router.get('/employee/:id', authenticateToken, canViewSalary, async (req, res) =
   }
 });
 
-// Create salary record (only owner/admin/accountant)
-router.post('/', authenticateToken, authorizeRoles('owner', 'admin', 'accountant'), async (req, res) => {
+// Create salary record (only Accountant and Owner can create)
+router.post('/', authenticateToken, authorizeRoles('owner', 'accountant'), async (req, res) => {
   try {
     const { employeeId, month, year, baseSalary, bonus, allowance, deductions, notes } = req.body;
 
@@ -74,8 +69,8 @@ router.post('/', authenticateToken, authorizeRoles('owner', 'admin', 'accountant
   }
 });
 
-// Update salary (only owner/admin/accountant)
-router.put('/:id', authenticateToken, authorizeRoles('owner', 'admin', 'accountant'), async (req, res) => {
+// Update salary (only Accountant and Owner can update)
+router.put('/:id', authenticateToken, authorizeRoles('owner', 'accountant'), async (req, res) => {
   try {
     const { baseSalary, bonus, allowance, deductions, status, notes } = req.body;
 
@@ -107,8 +102,8 @@ router.put('/:id', authenticateToken, authorizeRoles('owner', 'admin', 'accounta
   }
 });
 
-// Delete salary (only owner/admin)
-router.delete('/:id', authenticateToken, authorizeRoles('owner', 'admin'), async (req, res) => {
+// Delete salary (only Accountant and Owner can delete)
+router.delete('/:id', authenticateToken, authorizeRoles('owner', 'accountant'), async (req, res) => {
   try {
     const salary = await Salary.findByIdAndDelete(req.params.id);
     if (!salary) {
