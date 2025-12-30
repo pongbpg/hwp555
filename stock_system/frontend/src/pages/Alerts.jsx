@@ -53,6 +53,17 @@ export default function Alerts() {
     return true;
   });
 
+  const groupedAlerts = (() => {
+    const map = {};
+    for (const a of filteredAlerts) {
+      if (!map[a.sku]) {
+        map[a.sku] = { sku: a.sku, productName: a.productName, alerts: [] };
+      }
+      map[a.sku].alerts.push(a);
+    }
+    return Object.values(map);
+  })();
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -181,51 +192,65 @@ export default function Alerts() {
                 </tr>
               </thead>
               <tbody>
-                {filteredAlerts.map((alert, idx) => (
-                  <tr
-                    key={idx}
-                    className={`border-b border-gray-100 hover:bg-gray-50 ${
-                      alert.severity === 'critical' ? 'bg-red-50' : ''
-                    }`}
-                  >
-                    <td className="py-2 px-3">
-                      <span
-                        className={`text-xs px-2 py-1 rounded font-medium ${
-                          alert.severity === 'critical'
-                            ? 'bg-red-100 text-red-700'
-                            : 'bg-amber-100 text-amber-700'
-                        }`}
-                      >
-                        {alert.severity === 'critical' ? '🔴 ด่วน' : '🟡 เตือน'}
-                      </span>
-                    </td>
-                    <td className="py-2 px-3 text-sm">
-                      {alert.type === 'out-of-stock' && '❌ หมดสต็อก'}
-                      {alert.type === 'low-stock' && '⚠️ สต็อกต่ำ'}
-                      {alert.type === 'near-expiry' && '⏰ ใกล้หมดอายุ'}
-                    </td>
-                    <td className="py-2 px-3 text-sm font-medium text-gray-800">{alert.productName}</td>
-                    <td className="py-2 px-3 text-sm font-mono text-gray-600">{alert.sku}</td>
-                    <td className="py-2 px-3 text-sm text-gray-700">
-                      {alert.type === 'out-of-stock' && <span className="text-red-600">สต็อกหมด</span>}
-                      {alert.type === 'low-stock' && (
-                        <span>
-                          สต็อก: <strong>{fmtNumber.format(alert.stockOnHand)}</strong> / จุดสั่งซื้อ:{' '}
-                          <strong>{fmtNumber.format(alert.reorderPoint)}</strong>
+                {groupedAlerts.map((group, idx) => {
+                  const highestSeverity = group.alerts.some((a) => a.severity === 'critical') ? 'critical' : 'warning';
+                  const types = Array.from(new Set(group.alerts.map((a) => a.type))).join(' / ');
+                  return (
+                    <tr
+                      key={group.sku + '_' + idx}
+                      className={`border-b border-gray-100 hover:bg-gray-50 ${
+                        highestSeverity === 'critical' ? 'bg-red-50' : ''
+                      }`}
+                    >
+                      <td className="py-2 px-3 align-top">
+                        <span
+                          className={`text-xs px-2 py-1 rounded font-medium ${
+                            highestSeverity === 'critical' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                          }`}
+                        >
+                          {highestSeverity === 'critical' ? '🔴 ด่วน' : '🟡 เตือน'}
                         </span>
-                      )}
-                      {alert.type === 'near-expiry' && (
-                        <span>
-                          หมดอายุ: <strong>{fmtDate(alert.expiryDate)}</strong> (
-                          <span className={alert.daysLeft <= 7 ? 'text-red-600' : 'text-amber-600'}>
-                            เหลือ {alert.daysLeft} วัน
-                          </span>
-                          ) | ล็อต: {alert.batchRef || '-'} | จำนวน: {fmtNumber.format(alert.quantity)}
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="py-2 px-3 text-sm align-top">{types}</td>
+                      <td className="py-2 px-3 text-sm font-medium text-gray-800 align-top">{group.productName}</td>
+                      <td className="py-2 px-3 text-sm font-mono text-gray-600 align-top">{group.sku}</td>
+                      <td className="py-2 px-3 text-sm text-gray-700">
+                        <div className="space-y-1">
+                          {group.alerts.map((alert, i) => (
+                            <div key={i} className="p-2 rounded-md bg-gray-50">
+                              <div className="flex items-start gap-2">
+                                <div className="w-6 pt-0.5">
+                                  {alert.type === 'out-of-stock' && <span>❌</span>}
+                                  {alert.type === 'low-stock' && <span>⚠️</span>}
+                                  {alert.type === 'near-expiry' && <span>⏰</span>}
+                                </div>
+                                <div className="flex-1">
+                                  {alert.type === 'out-of-stock' && <span className="text-red-600">สต็อกหมด</span>}
+                                  {alert.type === 'low-stock' && (
+                                    <span>
+                                      สต็อก: <strong>{fmtNumber.format(alert.stockOnHand)}</strong> / จุดสั่งซื้อ:{' '}
+                                      <strong>{fmtNumber.format(alert.reorderPoint)}</strong>
+                                    </span>
+                                  )}
+                                  {alert.type === 'near-expiry' && (
+                                    <span>
+                                      หมดอายุ: <strong>{fmtDate(alert.expiryDate)}</strong> (
+                                      <span className={alert.daysLeft <= 7 ? 'text-red-600' : 'text-amber-600'}>
+                                        เหลือ {alert.daysLeft} วัน
+                                      </span>
+                                      ) | ล็อต: {alert.batchRef || '-'} | จำนวน: {fmtNumber.format(alert.quantity)}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-xs text-gray-500">{alert.severity === 'critical' ? 'ด่วน' : 'เตือน'}</div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

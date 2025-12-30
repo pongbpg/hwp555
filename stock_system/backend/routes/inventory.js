@@ -7,6 +7,7 @@ import Brand from '../models/Brand.js';
 import { authenticateToken, authorizeRoles } from '../middleware/auth.js';
 import { recordMovement } from './movements.js';
 import { checkAndAlertAfterSale } from '../services/stockAlertService.js';
+import { calculateSuggestedReorderPoint } from '../services/stockAlertService.js';
 
 const router = express.Router();
 
@@ -834,23 +835,34 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
     const outOfStockAlerts = [];
     const nearExpiryAlerts = [];
     
-    products.forEach((product) => {
-      (product.variants || []).forEach((variant) => {
-        if (variant.status !== 'active') return;
+    for (const product of products) {
+      for (const variant of product.variants || []) {
+        if (variant.status !== 'active') continue;
         const stock = variant.stockOnHand || 0;
-        const reorderPoint = variant.reorderPoint || 0;
+        const rawReorderPoint = variant.reorderPoint || 0;
         const leadTimeDays = variant.leadTimeDays || 7;
         const bufferDays = 7;
-        
+
         // คำนวณ daily sales rate
         const variantKey = String(variant._id);
         const quantitySold = salesByVariant.get(variantKey) || 0;
         const dailySalesRate = quantitySold / 30;
-        
+
+        // ถ้า reorderPoint ยังเป็น 0 ให้คำนวณค่าแนะนำจาก service
+        let reorderPoint = rawReorderPoint;
+        if (!reorderPoint || reorderPoint === 0) {
+          try {
+            const suggested = await calculateSuggestedReorderPoint(variant._id, leadTimeDays, bufferDays);
+            reorderPoint = Math.max(0, Math.round(suggested?.suggestedReorderPoint || 0));
+          } catch (err) {
+            reorderPoint = 0;
+          }
+        }
+
         // คำนวณวันที่สต็อกจะหมด
         const daysUntilStockOut = dailySalesRate > 0 ? stock / dailySalesRate : 999;
         const minimumDays = leadTimeDays + bufferDays;
-        
+
         // Out of stock
         if (stock <= 0) {
           outOfStockAlerts.push({
@@ -885,9 +897,9 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
             message: `${product.name} (${variant.sku}) สต็อกต่ำ: ${stock} ชิ้น (เหลือ ${Math.round(daysUntilStockOut)} วัน)`,
           });
         }
-        
+
         // Near expiry batches
-        (variant.batches || []).forEach((batch) => {
+        for (const batch of variant.batches || []) {
           if (batch.expiryDate && new Date(batch.expiryDate) <= expiryBefore && new Date(batch.expiryDate) >= now) {
             const daysLeft = Math.ceil((new Date(batch.expiryDate) - now) / (1000 * 60 * 60 * 24));
             nearExpiryAlerts.push({
@@ -904,9 +916,9 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
               message: `${product.name} (${variant.sku}) ล็อต ${batch.batchRef || 'N/A'} หมดอายุใน ${daysLeft} วัน`,
             });
           }
-        });
-      });
-    });
+        }
+      }
+    }
     
     // Sort by severity
     const allAlerts = [
