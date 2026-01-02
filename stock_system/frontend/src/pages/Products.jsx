@@ -192,6 +192,8 @@ export default function Products() {
 
   const handleUpdate = async (e) => {
     e.preventDefault();
+    const confirmed = window.confirm(`ยืนยันการอัพเดทสินค้า: ${newProduct.name || '(ไม่มีชื่อ)'} ?`);
+    if (!confirmed) return;
     setSaving(true);
     setError('');
     try {
@@ -248,6 +250,8 @@ export default function Products() {
 
   const handleCreate = async (e) => {
     e.preventDefault();
+    const confirmed = window.confirm(`ยืนยันการเพิ่มสินค้า: ${newProduct.name || '(ไม่มีชื่อ)'} ?`);
+    if (!confirmed) return;
     setSaving(true);
     setError('');
     try {
@@ -340,7 +344,12 @@ export default function Products() {
   };
 
   const addVariant = () => {
-    setVariants([...variants, { ...emptyVariant }]);
+    if (variants.length > 0) {
+      const lastVariant = variants[variants.length - 1];
+      setVariants([...variants, { ...lastVariant }]);
+    } else {
+      setVariants([...variants, { ...emptyVariant }]);
+    }
   };
 
   const removeVariant = (index) => {
@@ -642,16 +651,7 @@ export default function Products() {
             </div>
           ) : (
             <div className="mt-4">
-              <div className="flex justify-between items-center mb-3">
-                <h3 className="text-lg font-semibold text-gray-700">Variants</h3>
-                <button
-                  type="button"
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm"
-                  onClick={addVariant}
-                >
-                  + เพิ่ม Variant
-                </button>
-              </div>
+              <h3 className="text-lg font-semibold text-gray-700 mb-3">Variants</h3>
 
               {variants.map((variant, idx) => (
                 <div key={idx} className="border border-gray-200 rounded-lg p-4 mb-3 bg-gray-50">
@@ -738,27 +738,35 @@ export default function Products() {
                   </div>
                 </div>
               ))}
+              
+              <button
+                type="button"
+                className="w-full bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium mt-3"
+                onClick={addVariant}
+              >
+                + เพิ่ม Variant
+              </button>
             </div>
           )}
 
           {/* Submit Buttons */}
-          <div className="flex gap-3 mt-6">
-            <button
-              type="submit"
-              disabled={saving}
-              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium disabled:opacity-50"
-            >
-              {saving ? 'Saving...' : editMode ? 'อัพเดทสินค้า' : 'เพิ่มสินค้า'}
-            </button>
+          <div className="flex gap-3 mt-8">
             {editMode && (
               <button
                 type="button"
                 onClick={handleCancelEdit}
-                className="flex-1 bg-gray-500 hover:bg-gray-600 text-white px-6 py-2 rounded-lg font-medium"
+                className="flex-1 bg-gray-400 hover:bg-gray-500 text-white px-6 py-3 rounded-lg font-semibold text-lg"
               >
                 ยกเลิก
               </button>
             )}
+            <button
+              type="submit"
+              disabled={saving}
+              className="flex-1 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white px-8 py-3 rounded-lg font-bold text-lg shadow-lg disabled:opacity-50 transition-all"
+            >
+              {saving ? 'กำลังบันทึก...' : editMode ? '✅ อัพเดทสินค้า' : '✅ เพิ่มสินค้า'}
+            </button>
           </div>
         </form>
       </div>
