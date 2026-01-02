@@ -6,8 +6,7 @@ import Category from '../models/Category.js';
 import Brand from '../models/Brand.js';
 import { authenticateToken, authorizeRoles } from '../middleware/auth.js';
 import { recordMovement } from './movements.js';
-import { checkAndAlertAfterSale } from '../services/stockAlertService.js';
-import { calculateSuggestedReorderPoint } from '../services/stockAlertService.js';
+import { checkAndAlertAfterSale, calculateSuggestedReorderPoint, calculateReorderMetrics } from '../services/stockAlertService.js';
 
 const router = express.Router();
 
@@ -555,11 +554,14 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
         const bufferDays = 7; // default buffer 7 วัน
         const minimumDays = leadTimeDays + bufferDays;
 
+        // ใช้ calculateReorderMetrics สำหรับความสอดคล้องกับ service
+        const reorderMetrics = calculateReorderMetrics(dailySalesRate, leadTimeDays, bufferDays);
+        const suggestedReorderPoint = reorderMetrics.suggestedReorderPoint;
+        const suggestedOrderQty = reorderMetrics.suggestedReorderQty;
+
         if (daysUntilStockOut < minimumDays) {
-          // คำนวณจำนวนที่ควรสั่ง (เพียงพอสำหรับ lead time + buffer)
-          const daysToOrder = minimumDays; // สั่งให้พอใช้ lead time + buffer
-          const minCoverQty = Math.ceil(Math.max(0, dailySalesRate * minimumDays - currentStock));
-          const recommendedOrderQty = Math.ceil(dailySalesRate * daysToOrder - currentStock);
+          // คำนวณจำนวนที่ควรสั่งให้ถึง reorder point (ห้ามต่ำกว่า 0)
+          const recommendedOrderQty = Math.max(0, suggestedOrderQty - currentStock);
 
           if (recommendedOrderQty > 0) {
             reorderSuggestions.push({
@@ -572,9 +574,10 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
               quantitySold,
               dailySalesRate: Math.round(dailySalesRate * 100) / 100,
               daysUntilStockOut: Math.round(daysUntilStockOut * 10) / 10,
-              recommendedOrderQty,
+              suggestedReorderPoint: Math.ceil(suggestedReorderPoint),
+              suggestedOrderQty: Math.ceil(suggestedOrderQty),
+              recommendedOrderQty: Math.ceil(recommendedOrderQty),
               leadTimeDays,
-              minOrderQty: minCoverQty,
               bufferDays,
             });
 
@@ -848,16 +851,12 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
         const quantitySold = salesByVariant.get(variantKey) || 0;
         const dailySalesRate = quantitySold / 30;
 
-        // ถ้า reorderPoint ยังเป็น 0 ให้คำนวณค่าแนะนำจาก service
-        let reorderPoint = rawReorderPoint;
-        if (!reorderPoint || reorderPoint === 0) {
-          try {
-            const suggested = await calculateSuggestedReorderPoint(variant._id, leadTimeDays, bufferDays);
-            reorderPoint = Math.max(0, Math.round(suggested?.suggestedReorderPoint || 0));
-          } catch (err) {
-            reorderPoint = 0;
-          }
-        }
+        // ใช้ calculateReorderMetrics สำหรับความสอดคล้องกับ stockAlertService
+        const reorderMetrics = calculateReorderMetrics(dailySalesRate, leadTimeDays, bufferDays);
+        const computedReorderPoint = Math.ceil(reorderMetrics.suggestedReorderPoint);
+        
+        // ใช้ค่าที่ user กำหนด หากไม่มี ให้ใช้ค่าที่คำนวณ
+        const reorderPoint = rawReorderPoint || computedReorderPoint;
 
         // คำนวณวันที่สต็อกจะหมด
         const daysUntilStockOut = dailySalesRate > 0 ? stock / dailySalesRate : 999;
@@ -874,6 +873,7 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
             sku: variant.sku,
             stockOnHand: stock,
             reorderPoint,
+            suggestedReorderPoint: computedReorderPoint,
             dailySalesRate: Math.round(dailySalesRate * 100) / 100,
             daysUntilStockOut: 0,
             message: `${product.name} (${variant.sku}) หมดสต็อก`,
@@ -891,6 +891,7 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
             sku: variant.sku,
             stockOnHand: stock,
             reorderPoint,
+            suggestedReorderPoint: computedReorderPoint,
             dailySalesRate: Math.round(dailySalesRate * 100) / 100,
             daysUntilStockOut: Math.round(daysUntilStockOut * 10) / 10,
             leadTimeDays,
