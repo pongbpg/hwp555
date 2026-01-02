@@ -450,7 +450,10 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
     const days = Number(req.query.days) || 30;
     const expiryDays = Number(req.query.expiryDays) || 30;
     const top = Math.min(50, Math.max(1, Number(req.query.top) || 10));
-    const salesSince = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+    
+    // ใช้ช่วงยอดขาย 30 วันคงที่ เพื่อให้ dailySalesRate ตรงกับ LINE/Alerts
+    const salesPeriodDays = 30;
+    const salesSince = new Date(now.getTime() - salesPeriodDays * 24 * 60 * 60 * 1000);
     const expiryBefore = new Date(now.getTime() + expiryDays * 24 * 60 * 60 * 1000);
 
     // คำนวณยอดขายใน 30 วันที่ผ่านมา (ใช้ orderDate แทน createdAt เพื่อความถูกต้อง)
@@ -504,7 +507,7 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
       (product.variants || []).forEach((variant) => {
         const key = `${product._id}-${variant._id}`;
         const quantitySold = salesMap.get(key) || 0;
-        const dailySalesRate = quantitySold / days; // ขายเฉลี่ยต่อวัน
+        const dailySalesRate = quantitySold / salesPeriodDays; // ขายเฉลี่ยต่อวัน (ใช้ 30 วันคงที่)
         const incoming = variant.incoming || 0;
         const currentStock = (variant.stockOnHand || 0) + incoming; // รวมของที่สั่งแล้วยังไม่รับ
         const leadTimeDays = variant.leadTimeDays || 7; // default 7 วัน
