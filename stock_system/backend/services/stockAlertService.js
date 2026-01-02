@@ -143,6 +143,17 @@ export const checkVariantStockRiskWithSalesRate = (product, variant, avgDailySal
   const safetyStock = reorderMetrics.safetyStock;
   const computedReorderQty = reorderMetrics.suggestedReorderQty;
 
+  console.log(`🔍 [Stock Risk] Checking ${variant.sku}:`, {
+    currentStock,
+    avgDailySales: finalAvgDailySales.toFixed(3),
+    leadTimeDays,
+    bufferDays,
+    safetyStock,
+    computedReorderPoint,
+    computedReorderQty,
+    daysOfStock,
+  });
+
   // ตรวจสอบว่าต้องแจ้งเตือนหรือไม่
   const shouldAlert =
     currentStock <= 0 || // หมดสต็อก
@@ -212,9 +223,23 @@ export const checkAndAlertAfterSale = async (soldItems, options = {}) => {
       // ใช้ calculateAverageDailySalesFromOrders เพื่อให้ผลลัพธ์ตรงกับ /alerts และ /insights
       const avgDailySales = await calculateAverageDailySalesFromOrders(variant._id, 30);
 
+      console.log(`📊 [LINE Alert] Calculating for ${variant.sku}:`, {
+        variantId: variant._id,
+        currentStock: variant.stockOnHand,
+        leadTimeDays: variant.leadTimeDays || 7,
+        avgDailySales: avgDailySales.toFixed(3),
+      });
+
       // ตรวจสอบความเสี่ยง
       const alert = await checkVariantStockRisk(product, variant, avgDailySales);
       if (alert) {
+        console.log(`🔔 [LINE Alert] Alert created for ${variant.sku}:`, {
+          suggestedReorderPoint: alert.suggestedReorderPoint,
+          suggestedOrder: alert.suggestedOrder,
+          avgDailySales: alert.avgDailySales.toFixed(3),
+          daysOfStock: alert.daysOfStock,
+          currentStock: alert.currentStock,
+        });
         alerts.push(alert);
       }
     } catch (error) {
@@ -225,6 +250,14 @@ export const checkAndAlertAfterSale = async (soldItems, options = {}) => {
   // ส่งการแจ้งเตือนถ้ามี
   let notificationResult = null;
   if (sendNotification && alerts.length > 0) {
+    console.log(`📤 [LINE Alert] Sending ${alerts.length} alerts to LINE:`, alerts.map(a => ({
+      sku: a.sku,
+      currentStock: a.currentStock,
+      suggestedReorderPoint: a.suggestedReorderPoint,
+      suggestedOrder: a.suggestedOrder,
+      avgDailySales: a.avgDailySales.toFixed(3),
+    })));
+    
     try {
       // เลือกวิธีการแจ้งเตือน
       const useFlexMessage =
