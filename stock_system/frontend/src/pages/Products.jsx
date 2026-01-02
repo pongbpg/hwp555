@@ -7,6 +7,7 @@ const emptyProduct = {
   category: '',
   brand: '',
   price: 0,
+  cost: 0,
   stockOnHand: 0,
   leadTimeDays: 0,
 };
@@ -17,6 +18,7 @@ const emptyVariant = {
   size: '',
   material: '',
   price: 0,
+  cost: 0,
   stockOnHand: 0,
   leadTimeDays: 0,
 };
@@ -261,6 +263,7 @@ export default function Products() {
       category: product.category || '',
       brand: product.brand || '',
       price: product.variants?.[0]?.price || 0,
+      cost: product.variants?.[0]?.cost || 0,
       stockOnHand: product.variants?.[0]?.stockOnHand || 0,
       leadTimeDays: product.variants?.[0]?.leadTimeDays || 0,
     });
@@ -345,6 +348,7 @@ export default function Products() {
                 ...(v.material && { material: v.material }),
               },
               price: Number(v.price) || 0,
+              cost: Number(v.cost) || 0,
               stockOnHand: Number(v.stockOnHand) || 0,
               leadTimeDays: Number(v.leadTimeDays) || 0,
             };
@@ -353,6 +357,7 @@ export default function Products() {
             {
               sku: newProduct.sku || `${basePrefix}-${getNextRunningNumber(basePrefix)}`,
               price: Number(newProduct.price) || 0,
+              cost: Number(newProduct.cost) || 0,
               stockOnHand: Number(newProduct.stockOnHand) || 0,
               leadTimeDays: Number(newProduct.leadTimeDays) || 0,
               attributes: {},
@@ -412,6 +417,7 @@ export default function Products() {
                 ...(v.material && { material: v.material }),
               },
               price: Number(v.price) || 0,
+              cost: Number(v.cost) || 0,
               stockOnHand: Number(v.stockOnHand) || 0,
               leadTimeDays: Number(v.leadTimeDays) || 0,
             };
@@ -420,6 +426,7 @@ export default function Products() {
             {
               sku: newProduct.sku || `${basePrefix}-${getNextRunningNumber(basePrefix)}`,
               price: Number(newProduct.price) || 0,
+              cost: Number(newProduct.cost) || 0,
               stockOnHand: Number(newProduct.stockOnHand) || 0,
               leadTimeDays: Number(newProduct.leadTimeDays) || 0,
               attributes: {},
@@ -545,7 +552,29 @@ export default function Products() {
   const handleCategoryChange = (categoryId) => {
     const updates = { category: categoryId };
     if (!showVariants && categoryId && newProduct.brand) {
-      updates.sku = generateSKU(categoryId, newProduct.brand);
+      const newCategoryPrefix = categories.find((cat) => cat._id === categoryId)?.prefix || '';
+      const newBrandPrefix = brands.find((brand) => brand._id === newProduct.brand)?.prefix || '';
+      const newBasePrefix = [newCategoryPrefix, newBrandPrefix].filter(Boolean).join('-');
+      
+      // เก็บ suffix จาก SKU เดิม
+      const oldSku = newProduct.sku || '';
+      const oldCategoryPrefix = categories.find((cat) => cat._id === newProduct.category)?.prefix || '';
+      const oldBrandPrefix = brands.find((brand) => brand._id === newProduct.brand)?.prefix || '';
+      const oldBasePrefix = [oldCategoryPrefix, oldBrandPrefix].filter(Boolean).join('-');
+      
+      // แยก suffix จาก SKU เดิม
+      let suffix = '';
+      if (oldBasePrefix && oldSku.startsWith(oldBasePrefix + '-')) {
+        suffix = oldSku.substring(oldBasePrefix.length + 1);
+      }
+      
+      // สร้าง SKU ใหม่ = newBasePrefix + suffix
+      if (suffix) {
+        updates.sku = `${newBasePrefix}-${suffix}`;
+      } else {
+        const runningNumber = getNextRunningNumber(newBasePrefix);
+        updates.sku = `${newBasePrefix}-${runningNumber}`;
+      }
     } else if (!showVariants && categoryId) {
       const categoryPrefix = categories.find((cat) => cat._id === categoryId)?.prefix || '';
       if (categoryPrefix) {
@@ -553,13 +582,66 @@ export default function Products() {
         updates.sku = `${categoryPrefix}-${runningNumber}`;
       }
     }
+    
+    // แก้ไข variant SKU ด้วย
+    if (showVariants && categoryId) {
+      const newCategoryPrefix = categories.find((cat) => cat._id === categoryId)?.prefix || '';
+      const newBrandPrefix = brands.find((brand) => brand._id === newProduct.brand)?.prefix || '';
+      const newBasePrefix = [newCategoryPrefix, newBrandPrefix].filter(Boolean).join('-');
+      
+      const oldCategoryPrefix = categories.find((cat) => cat._id === newProduct.category)?.prefix || '';
+      const oldBrandPrefix = brands.find((brand) => brand._id === newProduct.brand)?.prefix || '';
+      const oldBasePrefix = [oldCategoryPrefix, oldBrandPrefix].filter(Boolean).join('-');
+      
+      const updatedVariants = variants.map((variant) => {
+        const oldVariantSku = variant.sku || '';
+        
+        // แยก suffix จาก variant SKU เดิม
+        let suffix = '';
+        if (oldBasePrefix && oldVariantSku.startsWith(oldBasePrefix + '-')) {
+          suffix = oldVariantSku.substring(oldBasePrefix.length + 1);
+        }
+        
+        // สร้าง variant SKU ใหม่
+        let newSku = oldVariantSku;
+        if (suffix) {
+          newSku = `${newBasePrefix}-${suffix}`;
+        }
+        
+        return { ...variant, sku: newSku };
+      });
+      setVariants(updatedVariants);
+    }
+    
     setNewProduct({ ...newProduct, ...updates });
   };
 
   const handleBrandChange = (brandId) => {
     const updates = { brand: brandId };
     if (!showVariants && brandId && newProduct.category) {
-      updates.sku = generateSKU(newProduct.category, brandId);
+      const newBrandPrefix = brands.find((brand) => brand._id === brandId)?.prefix || '';
+      const newCategoryPrefix = categories.find((cat) => cat._id === newProduct.category)?.prefix || '';
+      const newBasePrefix = [newCategoryPrefix, newBrandPrefix].filter(Boolean).join('-');
+      
+      // เก็บ suffix จาก SKU เดิม
+      const oldSku = newProduct.sku || '';
+      const oldBrandPrefix = brands.find((brand) => brand._id === newProduct.brand)?.prefix || '';
+      const oldCategoryPrefix = categories.find((cat) => cat._id === newProduct.category)?.prefix || '';
+      const oldBasePrefix = [oldCategoryPrefix, oldBrandPrefix].filter(Boolean).join('-');
+      
+      // แยก suffix จาก SKU เดิม
+      let suffix = '';
+      if (oldBasePrefix && oldSku.startsWith(oldBasePrefix + '-')) {
+        suffix = oldSku.substring(oldBasePrefix.length + 1);
+      }
+      
+      // สร้าง SKU ใหม่ = newBasePrefix + suffix
+      if (suffix) {
+        updates.sku = `${newBasePrefix}-${suffix}`;
+      } else {
+        const runningNumber = getNextRunningNumber(newBasePrefix);
+        updates.sku = `${newBasePrefix}-${runningNumber}`;
+      }
     } else if (!showVariants && brandId) {
       const brandPrefix = brands.find((brand) => brand._id === brandId)?.prefix || '';
       if (brandPrefix) {
@@ -567,6 +649,37 @@ export default function Products() {
         updates.sku = `${brandPrefix}-${runningNumber}`;
       }
     }
+    
+    // แก้ไข variant SKU ด้วย
+    if (showVariants && brandId) {
+      const newBrandPrefix = brands.find((brand) => brand._id === brandId)?.prefix || '';
+      const newCategoryPrefix = categories.find((cat) => cat._id === newProduct.category)?.prefix || '';
+      const newBasePrefix = [newCategoryPrefix, newBrandPrefix].filter(Boolean).join('-');
+      
+      const oldBrandPrefix = brands.find((brand) => brand._id === newProduct.brand)?.prefix || '';
+      const oldCategoryPrefix = categories.find((cat) => cat._id === newProduct.category)?.prefix || '';
+      const oldBasePrefix = [oldCategoryPrefix, oldBrandPrefix].filter(Boolean).join('-');
+      
+      const updatedVariants = variants.map((variant) => {
+        const oldVariantSku = variant.sku || '';
+        
+        // แยก suffix จาก variant SKU เดิม
+        let suffix = '';
+        if (oldBasePrefix && oldVariantSku.startsWith(oldBasePrefix + '-')) {
+          suffix = oldVariantSku.substring(oldBasePrefix.length + 1);
+        }
+        
+        // สร้าง variant SKU ใหม่
+        let newSku = oldVariantSku;
+        if (suffix) {
+          newSku = `${newBasePrefix}-${suffix}`;
+        }
+        
+        return { ...variant, sku: newSku };
+      });
+      setVariants(updatedVariants);
+    }
+    
     setNewProduct({ ...newProduct, ...updates });
   };
 
@@ -796,15 +909,25 @@ export default function Products() {
 
           {/* Non-variant fields */}
           {!showVariants ? (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mt-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">ราคา</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">ราคาขาย</label>
                 <input
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                   type="number"
-                  placeholder="Price"
+                  placeholder="ราคาขาย"
                   value={newProduct.price ?? 0}
                   onChange={(e) => setNewProduct({ ...newProduct, price: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">ต้นทุน (Cost)</label>
+                <input
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                  type="number"
+                  placeholder="ต้นทุน"
+                  value={newProduct.cost ?? 0}
+                  onChange={(e) => setNewProduct({ ...newProduct, cost: e.target.value })}
                 />
               </div>
               <div>
@@ -892,6 +1015,16 @@ export default function Products() {
                         placeholder="Price"
                         value={variant.price ?? 0}
                         onChange={(e) => updateVariant(idx, 'price', e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">ต้นทุน</label>
+                      <input
+                        className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                        type="number"
+                        placeholder="Cost"
+                        value={variant.cost ?? 0}
+                        onChange={(e) => updateVariant(idx, 'cost', e.target.value)}
                       />
                     </div>
                     <div>
@@ -985,7 +1118,7 @@ export default function Products() {
                         {v.attributes?.material && ` | วัสดุ: ${v.attributes.material}`}
                         <br />
                         <span className="text-gray-500">
-                          ราคา: {v.price} บาท | คงคลัง: {v.stockOnHand ?? 0} ชิ้น
+                          ราคา: {v.price} บาท | ต้นทุน: {v.cost ?? 0} บาท | คงคลัง: {v.stockOnHand ?? 0} ชิ้น
                         </span>
                       </div>
                     ))}
