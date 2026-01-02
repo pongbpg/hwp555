@@ -53,7 +53,7 @@ export const checkVariantStockRisk = async (product, variant, avgDailySales = nu
   const reorderPoint = variant.reorderPoint || 0;
   const leadTimeDays = variant.leadTimeDays || 7; // default 7 days
   const reorderQty = variant.reorderQty || 0;
-  const bufferDays = product.reorderBufferDays || 14;
+  const bufferDays = product.reorderBufferDays || 7; // default 7 days (consistent with inventory.js)
 
   // คำนวณ average daily sales ถ้าไม่ได้ระบุมา
   if (avgDailySales === null) {
@@ -249,11 +249,11 @@ export const checkAllStockRisks = async (options = {}) => {
 /**
  * คำนวณ Reorder Point ที่แนะนำ
  * @param {string} variantId - Variant ID
- * @param {number} leadTimeDays - Lead time ในการสั่งซื้อ
- * @param {number} bufferDays - Buffer days สำหรับความปลอดภัย
+ * @param {number} leadTimeDays - Lead time ในการสั่งซื้อ (default: 7 วัน)
+ * @param {number} bufferDays - Buffer days สำหรับความปลอดภัย (default: 7 วัน)
  * @returns {Promise<object>}
  */
-export const calculateSuggestedReorderPoint = async (variantId, leadTimeDays = 7, bufferDays = 14) => {
+export const calculateSuggestedReorderPoint = async (variantId, leadTimeDays = 7, bufferDays = 7) => {
   const avgDailySales = await calculateAverageDailySales(variantId, 30);
 
   // Reorder Point = (Average Daily Sales × Lead Time) + Safety Stock

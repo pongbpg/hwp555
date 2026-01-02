@@ -508,7 +508,7 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
         const dailySalesRate = quantitySold / days; // ขายเฉลี่ยต่อวัน
         const incoming = variant.incoming || 0;
         const currentStock = (variant.stockOnHand || 0) + incoming; // รวมของที่สั่งแล้วยังไม่รับ
-        const leadTimeDays = variant.leadTimeDays || 0;
+        const leadTimeDays = variant.leadTimeDays || 7; // default 7 วัน
 
         // คำนวณว่าสต็อกปัจจุบันพอใช้กี่วัน
         const daysUntilStockOut = dailySalesRate > 0 ? currentStock / dailySalesRate : 999999;
@@ -552,7 +552,7 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
         groupByBrand.set(brandKey, br);
 
         // ถ้าสต็อกไม่พอใช้ถึง lead time + buffer
-        const bufferDays = 7; // buffer 7 วัน
+        const bufferDays = 7; // default buffer 7 วัน
         const minimumDays = leadTimeDays + bufferDays;
 
         if (daysUntilStockOut < minimumDays) {
@@ -840,8 +840,8 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
         if (variant.status !== 'active') continue;
         const stock = variant.stockOnHand || 0;
         const rawReorderPoint = variant.reorderPoint || 0;
-        const leadTimeDays = variant.leadTimeDays || 7;
-        const bufferDays = 7;
+        const leadTimeDays = variant.leadTimeDays || 7; // default 7 วัน
+        const bufferDays = 7; // default buffer 7 วัน
 
         // คำนวณ daily sales rate
         const variantKey = String(variant._id);
