@@ -209,8 +209,8 @@ export const checkAndAlertAfterSale = async (soldItems, options = {}) => {
       const variant = product.variants.id(item.variantId);
       if (!variant) continue;
 
-      // คำนวณ average daily sales รวมการขายครั้งนี้
-      const avgDailySales = await calculateAverageDailySales(variant._id, 30);
+      // ใช้ calculateAverageDailySalesFromOrders เพื่อให้ผลลัพธ์ตรงกับ /alerts และ /insights
+      const avgDailySales = await calculateAverageDailySalesFromOrders(variant._id, 30);
 
       // ตรวจสอบความเสี่ยง
       const alert = await checkVariantStockRisk(product, variant, avgDailySales);

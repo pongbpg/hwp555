@@ -578,6 +578,7 @@ export default function Insights() {
                   <th className="py-2 px-3 text-right font-semibold text-gray-600">ขาย/วัน</th>
                   <th className="py-2 px-3 text-right font-semibold text-gray-600">เหลือใช้</th>
                   <th className="py-2 px-3 text-right font-semibold text-gray-600">Lead Time</th>
+                  <th className="py-2 px-3 text-right font-semibold text-gray-600">จุดสั่งซื้อ</th>
                   <th className="py-2 px-3 text-right font-semibold text-gray-600 bg-blue-50">แนะนำสั่ง</th>
                 </tr>
               </thead>
@@ -597,6 +598,7 @@ export default function Insights() {
                       {Math.round(item.daysUntilStockOut)} วัน
                     </td>
                     <td className="py-2 px-3 text-right text-gray-600">{item.leadTimeDays} วัน</td>
+                    <td className="py-2 px-3 text-right text-gray-600"> {fmtNumber.format(item.suggestedReorderPoint)}</td>
                     <td className="py-2 px-3 text-right font-bold text-blue-600 bg-blue-50">
                       {fmtNumber.format(item.recommendedOrderQty)}
                     </td>
