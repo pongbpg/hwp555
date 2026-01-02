@@ -551,7 +551,7 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
         groupByBrand.set(brandKey, br);
 
         // ถ้าสต็อกไม่พอใช้ถึง lead time + buffer
-        const bufferDays = 7; // default buffer 7 วัน
+        const bufferDays = product.reorderBufferDays ?? 7;
         const minimumDays = leadTimeDays + bufferDays;
 
         // ใช้ calculateReorderMetrics สำหรับความสอดคล้องกับ service
@@ -844,7 +844,7 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
         const stock = variant.stockOnHand || 0;
         const rawReorderPoint = variant.reorderPoint || 0;
         const leadTimeDays = variant.leadTimeDays || 7; // default 7 วัน
-        const bufferDays = 7; // default buffer 7 วัน
+        const bufferDays = product.reorderBufferDays ?? 7;
 
         // คำนวณ daily sales rate
         const variantKey = String(variant._id);

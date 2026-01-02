@@ -80,7 +80,7 @@ const productSchema = new Schema(
       },
     ],
     variants: { type: [variantSchema], default: [] },
-    reorderBufferDays: { type: Number, default: 14 },
+    reorderBufferDays: { type: Number, default: 7 },
     createdBy: { type: Schema.Types.ObjectId, ref: 'Employee' },
     updatedBy: { type: Schema.Types.ObjectId, ref: 'Employee' },
   },
