@@ -12,7 +12,44 @@ import Product from '../models/Product.js';
 import { sendStockAlertText, sendStockAlertFlexMessage } from '../utils/lineNotify.js';
 
 /**
- * คำนวณยอดขายเฉลี่ยต่อวันของ variant
+ * คำนวณยอดขายเฉลี่ยต่อวันของ variant จาก InventoryOrder (ให้ผลสม่ำเสมอทุก endpoint)
+ * @param {string} variantId - Variant ID
+ * @param {number} days - จำนวนวันย้อนหลังที่ต้องการคำนวณ (default: 30)
+ * @returns {Promise<number>} - ยอดขายเฉลี่ยต่อวัน
+ */
+export const calculateAverageDailySalesFromOrders = async (variantId, days = 30) => {
+  const InventoryOrder = (await import('../models/InventoryOrder.js')).default;
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
+
+  const result = await InventoryOrder.aggregate([
+    {
+      $match: {
+        type: 'sale',
+        orderDate: { $gte: startDate },
+        status: { $ne: 'cancelled' },
+      },
+    },
+    { $unwind: '$items' },
+    {
+      $match: {
+        'items.variantId': variantId,
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        totalSold: { $sum: '$items.quantity' },
+      },
+    },
+  ]);
+
+  const totalSold = result[0]?.totalSold || 0;
+  return totalSold / days;
+};
+
+/**
+ * คำนวณยอดขายเฉลี่ยต่อวันของ variant (ใช้ StockMovement - อาจต่างจาก InventoryOrder)
  * @param {string} variantId - Variant ID
  * @param {number} days - จำนวนวันย้อนหลังที่ต้องการคำนวณ (default: 30)
  * @returns {Promise<number>} - ยอดขายเฉลี่ยต่อวัน
@@ -45,19 +82,19 @@ export const calculateAverageDailySales = async (variantId, days = 30) => {
  * ตรวจสอบว่า variant มีความเสี่ยงจะหมดสต็อกหรือไม่
  * @param {object} product - Product document
  * @param {object} variant - Variant subdocument
- * @param {number} avgDailySales - ยอดขายเฉลี่ยต่อวัน (ถ้าไม่ระบุจะคำนวณใหม่)
+ * @param {number} avgDailySales - ยอดขายเฉลี่ยต่อวัน (ถ้าไม่ระบุจะคำนวณจาก StockMovement - ไม่แนะนำ)
  * @returns {Promise<object|null>} - Alert object หรือ null ถ้าไม่มีความเสี่ยง
+ * @deprecated ใช้ checkVariantStockRiskWithSalesRate แทน เพื่อให้ผลลัพธ์สอดคล้องกับ endpoints
  */
 export const checkVariantStockRisk = async (product, variant, avgDailySales = null) => {
   const currentStock = variant.stockOnHand || 0;
   const reorderPoint = variant.reorderPoint || 0;
   const leadTimeDays = variant.leadTimeDays || 7; // default 7 days
-  const reorderQty = variant.reorderQty || 0;
   const bufferDays = product.reorderBufferDays || 7; // default 7 days (consistent with inventory.js)
 
   // คำนวณ average daily sales ถ้าไม่ได้ระบุมา
   if (avgDailySales === null) {
-    avgDailySales = await calculateAverageDailySales(variant._id, 30);
+    avgDailySales = await calculateAverageDailySalesFromOrders(variant._id, 30);
   }
 
   // ถ้าไม่มียอดขาย ใช้ค่าประมาณจาก reorderPoint / leadTime
@@ -70,11 +107,38 @@ export const checkVariantStockRisk = async (product, variant, avgDailySales = nu
     avgDailySales = 0.1; // สมมติขายวันละ 0.1 ชิ้น
   }
 
+  // ใช้ checkVariantStockRiskWithSalesRate เพื่อให้ผลลัพธ์สอดคล้องกัน
+  return checkVariantStockRiskWithSalesRate(product, variant, avgDailySales);
+};
+
+/**
+ * ตรวจสอบความเสี่ยงสต็อก เมื่อมี avgDailySales มาแล้ว (ให้ผลลัพธ์สม่ำเสมอทุก endpoint)
+ * @param {object} product - Product document
+ * @param {object} variant - Variant subdocument
+ * @param {number} avgDailySales - ยอดขายเฉลี่ยต่อวัน (ต้องมีค่า)
+ * @returns {object|null} - Alert object หรือ null ถ้าไม่มีความเสี่ยง
+ */
+export const checkVariantStockRiskWithSalesRate = (product, variant, avgDailySales) => {
+  const currentStock = variant.stockOnHand || 0;
+  const reorderPoint = variant.reorderPoint || 0;
+  const leadTimeDays = variant.leadTimeDays || 7;
+  const bufferDays = product.reorderBufferDays || 7;
+
+  // ถ้ายังคำนวณไม่ได้ ให้ใช้ minimum threshold
+  let finalAvgDailySales = avgDailySales;
+  if (avgDailySales === 0) {
+    if (reorderPoint > 0 && leadTimeDays > 0) {
+      finalAvgDailySales = reorderPoint / leadTimeDays;
+    } else {
+      finalAvgDailySales = 0.1;
+    }
+  }
+
   // คำนวณจำนวนวันที่สต็อกจะเพียงพอ
-  const daysOfStock = Math.floor(currentStock / avgDailySales);
+  const daysOfStock = Math.floor(currentStock / finalAvgDailySales);
 
   // ใช้ calculateReorderMetrics เพื่อให้ผลลัพธ์สอดคล้องกับ endpoints ทั้งหมด
-  const reorderMetrics = calculateReorderMetrics(avgDailySales, leadTimeDays, bufferDays);
+  const reorderMetrics = calculateReorderMetrics(finalAvgDailySales, leadTimeDays, bufferDays);
   const computedReorderPoint = reorderMetrics.suggestedReorderPoint;
   const safetyStock = reorderMetrics.safetyStock;
   const computedReorderQty = reorderMetrics.suggestedReorderQty;
@@ -116,7 +180,7 @@ export const checkVariantStockRisk = async (product, variant, avgDailySales = nu
     // ส่งค่าที่คำนวณแนะนำด้วยเพื่อให้ client/notifications แสดงค่าเดียวกับการคำนวณ
     suggestedReorderPoint: Math.ceil(computedReorderPoint),
     leadTimeDays,
-    avgDailySales,
+    avgDailySales: finalAvgDailySales,
     daysOfStock,
     safetyStock: Math.ceil(safetyStock),
     computedReorderQty: Math.ceil(computedReorderQty),
@@ -295,7 +359,9 @@ export const calculateReorderMetrics = (dailySalesRate, leadTimeDays = 7, buffer
 
 export default {
   calculateAverageDailySales,
+  calculateAverageDailySalesFromOrders,
   checkVariantStockRisk,
+  checkVariantStockRiskWithSalesRate,
   checkAndAlertAfterSale,
   checkAllStockRisks,
   calculateSuggestedReorderPoint,

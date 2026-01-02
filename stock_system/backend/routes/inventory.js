@@ -6,7 +6,7 @@ import Category from '../models/Category.js';
 import Brand from '../models/Brand.js';
 import { authenticateToken, authorizeRoles } from '../middleware/auth.js';
 import { recordMovement } from './movements.js';
-import { checkAndAlertAfterSale, calculateSuggestedReorderPoint, calculateReorderMetrics } from '../services/stockAlertService.js';
+import { checkAndAlertAfterSale, calculateReorderMetrics, calculateAverageDailySalesFromOrders } from '../services/stockAlertService.js';
 
 const router = express.Router();
 
@@ -854,6 +854,8 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
         // ใช้ calculateReorderMetrics สำหรับความสอดคล้องกับ stockAlertService
         const reorderMetrics = calculateReorderMetrics(dailySalesRate, leadTimeDays, bufferDays);
         const computedReorderPoint = Math.ceil(reorderMetrics.suggestedReorderPoint);
+        const suggestedOrderQty = Math.ceil(reorderMetrics.suggestedReorderQty);
+        const suggestedOrder = Math.max(0, suggestedOrderQty - stock);
         
         // ใช้ค่าที่ user กำหนด หากไม่มี ให้ใช้ค่าที่คำนวณ
         const reorderPoint = rawReorderPoint || computedReorderPoint;
@@ -874,6 +876,9 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
             stockOnHand: stock,
             reorderPoint,
             suggestedReorderPoint: computedReorderPoint,
+            suggestedOrder,
+            avgDailySales: dailySalesRate,
+            daysOfStock: Math.floor(stock / (dailySalesRate || 0.1)),
             dailySalesRate: Math.round(dailySalesRate * 100) / 100,
             daysUntilStockOut: 0,
             message: `${product.name} (${variant.sku}) หมดสต็อก`,
@@ -892,6 +897,9 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
             stockOnHand: stock,
             reorderPoint,
             suggestedReorderPoint: computedReorderPoint,
+            suggestedOrder,
+            avgDailySales: dailySalesRate,
+            daysOfStock: Math.floor(stock / (dailySalesRate || 0.1)),
             dailySalesRate: Math.round(dailySalesRate * 100) / 100,
             daysUntilStockOut: Math.round(daysUntilStockOut * 10) / 10,
             leadTimeDays,
