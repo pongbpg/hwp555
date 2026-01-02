@@ -41,6 +41,7 @@ export default function Products() {
   const [savingBrand, setSavingBrand] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [editingProductId, setEditingProductId] = useState(null);
+  const [skuPrefix, setSkuPrefix] = useState('');
 
   const loadProducts = async () => {
     setLoading(true);
@@ -102,6 +103,110 @@ export default function Products() {
     return (maxNumber + 1).toString().padStart(4, '0');
   };
 
+  const parseCSVFile = (csvContent) => {
+    const lines = csvContent.trim().split('\n').map((line) => line.trim()).filter(Boolean);
+    if (lines.length < 2) {
+      setError('ไฟล์ CSV ต้องมีข้อมูลอย่างน้อย 2 แถว');
+      return null;
+    }
+
+    // แถวแรก: ชื่อสินค้า
+    const productName = lines[0];
+
+    // แถวที่สอง: ส่วนหัว (variant codes)
+    const headerLine = lines[1];
+    const variantCodes = headerLine.split(',').map((code) => code.trim());
+
+    if (variantCodes[0].toUpperCase() === 'SKP') {
+      variantCodes.shift();
+    }
+
+    if (variantCodes.length === 0) {
+      setError('ไม่พบ variant codes ในไฟล์ CSV');
+      return null;
+    }
+
+    const parsedVariants = [];
+    const dataRows = lines.slice(2);
+
+    // เก็บข้อมูลแต่ละแถว
+    const rowData = {};
+    dataRows.forEach((line) => {
+      const parts = line.split(',').map((part) => part.trim());
+      if (parts.length > 0) {
+        const rowLabel = parts[0];
+        rowData[rowLabel] = parts.slice(1);
+      }
+    });
+
+    // สร้าง variants จาก variant codes
+    variantCodes.forEach((code, idx) => {
+      const variant = {
+        sku: code,
+        color: '',
+        size: '',
+        material: '',
+        price: 0,
+        stockOnHand: 0,
+        leadTimeDays: 0,
+      };
+
+      // ตรวจหา leadtime
+      if (rowData['ระยะเวลารอคอย'] && rowData['ระยะเวลารอคอย'][idx]) {
+        variant.leadTimeDays = parseInt(rowData['ระยะเวลารอคอย'][idx], 10) || 0;
+      }
+
+      // ตรวจหา stock/คงเหลือ
+      if (rowData['คงเหลือ'] && rowData['คงเหลือ'][idx]) {
+        variant.stockOnHand = parseFloat(rowData['คงเหลือ'][idx]) || 0;
+      }
+
+      // พยายามแยก variant code เป็น color/size/material
+      const codeParts = code.split('/');
+      if (codeParts.length === 2) {
+        // ถ้ามีสลาช เช่น "B/M"
+        variant.color = codeParts[0];
+        variant.size = codeParts[1];
+      } else if (codeParts.length > 2) {
+        // ถ้ามีหลาย parts
+        variant.color = codeParts[0];
+        variant.size = codeParts.slice(1).join('/');
+      } else {
+        // ถ้าเป็น single code
+        variant.size = code;
+      }
+
+      parsedVariants.push(variant);
+    });
+
+    return {
+      productName,
+      variants: parsedVariants,
+    };
+  };
+
+  const handleCSVImport = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const csvContent = event.target?.result;
+        const parsed = parseCSVFile(csvContent);
+        if (parsed) {
+          setNewProduct((prev) => ({ ...prev, name: parsed.productName }));
+          setVariants(parsed.variants);
+          setShowVariants(true);
+          setError('');
+        }
+      } catch (err) {
+        setError(`เกิดข้อผิดพลาดในการอ่านไฟล์: ${err.message}`);
+      }
+    };
+    reader.readAsText(file);
+  };
+
   useEffect(() => {
     if (!editMode && !showVariants && newProduct.category && newProduct.brand && categories.length > 0 && brands.length > 0) {
       const categoryPrefix = categories.find((cat) => cat._id === newProduct.category)?.prefix || '';
@@ -118,7 +223,7 @@ export default function Products() {
   }, [newProduct.category, newProduct.brand, showVariants, categories, brands, products, editMode]);
 
   useEffect(() => {
-    if (!editMode && showVariants && (newProduct.category || newProduct.brand)) {
+    if (!editMode && showVariants && (newProduct.category || newProduct.brand || skuPrefix)) {
       const categoryPrefix = categories.find((cat) => cat._id === newProduct.category)?.prefix || '';
       const brandPrefix = brands.find((brand) => brand._id === newProduct.brand)?.prefix || '';
       const basePrefix = [categoryPrefix, brandPrefix].filter(Boolean).join('-');
@@ -130,15 +235,22 @@ export default function Products() {
           .substring(0, 10)
           .toUpperCase();
         const fullPrefix = variantSuffix ? `${basePrefix}-${variantSuffix}` : basePrefix;
-        const runningNumber = getNextRunningNumber(fullPrefix);
-        if (fullPrefix) {
-          return { ...variant, sku: `${fullPrefix}-${runningNumber}` };
+        
+        let sku = '';
+        if (skuPrefix) {
+          // ถ้ามี skuPrefix ให้เป็น basePrefix-color-size-material-SKU_PREFIX
+          sku = `${fullPrefix}-${skuPrefix}`;
+        } else {
+          // ไม่มี skuPrefix ให้ใช้ running number
+          const runningNumber = getNextRunningNumber(fullPrefix);
+          sku = `${fullPrefix}-${runningNumber}`;
         }
-        return variant;
+        
+        return { ...variant, sku };
       });
       setVariants(updatedVariants);
     }
-  }, [newProduct.category, newProduct.brand, showVariants, products, editMode]);
+  }, [newProduct.category, newProduct.brand, showVariants, products, editMode, skuPrefix]);
 
   const handleEdit = (product) => {
     setEditMode(true);
@@ -152,6 +264,13 @@ export default function Products() {
       stockOnHand: product.variants?.[0]?.stockOnHand || 0,
       leadTimeDays: product.variants?.[0]?.leadTimeDays || 0,
     });
+    
+    // ตั้งค่า skuPrefix จากส่วนแรกของ SKU
+    if (product.sku) {
+      setSkuPrefix(product.sku);
+    } else {
+      setSkuPrefix('');
+    }
 
     const hasVariants =
       product.variants?.length > 1 ||
@@ -188,6 +307,7 @@ export default function Products() {
     setShowVariants(false);
     setShowNewCategoryForm(false);
     setShowNewBrandForm(false);
+    setSkuPrefix('');
   };
 
   const handleUpdate = async (e) => {
@@ -205,8 +325,17 @@ export default function Products() {
         ? variants.map((v) => {
             const variantSuffix = [v.color, v.size, v.material].filter(Boolean).join('-').substring(0, 10).toUpperCase();
             const fullPrefix = variantSuffix ? `${basePrefix}-${variantSuffix}` : basePrefix;
-            const runningNumber = getNextRunningNumber(fullPrefix);
-            const autoSku = `${fullPrefix}-${runningNumber}`;
+            
+            let autoSku = '';
+            if (skuPrefix) {
+              // ถ้ามี skuPrefix ให้เป็น basePrefix-color-size-material-SKU_PREFIX
+              autoSku = `${fullPrefix}-${skuPrefix}`;
+            } else {
+              // ไม่มี skuPrefix ให้ใช้ running number
+              const runningNumber = getNextRunningNumber(fullPrefix);
+              autoSku = `${fullPrefix}-${runningNumber}`;
+            }
+            
             return {
               name: [v.color, v.size, v.material].filter(Boolean).join(' / ') || 'Default',
               sku: v.sku || autoSku,
@@ -263,8 +392,17 @@ export default function Products() {
         ? variants.map((v) => {
             const variantSuffix = [v.color, v.size, v.material].filter(Boolean).join('-').substring(0, 10).toUpperCase();
             const fullPrefix = variantSuffix ? `${basePrefix}-${variantSuffix}` : basePrefix;
-            const runningNumber = getNextRunningNumber(fullPrefix);
-            const autoSku = `${fullPrefix}-${runningNumber}`;
+            
+            let autoSku = '';
+            if (skuPrefix) {
+              // ถ้ามี skuPrefix ให้เป็น basePrefix-color-size-material-SKU_PREFIX
+              autoSku = `${fullPrefix}-${skuPrefix}`;
+            } else {
+              // ไม่มี skuPrefix ให้ใช้ running number
+              const runningNumber = getNextRunningNumber(fullPrefix);
+              autoSku = `${fullPrefix}-${runningNumber}`;
+            }
+            
             return {
               name: [v.color, v.size, v.material].filter(Boolean).join(' / ') || 'Default',
               sku: v.sku || autoSku,
@@ -301,6 +439,7 @@ export default function Products() {
       setShowVariants(false);
       setShowNewCategoryForm(false);
       setShowNewBrandForm(false);
+      setSkuPrefix('');
       loadProducts();
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to create');
@@ -369,9 +508,19 @@ export default function Products() {
       const basePrefix = [categoryPrefix, brandPrefix].filter(Boolean).join('-');
       const variantSuffix = [variant.color, variant.size, variant.material].filter(Boolean).join('-').substring(0, 10).toUpperCase();
       const fullPrefix = variantSuffix ? `${basePrefix}-${variantSuffix}` : basePrefix;
-      const runningNumber = getNextRunningNumber(fullPrefix);
+      
+      let sku = '';
+      if (skuPrefix) {
+        // ถ้ามี skuPrefix ให้เป็น basePrefix-color-size-material-SKU_PREFIX
+        sku = `${fullPrefix}-${skuPrefix}`;
+      } else {
+        // ไม่มี skuPrefix ให้ใช้ running number
+        const runningNumber = getNextRunningNumber(fullPrefix);
+        sku = `${fullPrefix}-${runningNumber}`;
+      }
+      
       if (fullPrefix) {
-        updated[index].sku = `${fullPrefix}-${runningNumber}`;
+        updated[index].sku = sku;
       }
     }
     setVariants(updated);
@@ -583,6 +732,20 @@ export default function Products() {
               />
             </div>
 
+            {/* SKU Prefix (for variants) */}
+            {showVariants && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">SKU Prefix (ตัวอักษรนำหน้า)</label>
+                <input
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono"
+                  placeholder="เช่น SHIRT หรือเว้นว่างให้ใช้ prefix จาก category/brand"
+                  value={skuPrefix || ''}
+                  onChange={(e) => setSkuPrefix(e.target.value.toUpperCase())}
+                />
+                <p className="text-xs text-gray-500 mt-1">ถ้าใส่ค่านี้จะใช้เป็น prefix สำหรับ SKU variant โดยไม่มี running number</p>
+              </div>
+            )}
+
             {/* SKU (if no variants) */}
             {!showVariants && (
               <div>
@@ -598,7 +761,7 @@ export default function Products() {
           </div>
 
           {/* Variants Toggle */}
-          <div className="mt-4">
+          <div className="mt-4 space-y-3">
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
@@ -613,6 +776,22 @@ export default function Products() {
               />
               <span className="text-sm text-gray-700">สินค้ามีหลาย Variant (สี/ไซส์/วัสดุ)</span>
             </label>
+
+            {/* CSV Import Button */}
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg cursor-pointer font-medium text-sm transition">
+                <span>📤 นำเข้าจากไฟล์ CSV</span>
+                <input
+                  type="file"
+                  accept=".csv"
+                  onChange={handleCSVImport}
+                  className="hidden"
+                />
+              </label>
+              <span className="text-xs text-gray-500">
+                (ไฟล์ CSV: ชื่อสินค้า, ตัวเลือก (SKP,B/M,B/L,...)ระยะเวลารอคอย, คงเหลือ)
+              </span>
+            </div>
           </div>
 
           {/* Non-variant fields */}
