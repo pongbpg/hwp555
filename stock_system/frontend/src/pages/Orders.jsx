@@ -73,8 +73,11 @@ export default function Orders() {
 
   useEffect(() => {
     loadProducts();
-    loadOrders(1);
   }, []);
+
+  useEffect(() => {
+    loadOrders(page);
+  }, [page, filterType, filterStatus]);
 
   const loadOrders = async (nextPage = page) => {
     setOrdersLoading(true);
@@ -103,6 +106,7 @@ export default function Orders() {
   const handleFilterChange = (newType, newStatus) => {
     setFilterType(newType);
     setFilterStatus(newStatus);
+    setPage(1);
   };
 
   const toggleExpand = (id) => {
