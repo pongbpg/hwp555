@@ -1,15 +1,44 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import api from '../api.js';
 import SearchableSelect from '../components/SearchableSelect.jsx';
 
-// คำนวณวันหมดอายุ default (+2 ปี)
+// Function to convert AD year to Buddhist year
+const getThaiYear = (date) => {
+  const year = new Date(date).getFullYear();
+  return year + 543;
+};
+
+// Calculate default expiry date (+2 years)
 const getDefaultExpiryDate = () => {
   const d = new Date();
   d.setFullYear(d.getFullYear() + 2);
   return d.toISOString().split('T')[0];
 };
 
-const defaultItem = { productId: '', variantId: '', quantity: 1, unitPrice: 0, type: 'sale', expiryDate: getDefaultExpiryDate(), batchRef: '' };
+// Generate reference number like SO2569-0001, PO2569-0001, etc.
+const generateReference = (type, orderDate, orders) => {
+  const prefixes = {
+    sale: 'SO',
+    purchase: 'PO',
+    adjustment: 'ADJ',
+  };
+  const prefix = prefixes[type] || type.toUpperCase();
+  const thaiYear = getThaiYear(orderDate);
+  
+  // Count existing orders of the same type and year
+  const sameTypeOrders = (orders || []).filter((o) => {
+    if (o.type !== type) return false;
+    const oYear = getThaiYear(o.orderDate || o.createdAt);
+    return oYear === thaiYear;
+  });
+  
+  const nextNumber = sameTypeOrders.length + 1;
+  const paddedNumber = String(nextNumber).padStart(4, '0');
+  
+  return `${prefix}${thaiYear}-${paddedNumber}`;
+};
+
+const defaultItem = { productId: '', variantId: '', quantity: 1, unitPrice: 0, type: 'sale', expiryDate: '', batchRef: '' };
 
 export default function Orders() {
   const [products, setProducts] = useState([]);
@@ -44,6 +73,7 @@ export default function Orders() {
 
   useEffect(() => {
     loadProducts();
+    loadOrders(1);
   }, []);
 
   const loadOrders = async (nextPage = page) => {
@@ -66,12 +96,9 @@ export default function Orders() {
   };
 
   useEffect(() => {
-    loadOrders(page);
-  }, [page]);
-
-  useEffect(() => {
-    setPage(1);
-  }, [filterType, filterStatus]);
+    const autoRef = generateReference(type, orderDate, orders);
+    setReference(autoRef);
+  }, [type, orderDate, orders]);
 
   const handleFilterChange = (newType, newStatus) => {
     setFilterType(newType);
@@ -169,7 +196,7 @@ export default function Orders() {
     setItems((prev) => prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
   };
 
-  const addItem = () => setItems((prev) => [...prev, { ...defaultItem, expiryDate: getDefaultExpiryDate() }]);
+  const addItem = () => setItems((prev) => [...prev, { ...defaultItem }]);
   const removeItem = (idx) => setItems((prev) => prev.filter((_, i) => i !== idx));
 
   const handleSubmit = async (e) => {
@@ -189,13 +216,13 @@ export default function Orders() {
           quantity: Number(it.quantity) || 0,
           unitPrice: Number(it.unitPrice) || 0,
           batchRef: it.batchRef || undefined,
-          expiryDate: it.expiryDate || undefined,
+          expiryDate: it.expiryDate ? it.expiryDate : undefined,
         })),
       };
       await api.post('/inventory/orders', payload);
       setMessage('Order recorded');
       // Reset form
-      setItems([{ ...defaultItem, expiryDate: getDefaultExpiryDate() }]);
+      setItems([{ ...defaultItem }]);
       setReference('');
       setType('sale');
       setOrderDate(new Date().toISOString().split('T')[0]);
@@ -254,13 +281,14 @@ export default function Orders() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">เลขอ้างอิง</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">เลขอ้างอิง (อัตโนมัติ)</label>
               <input
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-700 font-mono font-semibold focus:ring-2 focus:ring-blue-500 outline-none cursor-not-allowed"
                 value={reference}
-                onChange={(e) => setReference(e.target.value)}
-                placeholder="SO-001 or PO-001"
+                readOnly
+                placeholder="Auto-generated"
               />
+              <p className="text-xs text-gray-500 mt-1">✓ สร้างจากประเภท วันที่ และเลขลำดับ</p>
             </div>
           </div>
 
@@ -340,13 +368,14 @@ export default function Orders() {
                         />
                       </div>
                       <div>
-                        <label className="block text-xs text-gray-500 mb-1">📅 วันหมดอายุ</label>
+                        <label className="block text-xs text-gray-500 mb-1">📅 วันหมดอายุ (ไม่บังคับ)</label>
                         <input
                           type="date"
                           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                           value={item.expiryDate || ''}
                           onChange={(e) => updateItem(idx, { expiryDate: e.target.value })}
                         />
+                        <p className="text-xs text-gray-400 mt-1">สำหรับสินค้าที่มีอายุการใช้ (เช่น ยา อาหาร)</p>
                       </div>
                     </div>
                   )}
@@ -425,18 +454,19 @@ export default function Orders() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-gray-200">
-                <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">Date</th>
-                <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">Type</th>
+                <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">วันที่</th>
+                <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">ประเภท</th>
                 <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">Reference</th>
-                <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">Status</th>
-                <th className="text-center py-2 px-3 text-sm font-semibold text-gray-600">Items</th>
-                <th className="text-right py-2 px-3 text-sm font-semibold text-gray-600">Total</th>
+                <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">สถานะ</th>
+                <th className="text-center py-2 px-3 text-sm font-semibold text-gray-600">รายการ</th>
+                <th className="text-center py-2 px-3 text-sm font-semibold text-gray-600">จำนวนสินค้า</th>
+                <th className="text-right py-2 px-3 text-sm font-semibold text-gray-600">มูลค่ารวม</th>
                 <th className="text-center py-2 px-3 text-sm font-semibold text-gray-600">Actions</th>
               </tr>
             </thead>
             <tbody>
               {orders.map((o) => (
-                <>
+                <React.Fragment key={o._id}>
                   <tr
                     key={o._id}
                     className={`border-b border-gray-100 hover:bg-gray-50 ${o.status === 'cancelled' ? 'opacity-50 line-through' : ''}`}
@@ -456,6 +486,7 @@ export default function Orders() {
                       </span>
                     </td>
                     <td className="py-2 px-3 text-sm text-center">{o.items?.length ?? 0}</td>
+                    <td className="py-2 px-3 text-sm text-center">{(o.items || []).reduce((sum, it) => sum + (Number(it.quantity) || 0), 0)}</td>
                     <td className="py-2 px-3 text-sm text-right">{calcOrderTotal(o).toLocaleString()}</td>
                     <td className="py-2 px-3 text-sm">
                       <div className="flex gap-1 justify-center flex-wrap">
@@ -567,7 +598,7 @@ export default function Orders() {
                       </td>
                     </tr>
                   )}
-                </>
+                </React.Fragment>
               ))}
               {orders.length === 0 && !ordersLoading && (
                 <tr>
