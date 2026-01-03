@@ -79,6 +79,13 @@ const productSchema = new Schema(
       },
     ],
     variants: { type: [variantSchema], default: [] },
+    skuPrefix: { type: String, default: '' },
+    costingMethod: {
+      type: String,
+      enum: ['FIFO', 'LIFO', 'WAC'],
+      default: 'FIFO',
+      description: 'FIFO=First In First Out, LIFO=Last In First Out, WAC=Weighted Average Cost',
+    },
     leadTimeDays: { type: Number, default: 7 },
     reorderBufferDays: { type: Number, default: 7 },
     minOrderQty: { type: Number, default: 0 },

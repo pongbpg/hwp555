@@ -48,6 +48,7 @@ export default function Products() {
   const [defaultPrice, setDefaultPrice] = useState(0);
   const [defaultCost, setDefaultCost] = useState(0);
   const [defaultStockOnHand, setDefaultStockOnHand] = useState(0);
+  const [costingMethod, setCostingMethod] = useState('FIFO');
 
   const loadProducts = async () => {
     setLoading(true);
@@ -283,13 +284,10 @@ export default function Products() {
       reorderBufferDays: product.reorderBufferDays ?? 7,
       minOrderQty: product.minOrderQty ?? 0,
     });
+    setCostingMethod(product.costingMethod || 'FIFO');
     
-    // ตั้งค่า skuPrefix จากส่วนแรกของ SKU
-    if (product.sku) {
-      setSkuPrefix(product.sku);
-    } else {
-      setSkuPrefix('');
-    }
+    // ✅ เรียกใช้ skuPrefix จาก database (ไม่ต้องคำนวณจาก SKU)
+    setSkuPrefix(product.skuPrefix || '');
 
     const hasVariants =
       product.variants?.length > 1 ||
@@ -302,11 +300,13 @@ export default function Products() {
 
     if (hasVariants) {
       const loadedVariants = product.variants.map((v) => ({
+        _id: v._id,  // ✅ เก็บ variant ID เดิม
         sku: v.sku,
         color: v.attributes?.color || '',
         size: v.attributes?.size || '',
         material: v.attributes?.material || '',
         price: v.price || 0,
+        cost: v.cost || 0,
         stockOnHand: v.stockOnHand || 0,
       }));
       setVariants(loadedVariants);
@@ -368,6 +368,7 @@ export default function Products() {
             }
             
             return {
+              ...(v._id && { _id: v._id }),  // ✅ เก็บ _id เดิม
               name: [v.color, v.size, v.material].filter(Boolean).join(' / ') || 'Default',
               sku: v.sku || autoSku,
               attributes: {
@@ -396,6 +397,8 @@ export default function Products() {
         category: newProduct.category,
         brand: newProduct.brand,
         variants: variantsPayload,
+        skuPrefix: showVariants ? skuPrefix : '',
+        costingMethod,
         leadTimeDays: Number(newProduct.leadTimeDays) || 7,
         reorderBufferDays: Number(newProduct.reorderBufferDays) || 7,
         minOrderQty: Number(newProduct.minOrderQty) || 0,
@@ -438,6 +441,7 @@ export default function Products() {
             }
             
             return {
+              ...(v._id && { _id: v._id }),  // ✅ preserve variant ID if exists
               name: [v.color, v.size, v.material].filter(Boolean).join(' / ') || 'Default',
               sku: v.sku || autoSku,
               attributes: {
@@ -466,6 +470,8 @@ export default function Products() {
         category: newProduct.category,
         brand: newProduct.brand,
         variants: variantsPayload,
+        skuPrefix: showVariants ? skuPrefix : '',
+        costingMethod,
         leadTimeDays: Number(newProduct.leadTimeDays) || 7,
         reorderBufferDays: Number(newProduct.reorderBufferDays) || 7,
         minOrderQty: Number(newProduct.minOrderQty) || 0,
@@ -477,6 +483,7 @@ export default function Products() {
       setShowNewCategoryForm(false);
       setShowNewBrandForm(false);
       setSkuPrefix('');
+      setCostingMethod('FIFO');
       loadProducts();
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to create');
@@ -1016,16 +1023,6 @@ export default function Products() {
                   onChange={(e) => setNewProduct({ ...newProduct, stockOnHand: e.target.value })}
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">จำนวนวันที่ผลิต (Lead Time)</label>
-                <input
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  type="number"
-                  placeholder="วัน"
-                  value={newProduct.leadTimeDays ?? 0}
-                  onChange={(e) => setNewProduct({ ...newProduct, leadTimeDays: e.target.value })}
-                />
-              </div>
             </div>
           ) : (
             <div className="mt-4">
@@ -1128,42 +1125,62 @@ export default function Products() {
           )}
 
           {/* Lead Time, Reorder Buffer Days and Min Order Qty */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-6 border-t pt-6">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">จำนวนวันที่ผลิต (Lead Time)</label>
-              <input
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                type="number"
-                placeholder="จำนวนวัน (default: 7)"
-                value={newProduct.leadTimeDays ?? 7}
-                onChange={(e) => setNewProduct({ ...newProduct, leadTimeDays: parseInt(e.target.value) || 0 })}
-                min="0"
-              />
-              <p className="text-xs text-gray-500 mt-1">จำนวนวันในการสั่งซื้อสินค้า</p>
+          <div className="mt-6 border-t pt-6">
+            {/* Row 1: Costing Method & Min Order Qty */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">วิธีคำนวณต้นทุน</label>
+                <select
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                  value={costingMethod}
+                  onChange={(e) => setCostingMethod(e.target.value)}
+                >
+                  <option value="FIFO">FIFO - สินค้าเก่าออกก่อน (อาหาร/ยา)</option>
+                  <option value="LIFO">LIFO - สินค้าใหม่ออกก่อน (ราคาผันผวน)</option>
+                  <option value="WAC">WAC - ใช้ราคาเฉลี่ย (ทั่วไป)</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">คำนวณมูลค่าสต็อก & ตัดสต็อกเมื่อขาย</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">จำนวนสั่งซื้อขั้นต่ำ (MOQ)</label>
+                <input
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                  type="number"
+                  placeholder="จำนวนชิ้น (หรือ 0 ไม่มี MOQ)"
+                  value={newProduct.minOrderQty ?? 0}
+                  onChange={(e) => setNewProduct({ ...newProduct, minOrderQty: parseInt(e.target.value) || 0 })}
+                  min="0"
+                />
+                <p className="text-xs text-gray-500 mt-1">จำนวนต่ำสุดที่ต้องสั่งซื้อ</p>
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">วันบัฟเฟอร์ (Reorder Buffer Days)</label>
-              <input
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                type="number"
-                placeholder="จำนวนวัน (default: 7)"
-                value={newProduct.reorderBufferDays ?? 7}
-                onChange={(e) => setNewProduct({ ...newProduct, reorderBufferDays: parseInt(e.target.value) || 0 })}
-                min="0"
-              />
-              <p className="text-xs text-gray-500 mt-1">วันที่คัดแยกเพื่อความปลอดภัยในการสั่งซื้อ</p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">จำนวนสั่งซื้อขั้นต่ำ (MOQ)</label>
-              <input
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                type="number"
-                placeholder="จำนวนชิ้น (หรือ 0 ไม่มี MOQ)"
-                value={newProduct.minOrderQty ?? 0}
-                onChange={(e) => setNewProduct({ ...newProduct, minOrderQty: parseInt(e.target.value) || 0 })}
-                min="0"
-              />
-              <p className="text-xs text-gray-500 mt-1">จำนวนต่ำสุดที่ต้องสั่งซื้อ</p>
+
+            {/* Row 2: Lead Time & Reorder Buffer Days */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">จำนวนวันที่ผลิต (Lead Time)</label>
+                <input
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                  type="number"
+                  placeholder="จำนวนวัน (default: 7)"
+                  value={newProduct.leadTimeDays ?? 7}
+                  onChange={(e) => setNewProduct({ ...newProduct, leadTimeDays: parseInt(e.target.value) || 0 })}
+                  min="0"
+                />
+                <p className="text-xs text-gray-500 mt-1">จำนวนวันในการสั่งซื้อสินค้า</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">วันบัฟเฟอร์ (Reorder Buffer Days)</label>
+                <input
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                  type="number"
+                  placeholder="จำนวนวัน (default: 7)"
+                  value={newProduct.reorderBufferDays ?? 7}
+                  onChange={(e) => setNewProduct({ ...newProduct, reorderBufferDays: parseInt(e.target.value) || 0 })}
+                  min="0"
+                />
+                <p className="text-xs text-gray-500 mt-1">วันที่คัดแยกเพื่อความปลอดภัยในการสั่งซื้อ</p>
+              </div>
             </div>
           </div>
 

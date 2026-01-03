@@ -7,6 +7,7 @@ import Brand from '../models/Brand.js';
 import { authenticateToken, authorizeRoles } from '../middleware/auth.js';
 import { recordMovement } from './movements.js';
 import { checkAndAlertAfterSale, calculateReorderMetrics, calculateAverageDailySalesFromOrders, optimizeOrderWithMOQ } from '../services/stockAlertService.js';
+import { calculateInventoryValue, getBatchConsumptionOrder, consumeBatchesByOrder } from '../services/costingService.js';
 
 const router = express.Router();
 
@@ -20,57 +21,32 @@ const selectVariant = (product, variantId, sku) => {
   return product.variants[0] || null;
 };
 
-const consumeBatches = (variant, quantity) => {
+const consumeBatches = (variant, product, quantity) => {
   // If no batch tracking, treat as fully consumable
   if (!variant.batches || variant.batches.length === 0) return 0;
 
-  let remaining = quantity;
-  const sorted = [...(variant.batches || [])].sort((a, b) => {
-    const aDate = a.expiryDate ? new Date(a.expiryDate) : new Date(8640000000000000);
-    const bDate = b.expiryDate ? new Date(b.expiryDate) : new Date(8640000000000000);
-    return aDate - bDate;
-  });
-
+  const costingMethod = product?.costingMethod || 'FIFO';
   const debugStockAlerts = process.env.DEBUG_STOCK_ALERTS === '1' || process.env.DEBUG_STOCK_ALERTS === 'true';
+
+  // Get batches ในลำดับของ costing method
+  const sortedBatches = getBatchConsumptionOrder(variant.batches, costingMethod);
+
   if (debugStockAlerts) {
-    const totalBatchQty = sorted.reduce((sum, b) => sum + (b.quantity || 0), 0);
-    console.log(`[consumeBatches] SKU: ${variant.sku}, Requested: ${quantity}, Available in batches: ${totalBatchQty}`);
+    const totalBatchQty = sortedBatches.reduce((sum, b) => sum + (b.quantity || 0), 0);
+    console.log(`[consumeBatches] SKU: ${variant.sku}, Method: ${costingMethod}, Requested: ${quantity}, Available in batches: ${totalBatchQty}`);
   }
 
-  const updated = [];
-  for (const batch of sorted) {
-    if (remaining <= 0) {
-      updated.push(batch);
-      continue;
-    }
+  // ใช้ helper function จาก costingService
+  const remaining = consumeBatchesByOrder(variant, sortedBatches, quantity, costingMethod);
 
-    const available = batch.quantity || 0;
-    if (available <= remaining) {
-      // Batch ถูกใช้หมด - ไม่เพิ่มเข้า updated
-      remaining -= available;
-      if (debugStockAlerts) {
-        console.log(`  [consumeBatches] Batch ${batch.batchRef} fully consumed (qty: ${available})`);
-      }
-    } else {
-      // Batch เหลือบางส่วน
-      const newQty = available - remaining;
-      const plainBatch = batch.toObject ? batch.toObject() : batch;
-      updated.push({ ...plainBatch, quantity: newQty });
-      if (debugStockAlerts) {
-        console.log(`  [consumeBatches] Batch ${batch.batchRef} partially consumed (available: ${available}, used: ${remaining}, remaining: ${newQty})`);
-      }
-      remaining = 0;
-    }
-  }
-
-  variant.batches = updated.filter((batch) => (batch.quantity || 0) > 0);
   if (debugStockAlerts) {
     console.log(`[consumeBatches] Unconsumed quantity: ${remaining}, Remaining batches: ${variant.batches.length}`);
   }
+
   return remaining;
 };
 
-const applyStockChange = (variant, item, type) => {
+const applyStockChange = (variant, product, item, type) => {
   const qty = Number(item.quantity) || 0;
   if (qty <= 0) throw new Error('Quantity must be greater than zero');
 
@@ -107,7 +83,7 @@ const applyStockChange = (variant, item, type) => {
     // ลด stockOnHand ก่อน
     variant.stockOnHand = currentStock - qty;
 
-    // ถ้ามี batches ให้ consume ตาม FIFO (First Expire, First Out)
+    // ถ้ามี batches ให้ consume ตามวิธี costing method ที่เลือก
     if (variant.batches && variant.batches.length > 0) {
       const totalBatchQty = variant.batches.reduce((sum, b) => sum + (b.quantity || 0), 0);
       const unbatchedQty = currentStock - totalBatchQty; // สต็อกที่ไม่มี batch tracking
@@ -116,7 +92,7 @@ const applyStockChange = (variant, item, type) => {
         console.log(`[applyStockChange] Batch analysis - Total batch qty: ${totalBatchQty}, Unbatched qty: ${unbatchedQty}, Total: ${totalBatchQty + unbatchedQty}`);
       }
 
-      // ✅ ตรวจสอบว่า batch มีพอหรือไม่ (สำหรับการคำนวณ FIFO)
+      // ✅ ตรวจสอบว่า batch มีพอหรือไม่
       // ถ้า totalBatchQty < qty และไม่มี unbatched stock → error
       if (totalBatchQty < qty && unbatchedQty === 0 && !variant.allowBackorder) {
         // ต้อง rollback stockOnHand ก่อน
@@ -130,11 +106,11 @@ const applyStockChange = (variant, item, type) => {
         batches: variant.batches.map((batch) => (batch.toObject ? batch.toObject() : { ...batch })),
       };
 
-      // ✅ เลือก consume จาก batch ก่อน (FIFO)
+      // ✅ เลือก consume จาก batch ก่อน ตามวิธี costing method
       // ถ้า batch ไม่พอ ให้หักจาก unbatched stock
       if (totalBatchQty >= qty) {
         // Batch พอเพียง - consume จาก batch
-        const remaining = consumeBatches(variant, qty);
+        const remaining = consumeBatches(variant, product, qty);
         
         if (remaining > 0) {
           // ยังมี unconsumed quantity แม้ว่า batch calc บอกว่าพอ
@@ -147,7 +123,7 @@ const applyStockChange = (variant, item, type) => {
         }
       } else {
         // Batch ไม่พอ - consume all batch + use unbatched stock
-        const remaining = consumeBatches(variant, qty);
+        const remaining = consumeBatches(variant, product, qty);
         
         if (remaining > 0 && unbatchedQty >= remaining) {
           // ✅ ปลอดภัย - unbatched stock คุมครอง remaining
@@ -200,7 +176,7 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
         // สำหรับใบสั่งซื้อ: เพิ่ม incoming ไว้ก่อน รอรับของจึงบวกสต็อกจริง
         variant.incoming = (variant.incoming || 0) + qty;
       } else {
-        applyStockChange(variant, { ...rawItem, quantity: qty }, type);
+        applyStockChange(variant, product, { ...rawItem, quantity: qty }, type);
         
         // เก็บข้อมูลสำหรับ movement (ยกเว้น purchase เพราะยังไม่รับของ)
         movementRecords.push({
@@ -821,11 +797,13 @@ router.get('/dashboard', authenticateToken, authorizeRoles('owner', 'stock'), as
         if (variant.status !== 'active') return;
         totalVariants++;
         const stock = variant.stockOnHand || 0;
-        const cost = variant.cost || 0;
         const reorderPoint = variant.reorderPoint || 0;
         
+        // ✅ คำนวณ totalValue ตาม batch โดยใช้ costing method ของสินค้า
+        const variantValue = calculateInventoryValue(variant, product.costingMethod);
+        totalValue += variantValue;
+        
         totalStock += stock;
-        totalValue += stock * cost;
         
         if (stock <= 0) {
           outOfStockCount++;
@@ -840,7 +818,7 @@ router.get('/dashboard', authenticateToken, authorizeRoles('owner', 'stock'), as
         const catName = categoryMap[catId] || 'ไม่ระบุ';
         if (!categoryStock[catName]) categoryStock[catName] = { stock: 0, value: 0, count: 0 };
         categoryStock[catName].stock += stock;
-        categoryStock[catName].value += stock * cost;
+        categoryStock[catName].value += variantValue;
         categoryStock[catName].count++;
         
         // Group by brand (lookup name from map)
@@ -848,7 +826,7 @@ router.get('/dashboard', authenticateToken, authorizeRoles('owner', 'stock'), as
         const brandName = brandMap[brandId] || 'ไม่ระบุ';
         if (!brandStock[brandName]) brandStock[brandName] = { stock: 0, value: 0, count: 0 };
         brandStock[brandName].stock += stock;
-        brandStock[brandName].value += stock * cost;
+        brandStock[brandName].value += variantValue;
         brandStock[brandName].count++;
       });
     });

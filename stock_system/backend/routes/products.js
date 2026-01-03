@@ -67,6 +67,8 @@ router.put('/:id', authenticateToken, authorizeRoles('owner', 'admin', 'hr'), as
       'status',
       'attributesSchema',
       'variants',
+      'skuPrefix',
+      'costingMethod',
       'leadTimeDays',
       'reorderBufferDays',
       'minOrderQty',
