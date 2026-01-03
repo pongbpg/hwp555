@@ -40,6 +40,9 @@ export default function Layout({ onLogout, user }) {
               <NavLink to="/insights" className={linkClass}>
                 📈 Insights
               </NavLink>
+              <NavLink to="/replenishment" className={linkClass}>
+                📦 Replenishment
+              </NavLink>
             </>
           )}
         </nav>

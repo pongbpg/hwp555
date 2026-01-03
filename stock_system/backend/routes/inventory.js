@@ -6,7 +6,7 @@ import Category from '../models/Category.js';
 import Brand from '../models/Brand.js';
 import { authenticateToken, authorizeRoles } from '../middleware/auth.js';
 import { recordMovement } from './movements.js';
-import { checkAndAlertAfterSale, calculateReorderMetrics, calculateAverageDailySalesFromOrders } from '../services/stockAlertService.js';
+import { checkAndAlertAfterSale, calculateReorderMetrics, calculateAverageDailySalesFromOrders, optimizeOrderWithMOQ } from '../services/stockAlertService.js';
 
 const router = express.Router();
 
@@ -503,21 +503,36 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
     const groupByCategory = new Map();
     const groupByBrand = new Map();
 
+    // Group variants by product first for MOQ optimization
+    const productVariantMap = new Map();
     products.forEach((product) => {
+      if (!productVariantMap.has(String(product._id))) {
+        productVariantMap.set(String(product._id), { product, variants: [] });
+      }
       (product.variants || []).forEach((variant) => {
+        productVariantMap.get(String(product._id)).variants.push(variant);
+      });
+    });
+
+    // Process each product group for MOQ optimization
+    for (const [productId, { product, variants }] of productVariantMap) {
+      const variantSuggestions = []; // Temporary holder for this product's variants
+
+      variants.forEach((variant) => {
         const key = `${product._id}-${variant._id}`;
         const quantitySold = salesMap.get(key) || 0;
-        const dailySalesRate = quantitySold / salesPeriodDays; // ขายเฉลี่ยต่อวัน (ใช้ 30 วันคงที่)
+        const dailySalesRate = quantitySold / salesPeriodDays;
         const incoming = variant.incoming || 0;
-        const currentStock = (variant.stockOnHand || 0) + incoming; // รวมของที่สั่งแล้วยังไม่รับ
-        const leadTimeDays = product.leadTimeDays || 7; // Get from product level
+        const currentStock = (variant.stockOnHand || 0) + incoming;
+        const leadTimeDays = product.leadTimeDays || 7;
+        const bufferDays = product.reorderBufferDays ?? 7;
+        const minimumDays = leadTimeDays + bufferDays;
 
         // คำนวณว่าสต็อกปัจจุบันพอใช้กี่วัน
         const daysUntilStockOut = dailySalesRate > 0 ? currentStock / dailySalesRate : 999999;
 
         // บันทึก fast movers รายละเอียด
         if (dailySalesRate > 0) {
-          const daysUntilStockOutFM = dailySalesRate > 0 ? (currentStock / dailySalesRate) : 999999;
           fastMoversDetailed.push({
             productId: product._id,
             productName: product.name,
@@ -531,7 +546,7 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
             dailySalesRate: Math.round(dailySalesRate * 100) / 100,
             currentStock,
             incoming,
-            daysRemaining: Math.round(daysUntilStockOutFM * 10) / 10,
+            daysRemaining: Math.round(daysUntilStockOut * 10) / 10,
           });
         }
 
@@ -554,20 +569,15 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
         groupByBrand.set(brandKey, br);
 
         // ถ้าสต็อกไม่พอใช้ถึง lead time + buffer
-        const bufferDays = product.reorderBufferDays ?? 7;
-        const minimumDays = leadTimeDays + bufferDays;
-
-        // ใช้ calculateReorderMetrics สำหรับความสอดคล้องกับ service
         const reorderMetrics = calculateReorderMetrics(dailySalesRate, leadTimeDays, bufferDays);
         const suggestedReorderPoint = reorderMetrics.suggestedReorderPoint;
         const suggestedOrderQty = reorderMetrics.suggestedReorderQty;
 
         if (daysUntilStockOut < minimumDays) {
-          // คำนวณจำนวนที่ควรสั่งให้ถึง reorder point (ห้ามต่ำกว่า 0)
           const recommendedOrderQty = Math.max(0, suggestedOrderQty - currentStock);
 
           if (recommendedOrderQty > 0) {
-            reorderSuggestions.push({
+            variantSuggestions.push({
               productId: product._id,
               productName: product.name,
               variantId: variant._id,
@@ -583,6 +593,7 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
               leadTimeDays,
               bufferDays,
               minOrderQty: product.minOrderQty || 0,
+              avgDailySales: dailySalesRate,
             });
 
             lowStock.push({
@@ -597,7 +608,16 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
           }
         }
       });
-    });
+
+      // Apply MOQ optimization if this product has MOQ and has variants needing reorder
+      if (variantSuggestions.length > 0 && product.minOrderQty > 0) {
+        const optimizedVariants = optimizeOrderWithMOQ(product, variantSuggestions);
+        reorderSuggestions.push(...optimizedVariants);
+      } else if (variantSuggestions.length > 0) {
+        // No MOQ, just add as-is
+        reorderSuggestions.push(...variantSuggestions);
+      }
+    }
 
     // เรียงตามความเร่งด่วน (วันที่เหลือน้อยที่สุด)
     reorderSuggestions.sort((a, b) => a.daysUntilStockOut - b.daysUntilStockOut);

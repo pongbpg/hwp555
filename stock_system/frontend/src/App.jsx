@@ -7,6 +7,7 @@ import Orders from './pages/Orders.jsx';
 import Movements from './pages/Movements.jsx';
 import Alerts from './pages/Alerts.jsx';
 import Insights from './pages/Insights.jsx';
+import ReplenishmentOrder from './pages/ReplenishmentOrder.jsx';
 import CategoriesBrands from './pages/CategoriesBrands.jsx';
 import Layout from './pages/Layout.jsx';
 import { setAuthToken } from './api.js';
@@ -83,6 +84,11 @@ export default function App() {
         <Route path="/insights" element={
           <AnalyticsRoute user={user}>
             <Insights />
+          </AnalyticsRoute>
+        } />
+        <Route path="/replenishment" element={
+          <AnalyticsRoute user={user}>
+            <ReplenishmentOrder />
           </AnalyticsRoute>
         } />
       </Route>

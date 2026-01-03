@@ -608,7 +608,7 @@ export default function Insights() {
                       {item.minOrderQty ? fmtNumber.format(item.minOrderQty) : '-'}
                     </td>
                     <td className="py-2 px-3 text-right font-bold text-green-600 bg-green-50">
-                      {item.minOrderQty && item.minOrderQty > item.currentStock ? fmtNumber.format(item.minOrderQty) : fmtNumber.format(item.recommendedOrderQty)}
+                      {item.minOrderQty > 0 ? fmtNumber.format(item.minOrderQty) : fmtNumber.format(item.recommendedOrderQty)}
                     </td>
                   </tr>
                 ))}
