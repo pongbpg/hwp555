@@ -45,6 +45,9 @@ export default function Products() {
   const [editMode, setEditMode] = useState(false);
   const [editingProductId, setEditingProductId] = useState(null);
   const [skuPrefix, setSkuPrefix] = useState('');
+  const [defaultPrice, setDefaultPrice] = useState(0);
+  const [defaultCost, setDefaultCost] = useState(0);
+  const [defaultStockOnHand, setDefaultStockOnHand] = useState(0);
 
   const loadProducts = async () => {
     setLoading(true);
@@ -113,15 +116,42 @@ export default function Products() {
       return null;
     }
 
-    // แถวแรก: ชื่อสินค้า
-    const productName = lines[0];
+    // ตรวจสอบรูปแบบ: แถวแรก คอลัมน์แรก เป็นค่าว่าง = รูปแบบใหม่
+    const firstLineColumns = lines[0].split(',').map((col) => col.trim());
+    const isNewFormat = !firstLineColumns[0]; // A1 เป็นค่าว่าง
+    
+    let variantCodes = [];
+    let stockData = [];
+    let productName = 'สินค้า';
 
-    // แถวที่สอง: ส่วนหัว (variant codes)
-    const headerLine = lines[1];
-    const variantCodes = headerLine.split(',').map((code) => code.trim());
+    if (isNewFormat) {
+      // รูปแบบใหม่: 
+      // แถวแรก: (empty),B/2XS,B/XS,B/S,...
+      // แถวที่สอง: คงเหลือ,71.00,184.00,...
+      variantCodes = firstLineColumns.slice(1).filter(Boolean); // ข้าม A1 ที่เป็นค่าว่าง
 
-    if (variantCodes[0].toUpperCase() === 'SKP') {
-      variantCodes.shift();
+      // หา row ที่มี "คงเหลือ"
+      lines.slice(1).forEach((line) => {
+        const parts = line.split(',').map((part) => part.trim());
+        if (parts[0] === 'คงเหลือ') {
+          stockData = parts.slice(1);
+        }
+      });
+    } else {
+      // รูปแบบเก่า (ถ้ามี): แถวแรก = ชื่อสินค้า
+      productName = firstLineColumns[0] || 'สินค้า';
+      const headerLine = lines[1];
+      variantCodes = headerLine.split(',').map((code) => code.trim());
+
+     
+
+      // หา row ที่มี "คงเหลือ"
+      lines.slice(2).forEach((line) => {
+        const parts = line.split(',').map((part) => part.trim());
+        if (parts[0] === 'คงเหลือ') {
+          stockData = parts.slice(1);
+        }
+      });
     }
 
     if (variantCodes.length === 0) {
@@ -130,17 +160,6 @@ export default function Products() {
     }
 
     const parsedVariants = [];
-    const dataRows = lines.slice(2);
-
-    // เก็บข้อมูลแต่ละแถว
-    const rowData = {};
-    dataRows.forEach((line) => {
-      const parts = line.split(',').map((part) => part.trim());
-      if (parts.length > 0) {
-        const rowLabel = parts[0];
-        rowData[rowLabel] = parts.slice(1);
-      }
-    });
 
     // สร้าง variants จาก variant codes
     variantCodes.forEach((code, idx) => {
@@ -154,8 +173,8 @@ export default function Products() {
       };
 
       // ตรวจหา stock/คงเหลือ
-      if (rowData['คงเหลือ'] && rowData['คงเหลือ'][idx]) {
-        variant.stockOnHand = parseFloat(rowData['คงเหลือ'][idx]) || 0;
+      if (stockData && stockData[idx]) {
+        variant.stockOnHand = parseFloat(stockData[idx]) || 0;
       }
 
       // พยายามแยก variant code เป็น color/size/material
@@ -307,6 +326,19 @@ export default function Products() {
     setShowNewCategoryForm(false);
     setShowNewBrandForm(false);
     setSkuPrefix('');
+    setDefaultPrice(0);
+    setDefaultCost(0);
+    setDefaultStockOnHand(0);
+  };
+
+  const applyDefaultsToAllVariants = () => {
+    const updated = variants.map((v) => ({
+      ...v,
+      price: defaultPrice || v.price,
+      cost: defaultCost || v.cost,
+      stockOnHand: defaultStockOnHand || v.stockOnHand,
+    }));
+    setVariants(updated);
   };
 
   const handleUpdate = async (e) => {
@@ -900,10 +932,56 @@ export default function Products() {
                 />
               </label>
               <span className="text-xs text-gray-500">
-                (ไฟล์ CSV: ชื่อสินค้า, ตัวเลือก (SKP,B/M,B/L,...)ระยะเวลารอคอย, คงเหลือ)
+                (ไฟล์ CSV: คอลัมน์ 1 ว่าง, ตัวเลือก (B/M,B/L,...), คงเหลือ)
               </span>
             </div>
           </div>
+
+          {/* Default Price, Cost, Stock (for variants) */}
+          {showVariants && variants.length > 0 && (
+            <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <h3 className="text-sm font-semibold text-gray-800 mb-3">📋 ตั้งค่าเดียวให้ทั้งหมด</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">ราคา</label>
+                  <input
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                    type="number"
+                    placeholder="ราคาขาย"
+                    value={defaultPrice || ''}
+                    onChange={(e) => setDefaultPrice(Number(e.target.value) || 0)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">ต้นทุน</label>
+                  <input
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                    type="number"
+                    placeholder="ต้นทุน"
+                    value={defaultCost || ''}
+                    onChange={(e) => setDefaultCost(Number(e.target.value) || 0)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">คงคลัง</label>
+                  <input
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                    type="number"
+                    placeholder="คงคลัง"
+                    value={defaultStockOnHand || ''}
+                    onChange={(e) => setDefaultStockOnHand(Number(e.target.value) || 0)}
+                  />
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={applyDefaultsToAllVariants}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
+              >
+                ✓ ก็อบค่าเหล่านี้ไปยัง Variant ทั้งหมด
+              </button>
+            </div>
+          )}
 
           {/* Non-variant fields */}
           {!showVariants ? (
