@@ -580,6 +580,8 @@ export default function Insights() {
                   <th className="py-2 px-3 text-right font-semibold text-gray-600">Lead Time</th>
                   <th className="py-2 px-3 text-right font-semibold text-gray-600">จุดสั่งซื้อ</th>
                   <th className="py-2 px-3 text-right font-semibold text-gray-600 bg-blue-50">แนะนำสั่ง</th>
+                  <th className="py-2 px-3 text-right font-semibold text-gray-600">📦 MOQ</th>
+                  <th className="py-2 px-3 text-right font-semibold text-gray-600 bg-green-50">✅ รวมสั่ง</th>
                 </tr>
               </thead>
               <tbody>
@@ -601,6 +603,12 @@ export default function Insights() {
                     <td className="py-2 px-3 text-right text-gray-600"> {fmtNumber.format(item.suggestedReorderPoint)}</td>
                     <td className="py-2 px-3 text-right font-bold text-blue-600 bg-blue-50">
                       {fmtNumber.format(item.recommendedOrderQty)}
+                    </td>
+                    <td className="py-2 px-3 text-right text-gray-600">
+                      {item.minOrderQty ? fmtNumber.format(item.minOrderQty) : '-'}
+                    </td>
+                    <td className="py-2 px-3 text-right font-bold text-green-600 bg-green-50">
+                      {item.minOrderQty && item.minOrderQty > item.currentStock ? fmtNumber.format(item.minOrderQty) : fmtNumber.format(item.recommendedOrderQty)}
                     </td>
                   </tr>
                 ))}

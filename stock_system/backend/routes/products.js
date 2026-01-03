@@ -67,7 +67,9 @@ router.put('/:id', authenticateToken, authorizeRoles('owner', 'admin', 'hr'), as
       'status',
       'attributesSchema',
       'variants',
+      'leadTimeDays',
       'reorderBufferDays',
+      'minOrderQty',
     ];
 
     const updatePayload = { updatedBy: req.user?._id };

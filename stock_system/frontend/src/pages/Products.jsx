@@ -9,7 +9,9 @@ const emptyProduct = {
   price: 0,
   cost: 0,
   stockOnHand: 0,
-  leadTimeDays: 0,
+  leadTimeDays: 7,
+  reorderBufferDays: 7,
+  minOrderQty: 0,
 };
 
 const emptyVariant = {
@@ -20,7 +22,6 @@ const emptyVariant = {
   price: 0,
   cost: 0,
   stockOnHand: 0,
-  leadTimeDays: 0,
 };
 
 export default function Products() {
@@ -150,13 +151,7 @@ export default function Products() {
         material: '',
         price: 0,
         stockOnHand: 0,
-        leadTimeDays: 0,
       };
-
-      // ตรวจหา leadtime
-      if (rowData['ระยะเวลารอคอย'] && rowData['ระยะเวลารอคอย'][idx]) {
-        variant.leadTimeDays = parseInt(rowData['ระยะเวลารอคอย'][idx], 10) || 0;
-      }
 
       // ตรวจหา stock/คงเหลือ
       if (rowData['คงเหลือ'] && rowData['คงเหลือ'][idx]) {
@@ -265,7 +260,9 @@ export default function Products() {
       price: product.variants?.[0]?.price || 0,
       cost: product.variants?.[0]?.cost || 0,
       stockOnHand: product.variants?.[0]?.stockOnHand || 0,
-      leadTimeDays: product.variants?.[0]?.leadTimeDays || 0,
+      leadTimeDays: product.leadTimeDays ?? 7,
+      reorderBufferDays: product.reorderBufferDays ?? 7,
+      minOrderQty: product.minOrderQty ?? 0,
     });
     
     // ตั้งค่า skuPrefix จากส่วนแรกของ SKU
@@ -292,7 +289,6 @@ export default function Products() {
         material: v.attributes?.material || '',
         price: v.price || 0,
         stockOnHand: v.stockOnHand || 0,
-        leadTimeDays: v.leadTimeDays || 0,
       }));
       setVariants(loadedVariants);
     } else {
@@ -350,7 +346,6 @@ export default function Products() {
               price: Number(v.price) || 0,
               cost: Number(v.cost) || 0,
               stockOnHand: Number(v.stockOnHand) || 0,
-              leadTimeDays: Number(v.leadTimeDays) || 0,
             };
           })
         : [
@@ -359,7 +354,6 @@ export default function Products() {
               price: Number(newProduct.price) || 0,
               cost: Number(newProduct.cost) || 0,
               stockOnHand: Number(newProduct.stockOnHand) || 0,
-              leadTimeDays: Number(newProduct.leadTimeDays) || 0,
               attributes: {},
             },
           ];
@@ -370,6 +364,9 @@ export default function Products() {
         category: newProduct.category,
         brand: newProduct.brand,
         variants: variantsPayload,
+        leadTimeDays: Number(newProduct.leadTimeDays) || 7,
+        reorderBufferDays: Number(newProduct.reorderBufferDays) || 7,
+        minOrderQty: Number(newProduct.minOrderQty) || 0,
       };
 
       await api.put(`/products/${editingProductId}`, payload);
@@ -419,7 +416,6 @@ export default function Products() {
               price: Number(v.price) || 0,
               cost: Number(v.cost) || 0,
               stockOnHand: Number(v.stockOnHand) || 0,
-              leadTimeDays: Number(v.leadTimeDays) || 0,
             };
           })
         : [
@@ -428,7 +424,6 @@ export default function Products() {
               price: Number(newProduct.price) || 0,
               cost: Number(newProduct.cost) || 0,
               stockOnHand: Number(newProduct.stockOnHand) || 0,
-              leadTimeDays: Number(newProduct.leadTimeDays) || 0,
               attributes: {},
             },
           ];
@@ -439,6 +434,9 @@ export default function Products() {
         category: newProduct.category,
         brand: newProduct.brand,
         variants: variantsPayload,
+        leadTimeDays: Number(newProduct.leadTimeDays) || 7,
+        reorderBufferDays: Number(newProduct.reorderBufferDays) || 7,
+        minOrderQty: Number(newProduct.minOrderQty) || 0,
       };
       await api.post('/products', payload);
       setNewProduct(emptyProduct);
@@ -883,7 +881,7 @@ export default function Products() {
                 onChange={(e) => {
                   setShowVariants(e.target.checked);
                   if (e.target.checked) {
-                    setNewProduct((prev) => ({ ...prev, price: 0, stockOnHand: 0, leadTimeDays: 0 }));
+                    setNewProduct((prev) => ({ ...prev, price: 0, stockOnHand: 0 }));
                   }
                 }}
               />
@@ -1037,16 +1035,6 @@ export default function Products() {
                         onChange={(e) => updateVariant(idx, 'stockOnHand', e.target.value)}
                       />
                     </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">Lead Time (วัน)</label>
-                      <input
-                        className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                        type="number"
-                        placeholder="วัน"
-                        value={variant.leadTimeDays ?? 0}
-                        onChange={(e) => updateVariant(idx, 'leadTimeDays', e.target.value)}
-                      />
-                    </div>
                   </div>
                 </div>
               ))}
@@ -1060,6 +1048,46 @@ export default function Products() {
               </button>
             </div>
           )}
+
+          {/* Lead Time, Reorder Buffer Days and Min Order Qty */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-6 border-t pt-6">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">จำนวนวันที่ผลิต (Lead Time)</label>
+              <input
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                type="number"
+                placeholder="จำนวนวัน (default: 7)"
+                value={newProduct.leadTimeDays ?? 7}
+                onChange={(e) => setNewProduct({ ...newProduct, leadTimeDays: parseInt(e.target.value) || 0 })}
+                min="0"
+              />
+              <p className="text-xs text-gray-500 mt-1">จำนวนวันในการสั่งซื้อสินค้า</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">วันบัฟเฟอร์ (Reorder Buffer Days)</label>
+              <input
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                type="number"
+                placeholder="จำนวนวัน (default: 7)"
+                value={newProduct.reorderBufferDays ?? 7}
+                onChange={(e) => setNewProduct({ ...newProduct, reorderBufferDays: parseInt(e.target.value) || 0 })}
+                min="0"
+              />
+              <p className="text-xs text-gray-500 mt-1">วันที่คัดแยกเพื่อความปลอดภัยในการสั่งซื้อ</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">จำนวนสั่งซื้อขั้นต่ำ (MOQ)</label>
+              <input
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                type="number"
+                placeholder="จำนวนชิ้น (หรือ 0 ไม่มี MOQ)"
+                value={newProduct.minOrderQty ?? 0}
+                onChange={(e) => setNewProduct({ ...newProduct, minOrderQty: parseInt(e.target.value) || 0 })}
+                min="0"
+              />
+              <p className="text-xs text-gray-500 mt-1">จำนวนต่ำสุดที่ต้องสั่งซื้อ</p>
+            </div>
+          </div>
 
           {/* Submit Buttons */}
           <div className="flex gap-3 mt-8">
@@ -1122,6 +1150,12 @@ export default function Products() {
                         </span>
                       </div>
                     ))}
+                    {(p.reorderBufferDays || p.minOrderQty) && (
+                      <div className="text-xs text-blue-600 mt-1 pt-1 border-t border-gray-100">
+                        {p.reorderBufferDays && <div>📌 Buffer: {p.reorderBufferDays} วัน</div>}
+                        {p.minOrderQty && <div>📦 MOQ: {p.minOrderQty} ชิ้น</div>}
+                      </div>
+                    )}
                   </td>
                   <td className="py-2 px-3 text-center">
                     <button

@@ -64,7 +64,7 @@ export const calculateAverageDailySalesFromOrders = async (variantId, days = 30)
 export const checkVariantStockRisk = async (product, variant, avgDailySales = null) => {
   const currentStock = variant.stockOnHand || 0;
   const reorderPoint = variant.reorderPoint || 0;
-  const leadTimeDays = variant.leadTimeDays || 7; // default 7 days
+  const leadTimeDays = product.leadTimeDays || 7; // Get from product level
   const bufferDays = product.reorderBufferDays ?? 7;
 
   // คำนวณ average daily sales ถ้าไม่ได้ระบุมา
@@ -176,7 +176,6 @@ export const checkAndAlertAfterSale = async (soldItems, options = {}) => {
       logDebug(`📊 [LINE Alert] Calculating for ${variant.sku}:`, {
         variantId: variant._id,
         currentStock: variant.stockOnHand,
-        leadTimeDays: variant.leadTimeDays || 7,
         avgDailySales: avgDailySales.toFixed(3),
       });
 
@@ -235,6 +234,7 @@ export const checkAndAlertAfterSale = async (soldItems, options = {}) => {
 
 /**
  * ตรวจสอบสินค้าทั้งหมดที่มีความเสี่ยง (สำหรับ scheduled job)
+ * Groups variants by product and applies MOQ optimization
  * @param {object} options - ตัวเลือก
  * @returns {Promise<object>}
  */
@@ -249,14 +249,24 @@ export const checkAllStockRisks = async (options = {}) => {
 
   const products = await Product.find(query);
 
+  // Group variants by product and apply MOQ optimization
   for (const product of products) {
+    const productAlerts = [];
+
+    // Collect alerts for all active variants in this product
     for (const variant of product.variants || []) {
       if (variant.status !== 'active') continue;
 
       const alert = await checkVariantStockRisk(product, variant);
       if (alert) {
-        alerts.push(alert);
+        productAlerts.push(alert);
       }
+    }
+
+    // Apply MOQ optimization if there are alerts
+    if (productAlerts.length > 0) {
+      const optimizedAlerts = optimizeOrderWithMOQ(product, productAlerts);
+      alerts.push(...optimizedAlerts);
     }
   }
 
@@ -313,10 +323,85 @@ export const calculateReorderMetrics = (dailySalesRate, leadTimeDays = 7, buffer
   };
 };
 
+/**
+ * Optimize order quantities based on Minimum Order Quantity (MOQ)
+ * If the total suggestedOrder across all variants is less than product.minOrderQty,
+ * distribute the deficit proportionally based on avgDailySales.
+ * @param {object} product - Product document
+ * @param {Array} variantAlerts - Array of alert objects from checkVariantStockRisk
+ * @returns {Array} - Updated alert objects with optimized suggestedOrder
+ */
+export const optimizeOrderWithMOQ = (product, variantAlerts) => {
+  const minOrderQty = product.minOrderQty || 0;
+
+  // If no MOQ set, return alerts as-is
+  if (minOrderQty === 0) {
+    return variantAlerts;
+  }
+
+  // Calculate total suggested order and total avgDailySales
+  const totalSuggestedOrder = variantAlerts.reduce((sum, alert) => sum + alert.suggestedOrder, 0);
+  const totalAvgDailySales = variantAlerts.reduce((sum, alert) => sum + alert.avgDailySales, 0);
+
+  // If total suggested order already meets or exceeds MOQ, no optimization needed
+  if (totalSuggestedOrder >= minOrderQty) {
+    return variantAlerts;
+  }
+
+  // Calculate deficit to distribute
+  const deficit = minOrderQty - totalSuggestedOrder;
+
+  logDebug(`📦 [MOQ Optimization] Product: ${product.name}`, {
+    minOrderQty,
+    totalSuggestedOrder,
+    deficit,
+    totalAvgDailySales: totalAvgDailySales.toFixed(3),
+    variantCount: variantAlerts.length,
+  });
+
+  // Distribute deficit proportionally based on avgDailySales
+  if (totalAvgDailySales === 0) {
+    // If no sales data, distribute equally
+    const deficitPerVariant = Math.ceil(deficit / variantAlerts.length);
+    return variantAlerts.map((alert) => ({
+      ...alert,
+      suggestedOrder: alert.suggestedOrder + deficitPerVariant,
+      computedReorderQty: alert.computedReorderQty + deficitPerVariant,
+      moqAdjustment: deficitPerVariant,
+    }));
+  }
+
+  // Distribute proportionally based on sales velocity
+  let remainingDeficit = deficit;
+  const optimizedAlerts = variantAlerts.map((alert, index, arr) => {
+    const salesProportion = alert.avgDailySales / totalAvgDailySales;
+    let allocationForThisVariant = Math.ceil(deficit * salesProportion);
+
+    // For the last variant, allocate remaining deficit to avoid rounding errors
+    if (index === arr.length - 1) {
+      allocationForThisVariant = Math.max(0, remainingDeficit);
+    } else {
+      remainingDeficit -= allocationForThisVariant;
+    }
+
+    logDebug(`  - ${alert.sku}: allocation=${allocationForThisVariant}, avgDailySales=${alert.avgDailySales.toFixed(3)}, proportion=${(salesProportion * 100).toFixed(1)}%`);
+
+    return {
+      ...alert,
+      suggestedOrder: alert.suggestedOrder + allocationForThisVariant,
+      computedReorderQty: alert.computedReorderQty + allocationForThisVariant,
+      moqAdjustment: allocationForThisVariant,
+    };
+  });
+
+  return optimizedAlerts;
+};
+
 export default {
   calculateAverageDailySalesFromOrders,
   checkVariantStockRisk,
   checkAndAlertAfterSale,
   checkAllStockRisks,
   calculateReorderMetrics,
+  optimizeOrderWithMOQ,
 };

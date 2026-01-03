@@ -30,15 +30,15 @@ const reorderMetrics = calculateReorderMetrics(dailySalesRate, leadTimeDays, buf
 #### 3. ใช้ค่า config จากแหล่งเดียวกัน
 - **Sales source**: InventoryOrder (30 วัน)
 - **bufferDays**: `product.reorderBufferDays ?? 7`
-- **leadTimeDays**: `variant.leadTimeDays || 7`
+- **leadTimeDays**: `product.leadTimeDays || 7`
 
 ### จุดที่ใช้คำนวณตัวเลขเหมือนกัน
 
 | ตำแหน่ง | Sales Period | Buffer Source | Lead Time Source |
 |---------|--------------|---------------|------------------|
-| LINE Alert | 30 วัน | product.reorderBufferDays ?? 7 | variant.leadTimeDays \\|\\| 7 |
-| Alerts API | 30 วัน | product.reorderBufferDays ?? 7 | variant.leadTimeDays \\|\\| 7 |
-| Insights API | 30 วัน | product.reorderBufferDays ?? 7 | variant.leadTimeDays \\|\\| 7 |
+| LINE Alert | 30 วัน | product.reorderBufferDays ?? 7 | product.leadTimeDays \\|\\| 7 |
+| Alerts API | 30 วัน | product.reorderBufferDays ?? 7 | product.leadTimeDays \\|\\| 7 |
+| Insights API | 30 วัน | product.reorderBufferDays ?? 7 | product.leadTimeDays \\|\\| 7 |
 
 ### ตัวเลขที่จะตรงกันทุกที่
 - **avgDailySales** = totalSold / 30
