@@ -560,7 +560,10 @@ export default function Insights() {
       {reorderData.length > 0 && (
         <div className="bg-white rounded-xl shadow p-6">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-gray-800">🛒 แนะนำการสั่งซื้อ</h3>
+            <div>
+              <h3 className="text-lg font-semibold text-gray-800">🛒 แนะนำการสั่งซื้อ</h3>
+              <p className="text-xs text-gray-500 mt-1">💡 สำหรับการแบ่ง MOQ ตามแต่ละ Variant ให้ดูที่หน้า <strong>📦 Replenishment</strong></p>
+            </div>
             <div className="flex gap-2 text-xs">
               <span className="px-2 py-1 bg-red-100 text-red-700 rounded">ด่วนมาก ≤7 วัน</span>
               <span className="px-2 py-1 bg-amber-100 text-amber-700 rounded">ด่วน ≤14 วัน</span>
@@ -580,8 +583,6 @@ export default function Insights() {
                   <th className="py-2 px-3 text-right font-semibold text-gray-600">Lead Time</th>
                   <th className="py-2 px-3 text-right font-semibold text-gray-600">จุดสั่งซื้อ</th>
                   <th className="py-2 px-3 text-right font-semibold text-gray-600 bg-blue-50">แนะนำสั่ง</th>
-                  <th className="py-2 px-3 text-right font-semibold text-gray-600">📦 MOQ</th>
-                  <th className="py-2 px-3 text-right font-semibold text-gray-600 bg-green-50">✅ รวมสั่ง</th>
                 </tr>
               </thead>
               <tbody>
@@ -603,12 +604,6 @@ export default function Insights() {
                     <td className="py-2 px-3 text-right text-gray-600"> {fmtNumber.format(item.suggestedReorderPoint)}</td>
                     <td className="py-2 px-3 text-right font-bold text-blue-600 bg-blue-50">
                       {fmtNumber.format(item.recommendedOrderQty)}
-                    </td>
-                    <td className="py-2 px-3 text-right text-gray-600">
-                      {item.minOrderQty ? fmtNumber.format(item.minOrderQty) : '-'}
-                    </td>
-                    <td className="py-2 px-3 text-right font-bold text-green-600 bg-green-50">
-                      {item.minOrderQty > 0 ? fmtNumber.format(item.minOrderQty) : fmtNumber.format(item.recommendedOrderQty)}
                     </td>
                   </tr>
                 ))}
