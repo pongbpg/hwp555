@@ -31,6 +31,12 @@ const consumeBatches = (variant, quantity) => {
     return aDate - bDate;
   });
 
+  const debugStockAlerts = process.env.DEBUG_STOCK_ALERTS === '1' || process.env.DEBUG_STOCK_ALERTS === 'true';
+  if (debugStockAlerts) {
+    const totalBatchQty = sorted.reduce((sum, b) => sum + (b.quantity || 0), 0);
+    console.log(`[consumeBatches] SKU: ${variant.sku}, Requested: ${quantity}, Available in batches: ${totalBatchQty}`);
+  }
+
   const updated = [];
   for (const batch of sorted) {
     if (remaining <= 0) {
@@ -42,22 +48,33 @@ const consumeBatches = (variant, quantity) => {
     if (available <= remaining) {
       // Batch ถูกใช้หมด - ไม่เพิ่มเข้า updated
       remaining -= available;
+      if (debugStockAlerts) {
+        console.log(`  [consumeBatches] Batch ${batch.batchRef} fully consumed (qty: ${available})`);
+      }
     } else {
       // Batch เหลือบางส่วน
       const newQty = available - remaining;
       const plainBatch = batch.toObject ? batch.toObject() : batch;
       updated.push({ ...plainBatch, quantity: newQty });
+      if (debugStockAlerts) {
+        console.log(`  [consumeBatches] Batch ${batch.batchRef} partially consumed (available: ${available}, used: ${remaining}, remaining: ${newQty})`);
+      }
       remaining = 0;
     }
   }
 
   variant.batches = updated.filter((batch) => (batch.quantity || 0) > 0);
+  if (debugStockAlerts) {
+    console.log(`[consumeBatches] Unconsumed quantity: ${remaining}, Remaining batches: ${variant.batches.length}`);
+  }
   return remaining;
 };
 
 const applyStockChange = (variant, item, type) => {
   const qty = Number(item.quantity) || 0;
   if (qty <= 0) throw new Error('Quantity must be greater than zero');
+
+  const debugStockAlerts = process.env.DEBUG_STOCK_ALERTS === '1' || process.env.DEBUG_STOCK_ALERTS === 'true';
 
   if (type === 'purchase') {
     variant.stockOnHand = (variant.stockOnHand || 0) + qty;
@@ -76,27 +93,74 @@ const applyStockChange = (variant, item, type) => {
   }
 
   if (type === 'sale') {
-    if (!variant.allowBackorder && (variant.stockOnHand || 0) < qty) {
-      throw new Error(`Insufficient stock for SKU ${variant.sku}`);
+    const currentStock = variant.stockOnHand || 0;
+    
+    if (debugStockAlerts) {
+      console.log(`[applyStockChange] SKU: ${variant.sku}, Type: sale, Requested qty: ${qty}, Current stock: ${currentStock}, Has batches: ${(variant.batches && variant.batches.length > 0) ? 'yes' : 'no'}`);
+    }
+
+    // ✅ ตรวจสอบ: ถ้าไม่อนุญาต backorder ต้องมีสต็อกพอ
+    if (!variant.allowBackorder && currentStock < qty) {
+      throw new Error(`Insufficient stock for SKU ${variant.sku}: have ${currentStock}, need ${qty}`);
     }
 
     // ลด stockOnHand ก่อน
-    variant.stockOnHand = (variant.stockOnHand || 0) - qty;
+    variant.stockOnHand = currentStock - qty;
 
     // ถ้ามี batches ให้ consume ตาม FIFO (First Expire, First Out)
     if (variant.batches && variant.batches.length > 0) {
+      const totalBatchQty = variant.batches.reduce((sum, b) => sum + (b.quantity || 0), 0);
+      const unbatchedQty = currentStock - totalBatchQty; // สต็อกที่ไม่มี batch tracking
+      
+      if (debugStockAlerts) {
+        console.log(`[applyStockChange] Batch analysis - Total batch qty: ${totalBatchQty}, Unbatched qty: ${unbatchedQty}, Total: ${totalBatchQty + unbatchedQty}`);
+      }
+
+      // ✅ ตรวจสอบว่า batch มีพอหรือไม่ (สำหรับการคำนวณ FIFO)
+      // ถ้า totalBatchQty < qty และไม่มี unbatched stock → error
+      if (totalBatchQty < qty && unbatchedQty === 0 && !variant.allowBackorder) {
+        // ต้อง rollback stockOnHand ก่อน
+        variant.stockOnHand = currentStock;
+        throw new Error(`Insufficient batch quantities for SKU ${variant.sku}: batch qty ${totalBatchQty} < needed ${qty}`);
+      }
+
+      // Snapshot ก่อน consume
       const snapshot = {
-        stockOnHand: variant.stockOnHand + qty, // เก็บค่าเดิมก่อนลด
+        stockOnHand: currentStock,
         batches: variant.batches.map((batch) => (batch.toObject ? batch.toObject() : { ...batch })),
       };
 
-      const remaining = consumeBatches(variant, qty);
-
-      // ถ้า consume batches ไม่พอและไม่อนุญาต backorder ให้ rollback
-      if (remaining > 0 && !variant.allowBackorder) {
-        variant.stockOnHand = snapshot.stockOnHand;
-        variant.batches = snapshot.batches;
-        throw new Error(`Insufficient batch quantities for SKU ${variant.sku}`);
+      // ✅ เลือก consume จาก batch ก่อน (FIFO)
+      // ถ้า batch ไม่พอ ให้หักจาก unbatched stock
+      if (totalBatchQty >= qty) {
+        // Batch พอเพียง - consume จาก batch
+        const remaining = consumeBatches(variant, qty);
+        
+        if (remaining > 0) {
+          // ยังมี unconsumed quantity แม้ว่า batch calc บอกว่าพอ
+          // นี่ควรไม่เกิด แต่ถ้าเกิด rollback
+          if (!variant.allowBackorder) {
+            variant.stockOnHand = snapshot.stockOnHand;
+            variant.batches = snapshot.batches;
+            throw new Error(`Batch consumption mismatch for SKU ${variant.sku}: remain ${remaining}`);
+          }
+        }
+      } else {
+        // Batch ไม่พอ - consume all batch + use unbatched stock
+        const remaining = consumeBatches(variant, qty);
+        
+        if (remaining > 0 && unbatchedQty >= remaining) {
+          // ✅ ปลอดภัย - unbatched stock คุมครอง remaining
+          // สต็อกเดิมที่ไม่มี batch ก็ถูก consume แล้ว
+          if (debugStockAlerts) {
+            console.log(`[applyStockChange] Using unbatched stock: ${remaining} units`);
+          }
+        } else if (remaining > 0 && !variant.allowBackorder) {
+          // ❌ ยังขาดเหลือ แม้ใช้ unbatched
+          variant.stockOnHand = snapshot.stockOnHand;
+          variant.batches = snapshot.batches;
+          throw new Error(`Insufficient total quantities for SKU ${variant.sku}: need ${qty}, available ${totalBatchQty + unbatchedQty}`);
+        }
       }
     }
     // ถ้าไม่มี batches tracking ก็แค่ลด stockOnHand อย่างเดียว (ทำไปแล้วด้านบน)
@@ -339,7 +403,38 @@ router.patch('/orders/:id/cancel', authenticateToken, authorizeRoles('owner', 'a
     if (order.status === 'cancelled') return res.status(400).json({ error: 'Order is already cancelled' });
 
     const productCache = new Map();
+    
+    // ✅ Phase 1: Validation - ตรวจสอบว่าสามารถยกเลิกได้หรือไม่
+    if (order.type === 'purchase') {
+      for (const item of order.items) {
+        const productId = String(item.productId);
+        let product = productCache.get(productId);
+        if (!product) {
+          product = await Product.findById(productId);
+          if (!product) continue;
+          productCache.set(productId, product);
+        }
+        const variant = selectVariant(product, item.variantId, item.sku);
+        if (!variant) continue;
 
+        const qty = Number(item.quantity) || 0;
+        const receivedQty = Number(item.receivedQuantity) || 0;
+        const currentStockOnHand = variant.stockOnHand || 0;
+
+        // ตรวจสอบว่าถ้าลด receivedQty ออก สต็อกจะติดลบหรือไม่
+        // (ยกเว้นถ้า allowBackorder เปิดอยู่)
+        if (!variant.allowBackorder && currentStockOnHand < receivedQty) {
+          return res.status(400).json({
+            error: `Cannot cancel order: SKU ${variant.sku} has only ${currentStockOnHand} units but received ${receivedQty}. ` +
+                   `Insufficient stock to reverse this purchase.`
+          });
+        }
+      }
+    }
+
+    // ✅ Phase 2: Rollback - ทำการยกเลิกและต้นฉบับสต็อก
+    productCache.clear(); // ล้าง cache และโหลดใหม่
+    
     for (const item of order.items) {
       const productId = String(item.productId);
       let product = productCache.get(productId);
@@ -358,11 +453,14 @@ router.patch('/orders/:id/cancel', authenticateToken, authorizeRoles('owner', 'a
         // Rollback: ลด incoming ที่ยังไม่รับ และลด stockOnHand ที่รับแล้ว
         const pendingQty = qty - receivedQty;
         variant.incoming = Math.max(0, (variant.incoming || 0) - pendingQty);
-        variant.stockOnHand = Math.max(0, (variant.stockOnHand || 0) - receivedQty);
+        variant.stockOnHand = (variant.stockOnHand || 0) - receivedQty;
         // Note: ไม่ลบ batches เพราะอาจถูก consume ไปแล้ว
       } else if (order.type === 'sale') {
-        // Rollback: คืน stock กลับ
+        // Rollback: คืน stock กลับ (ต้องคืน batch ให้ถูกวิธี)
+        // เพราะ batches อาจถูก consume บางส่วน ต้องกู้คืนให้ตรงกับที่มี
         variant.stockOnHand = (variant.stockOnHand || 0) + qty;
+        // Note: ไม่ต้องกู้คืน batches เพราะถ้า batches ถูก consume แล้ว มันลบไปแล้ว
+        // ดังนั้นเพิ่ม stockOnHand ก็พอ (เหมือนเดิม)
       } else if (order.type === 'adjustment') {
         // Rollback: ลบจำนวนที่ปรับไป
         variant.stockOnHand = (variant.stockOnHand || 0) - qty;
