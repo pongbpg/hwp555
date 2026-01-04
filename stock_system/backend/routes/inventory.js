@@ -906,6 +906,180 @@ router.get('/dashboard', authenticateToken, authorizeRoles('owner', 'stock'), as
       });
     });
     
+    // Get reorder suggestions (items needing to be ordered)
+    // ใช้ลอจิกเดียวกับ Alerts API เพื่อให้สอดคล้องกัน
+    const toReorderItems = [];
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    
+    // ดึงยอดขาย 30 วันย้อนหลัง
+    const salesDataForReorder = await InventoryOrder.aggregate([
+      { $match: { type: 'sale', orderDate: { $gte: thirtyDaysAgo }, status: { $ne: 'cancelled' } } },
+      { $unwind: '$items' },
+      {
+        $group: {
+          _id: { variantId: '$items.variantId' },
+          quantitySold: { $sum: '$items.quantity' },
+        },
+      },
+    ]);
+    
+    const salesByVariantReorder = new Map();
+    salesDataForReorder.forEach((s) => {
+      const key = String(s._id.variantId);
+      salesByVariantReorder.set(key, s.quantitySold || 0);
+    });
+    
+    products.forEach((product) => {
+      if (!product.enableStockAlerts) return;
+      (product.variants || []).forEach((variant) => {
+        if (variant.status !== 'active') return;
+        const stock = variant.stockOnHand || 0;
+        const reorderPoint = variant.reorderPoint || 0;
+        const leadTimeDays = product.leadTimeDays || 7;
+        const bufferDays = product.reorderBufferDays ?? 7;
+        
+        // คำนวณ daily sales rate
+        const variantKey = String(variant._id);
+        const quantitySold = salesByVariantReorder.get(variantKey) || 0;
+        const dailySalesRate = quantitySold / 30;
+        
+        // ใช้ calculateReorderMetrics เหมือน Alerts
+        const reorderMetrics = calculateReorderMetrics(dailySalesRate, leadTimeDays, bufferDays);
+        const computedReorderPoint = Math.ceil(reorderMetrics.suggestedReorderPoint);
+        const minimumDays = leadTimeDays + bufferDays;
+        const daysUntilStockOut = dailySalesRate > 0 ? stock / dailySalesRate : 999;
+        
+        // รวมเงื่อนไข: หมดสต็อก หรือ สต็อกต่ำ หรือ วันคงเหลือน้อยกว่า lead time + buffer
+        const shouldAlert = stock <= 0 || stock <= reorderPoint || (dailySalesRate > 0 && daysUntilStockOut < minimumDays);
+        
+        if (shouldAlert) {
+          toReorderItems.push({
+            productId: product._id,
+            productName: product.name,
+            variantId: variant._id,
+            sku: variant.sku,
+            currentStock: stock,
+            reorderPoint: reorderPoint || computedReorderPoint,
+          });
+        }
+      });
+    });
+    
+    // Get pending purchase orders (inbound today)
+    const inboundOrders = await InventoryOrder.find({
+      type: 'purchase',
+      status: { $in: ['pending', 'completed'] },
+    }).lean().limit(10);
+    
+    const todayStart = new Date(now);
+    todayStart.setHours(0, 0, 0, 0);
+    const inboundToday = inboundOrders.filter(order => {
+      const orderDate = new Date(order.orderDate || order.createdAt);
+      return orderDate >= todayStart;
+    }).slice(0, 5).map(order => ({
+      id: order._id,
+      reference: order.reference,
+      status: order.status,
+      itemCount: (order.items || []).length,
+      totalQty: (order.items || []).reduce((sum, item) => sum + (item.quantity || 0), 0),
+      receivedQty: (order.items || []).reduce((sum, item) => sum + (item.receivedQuantity || 0), 0),
+    }));
+    
+    // Get recent activities (last 15 stock movements)
+    const recentActivities = await StockMovement.find()
+      .populate({
+        path: 'createdBy',
+        select: 'firstName lastName username',
+        model: 'Employee'
+      })
+      .select('movementType quantity sku createdBy createdByName createdAt')
+      .sort({ createdAt: -1 })
+      .limit(15)
+      .lean();
+    
+    const activitiesData = recentActivities.map(activity => {
+      // Build userName from createdBy (populated Employee) or createdByName (fallback)
+      let userName = 'System';
+      if (activity.createdBy) {
+        const emp = activity.createdBy;
+        const firstName = emp.firstName || '';
+        const lastName = emp.lastName || '';
+        const combined = `${firstName} ${lastName}`.trim();
+        userName = combined || emp.username || 'System';
+      } else if (activity.createdByName) {
+        userName = activity.createdByName;
+      }
+      
+      return {
+        id: activity._id,
+        type: activity.movementType,
+        quantity: Math.abs(activity.quantity),
+        direction: activity.quantity > 0 ? 'in' : 'out',
+        sku: activity.sku || 'Unknown',
+        variant: '',
+        userName,
+        timestamp: new Date(activity.createdAt),
+      };
+    });
+    
+    // Get sales data for last 7 days by date
+    const sevenDaysStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    sevenDaysStart.setHours(0, 0, 0, 0);
+    
+    const ordersByDay = await InventoryOrder.aggregate([
+      {
+        $match: {
+          type: 'sale',
+          status: { $ne: 'cancelled' },
+          orderDate: { $gte: sevenDaysStart, $lte: now }
+        }
+      },
+      {
+        $group: {
+          _id: { $dateToString: { format: '%m/%d', date: '$orderDate' } },
+          count: { $sum: 1 },
+          totalQty: { $sum: { $sum: '$items.quantity' } }
+        }
+      },
+      { $sort: { _id: 1 } }
+    ]);
+    
+    const dailyOrderVolume = ordersByDay.map(day => ({
+      date: day._id,
+      orders: day.count,
+      qty: day.totalQty
+    }));
+    
+    // Get today's top sales
+    const todaySales = await InventoryOrder.aggregate([
+      {
+        $match: {
+          type: 'sale',
+          status: { $ne: 'cancelled' },
+          orderDate: { $gte: todayStart, $lte: now }
+        }
+      },
+      { $unwind: '$items' },
+      {
+        $group: {
+          _id: {
+            productId: '$items.productId',
+            productName: '$items.productName',
+            sku: '$items.sku',
+          },
+          quantitySold: { $sum: '$items.quantity' }
+        }
+      },
+      { $sort: { quantitySold: -1 } },
+      { $limit: 5 }
+    ]);
+    
+    const topSalestoday = todaySales.map(sale => ({
+      productName: sale._id.productName,
+      sku: sale._id.sku,
+      quantitySold: sale.quantitySold
+    }));
+    
     res.json({
       summary: {
         totalProducts,
@@ -936,6 +1110,12 @@ router.get('/dashboard', authenticateToken, authorizeRoles('owner', 'stock'), as
       byBrand: Object.entries(brandStock)
         .map(([name, data]) => ({ name, ...data }))
         .sort((a, b) => b.stock - a.stock),
+      // New data for dashboard
+      toReorder: toReorderItems.slice(0, 10),
+      inboundToday,
+      recentActivities: activitiesData.slice(0, 15),
+      dailyOrderVolume,
+      topSalestoday,
     });
   } catch (error) {
     res.status(500).json({ error: error.message });

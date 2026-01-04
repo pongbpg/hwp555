@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import api from '../api.js';
 
+// ==================== Chart Components ====================
+
 // Simple Pie Chart Component
 const PieChart = ({ data, title }) => {
   if (!data || data.length === 0) return null;
@@ -216,13 +218,27 @@ const DonutChart = ({ data, title, centerText }) => {
   );
 };
 
+// ==================== Main Component ====================
+
 export default function Dashboard() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [sortCategory, setSortCategory] = useState('stock');
+  const [sortBrand, setSortBrand] = useState('stock');
+  const [sortOrderCategory, setSortOrderCategory] = useState('desc');
+  const [sortOrderBrand, setSortOrderBrand] = useState('desc');
 
   const fmtNumber = new Intl.NumberFormat('th-TH');
   const fmtCurrency = new Intl.NumberFormat('th-TH', { style: 'currency', currency: 'THB' });
+  const fmtDateTime = (date) => {
+    return new Date(date).toLocaleString('th-TH', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
 
   const loadData = async () => {
     setLoading(true);
@@ -263,7 +279,6 @@ export default function Dashboard() {
     );
   }
 
-  // Loading indicator component for empty sections
   const LoadingSection = ({ height = 'h-32' }) => (
     <div className={`bg-white rounded-xl shadow p-6 flex items-center justify-center ${height}`}>
       <div className="flex flex-col items-center gap-2">
@@ -276,16 +291,16 @@ export default function Dashboard() {
   const summary = data?.summary || {};
   const alerts = data?.alerts || {};
   const movements = data?.movements || {};
+  const toReorder = data?.toReorder || [];
+  const inboundToday = data?.inboundToday || [];
+  const recentActivities = data?.recentActivities || [];
+  const dailyOrderVolume = data?.dailyOrderVolume || [];
+  const topSalestoday = data?.topSalestoday || [];
 
   // Prepare chart data
   const categoryPieData = (data?.byCategory || []).map(cat => ({
     label: cat.name,
     value: cat.stock
-  }));
-  
-  const categoryValueData = (data?.byCategory || []).map(cat => ({
-    label: cat.name,
-    value: cat.value
   }));
   
   const movementTrendData = (data?.movementTrend || []).map(m => ({
@@ -309,24 +324,86 @@ export default function Dashboard() {
     value: brand.stock
   }));
 
+  const dailyVolume = (dailyOrderVolume || []).map(item => ({
+    label: item.date,
+    value: item.orders
+  }));
+
+  // Group top sales by product name and sum quantities
+  const topSalesByProduct = {};
+  (topSalestoday || []).forEach(item => {
+    if (!topSalesByProduct[item.productName]) {
+      topSalesByProduct[item.productName] = 0;
+    }
+    topSalesByProduct[item.productName] += item.quantitySold;
+  });
+
+  const topSales = Object.entries(topSalesByProduct)
+    .map(([productName, totalQuantity]) => ({
+      label: productName,
+      value: totalQuantity
+    }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 5);
+
+  // Sorting functions
+  const sortTableData = (data, sortKey, sortOrder) => {
+    if (!data) return [];
+    const sorted = [...data].sort((a, b) => {
+      let aVal = 0;
+      let bVal = 0;
+      
+      if (sortKey === 'stock') {
+        aVal = a.stock || 0;
+        bVal = b.stock || 0;
+      } else if (sortKey === 'value') {
+        aVal = a.value || 0;
+        bVal = b.value || 0;
+      }
+      
+      return sortOrder === 'desc' ? bVal - aVal : aVal - bVal;
+    });
+    return sorted.slice(0, 10);
+  };
+
+  const handleCategorySort = (key) => {
+    if (sortCategory === key) {
+      setSortOrderCategory(sortOrderCategory === 'desc' ? 'asc' : 'desc');
+    } else {
+      setSortCategory(key);
+      setSortOrderCategory('desc');
+    }
+  };
+
+  const handleBrandSort = (key) => {
+    if (sortBrand === key) {
+      setSortOrderBrand(sortOrderBrand === 'desc' ? 'asc' : 'desc');
+    } else {
+      setSortBrand(key);
+      setSortOrderBrand('desc');
+    }
+  };
+
+  const SortIndicator = ({ isActive, order }) => {
+    if (!isActive) return <span className="ml-1 text-gray-300">⇅</span>;
+    return <span className="ml-1">{order === 'desc' ? '↓' : '↑'}</span>;
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">📊 Dashboard</h1>
-          <p className="text-gray-500 text-sm">ภาพรวมระบบสต็อก</p>
+          <h1 className="text-3xl font-bold text-gray-800">📊 Dashboard</h1>
+          <p className="text-gray-500 text-sm mt-1">ภาพรวมระบบสต็อก</p>
         </div>
         <button
           onClick={loadData}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
+          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors flex items-center gap-2 font-medium"
         >
           🔄 รีเฟรช
         </button>
       </div>
-
-      {/* Date Range Filter */}
-      {/* Removed - Dashboard shows overall metrics only. Use Insights page for date range analysis */}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
@@ -339,28 +416,28 @@ export default function Dashboard() {
         ) : (
           <>
             <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-lg p-4 text-white">
-              <p className="text-sm opacity-90">📦 สินค้าทั้งหมด</p>
-              <p className="text-2xl font-bold">{fmtNumber.format(summary.totalProducts || 0)}</p>
+              <p className="text-sm opacity-90 font-medium">📦 สินค้าทั้งหมด</p>
+              <p className="text-2xl font-bold mt-1">{fmtNumber.format(summary.totalProducts || 0)}</p>
             </div>
             <div className="bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-xl shadow-lg p-4 text-white">
-              <p className="text-sm opacity-90">🏷️ รายการสินค้า</p>
-              <p className="text-2xl font-bold">{fmtNumber.format(summary.totalVariants || 0)}</p>
+              <p className="text-sm opacity-90 font-medium">🏷️ รายการสินค้า</p>
+              <p className="text-2xl font-bold mt-1">{fmtNumber.format(summary.totalVariants || 0)}</p>
             </div>
             <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-xl shadow-lg p-4 text-white">
-              <p className="text-sm opacity-90">📈 สต็อกรวม</p>
-              <p className="text-2xl font-bold">{fmtNumber.format(summary.totalStock || 0)}</p>
+              <p className="text-sm opacity-90 font-medium">📈 สต็อกรวม</p>
+              <p className="text-2xl font-bold mt-1">{fmtNumber.format(summary.totalStock || 0)}</p>
             </div>
             <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl shadow-lg p-4 text-white">
-              <p className="text-sm opacity-90">💰 มูลค่าสต็อก</p>
-              <p className="text-2xl font-bold">{fmtCurrency.format(summary.totalValue || 0)}</p>
+              <p className="text-sm opacity-90 font-medium">💰 มูลค่าสต็อก</p>
+              <p className="text-2xl font-bold mt-1">{fmtCurrency.format(summary.totalValue || 0)}</p>
             </div>
             <div className="bg-gradient-to-br from-amber-500 to-amber-600 rounded-xl shadow-lg p-4 text-white">
-              <p className="text-sm opacity-90">⚠️ สต็อกต่ำ</p>
-              <p className="text-2xl font-bold">{fmtNumber.format(summary.lowStockCount || 0)}</p>
+              <p className="text-sm opacity-90 font-medium">⚠️ สต็อกต่ำ</p>
+              <p className="text-2xl font-bold mt-1">{fmtNumber.format(summary.lowStockCount || 0)}</p>
             </div>
             <div className="bg-gradient-to-br from-red-500 to-red-600 rounded-xl shadow-lg p-4 text-white">
-              <p className="text-sm opacity-90">❌ หมดสต็อก</p>
-              <p className="text-2xl font-bold">{fmtNumber.format(summary.outOfStockCount || 0)}</p>
+              <p className="text-sm opacity-90 font-medium">❌ หมดสต็อก</p>
+              <p className="text-2xl font-bold mt-1">{fmtNumber.format(summary.outOfStockCount || 0)}</p>
             </div>
           </>
         )}
@@ -377,26 +454,98 @@ export default function Dashboard() {
         ) : (
           <>
             <div className="bg-white rounded-xl shadow p-4 border-l-4 border-blue-500">
-              <p className="text-sm text-gray-500">📋 ใบสั่งซื้อรอรับ</p>
-              <p className="text-xl font-bold text-gray-800">{fmtNumber.format(summary.pendingOrders || 0)}</p>
+              <p className="text-sm text-gray-500 font-medium">📋 รอรับของวันนี้</p>
+              <p className="text-xl font-bold text-gray-800 mt-1">{fmtNumber.format(inboundToday.length)}</p>
             </div>
             <div className="bg-white rounded-xl shadow p-4 border-l-4 border-green-500">
-              <p className="text-sm text-gray-500">📝 ใบสั่งวันนี้</p>
-              <p className="text-xl font-bold text-gray-800">{fmtNumber.format(summary.ordersToday || 0)}</p>
+              <p className="text-sm text-gray-500 font-medium">📝 ใบสั่งวันนี้</p>
+              <p className="text-xl font-bold text-gray-800 mt-1">{fmtNumber.format(summary.ordersToday || 0)}</p>
             </div>
             <div className="bg-white rounded-xl shadow p-4 border-l-4 border-purple-500">
-              <p className="text-sm text-gray-500">📁 หมวดหมู่</p>
-              <p className="text-xl font-bold text-gray-800">{fmtNumber.format((data?.byCategory || []).length)}</p>
+              <p className="text-sm text-gray-500 font-medium">📁 ต้องสั่งเติม</p>
+              <p className="text-xl font-bold text-gray-800 mt-1">{fmtNumber.format(toReorder.length)}</p>
             </div>
             <div className="bg-white rounded-xl shadow p-4 border-l-4 border-pink-500">
-              <p className="text-sm text-gray-500">🏷️ แบรนด์</p>
-              <p className="text-xl font-bold text-gray-800">{fmtNumber.format((data?.byBrand || []).length)}</p>
+              <p className="text-sm text-gray-500 font-medium">📦 รอรับ (ค้างอยู่)</p>
+              <p className="text-xl font-bold text-gray-800 mt-1">{fmtNumber.format(summary.pendingOrders || 0)}</p>
             </div>
           </>
         )}
       </div>
 
-      {/* Charts Row 1 */}
+      {/* To-Do & Inbound Section */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {loading ? (
+          <>
+            <LoadingSection height="h-64" />
+            <LoadingSection height="h-64" />
+          </>
+        ) : (
+          <>
+            {/* To Reorder */}
+            <div className="bg-white rounded-xl shadow p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <h3 className="text-lg font-semibold text-gray-800">🛒 สินค้าต้องสั่งซื้อเติม</h3>
+                <span className="bg-red-100 text-red-700 text-xs px-2 py-1 rounded-full font-semibold">{toReorder.length}</span>
+              </div>
+              <div className="space-y-2 max-h-72 overflow-y-auto">
+                {toReorder.length > 0 ? (
+                  toReorder.map((item, idx) => (
+                    <div key={idx} className="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-center justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-gray-800 truncate">{item.productName}</p>
+                        <p className="text-xs text-gray-600 font-mono">{item.sku}</p>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className="text-sm font-bold text-gray-700">{fmtNumber.format(item.currentStock)}</p>
+                        <p className="text-xs text-gray-500">คงเหลือ</p>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-center text-gray-500 py-6">
+                    <p className="text-sm">✅ ไม่มีสินค้าต้องสั่งซื้อ</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Inbound Today */}
+            <div className="bg-white rounded-xl shadow p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <h3 className="text-lg font-semibold text-gray-800">📥 สินค้ากำลังจะเข้ามาวันนี้</h3>
+                <span className="bg-blue-100 text-blue-700 text-xs px-2 py-1 rounded-full font-semibold">{inboundToday.length}</span>
+              </div>
+              <div className="space-y-2 max-h-72 overflow-y-auto">
+                {inboundToday.length > 0 ? (
+                  inboundToday.map((order, idx) => (
+                    <div key={idx} className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <p className="font-medium text-gray-800 truncate flex-1">{order.reference || `Order #${idx + 1}`}</p>
+                        <span className={`text-xs px-2 py-1 rounded font-semibold ${
+                          order.status === 'completed' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
+                        }`}>
+                          {order.status === 'completed' ? '✓ รับแล้ว' : '⏳ รอรับ'}
+                        </span>
+                      </div>
+                      <div className="text-xs text-gray-600 grid grid-cols-2 gap-1">
+                        <span>📦 {fmtNumber.format(order.totalQty)} ชิ้น</span>
+                        <span>✓ {fmtNumber.format(order.receivedQty)} ชิ้น</span>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-center text-gray-500 py-6">
+                    <p className="text-sm">ไม่มีสินค้ากำลังจะเข้ามาวันนี้</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Charts Row 1: Category & Brand Distribution */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {loading ? (
           <>
@@ -409,180 +558,53 @@ export default function Dashboard() {
               data={categoryPieData} 
               title="📊 สัดส่วนสต็อกตามหมวดหมู่" 
             />
-            <DonutChart 
-              data={stockStatusData} 
-              title="📈 สถานะสต็อก" 
-              centerText={fmtNumber.format(summary.totalVariants || 0)}
+            <PieChart 
+              data={(data?.byBrand || []).map(brand => ({
+                label: brand.name,
+                value: brand.stock
+              }))} 
+              title="📊 สัดส่วนสต็อกตามแบรนด์" 
             />
           </>
         )}
       </div>
 
-      {/* Charts Row 2 */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {loading ? (
-          <>
-            <LoadingSection height="h-96" />
-            <LoadingSection height="h-96" />
-          </>
-        ) : (
-          <>
-            <BarChart 
-              data={topCategoriesBar}
-              title="📦 Top 10 หมวดหมู่ (จำนวนสต็อก)"
-              color="#3B82F6"
-            />
-            <BarChart 
-              data={topBrandsBar}
-              title="🏷️ Top 10 แบรนด์ (จำนวนสต็อก)"
-              color="#8B5CF6"
-            />
-          </>
-        )}
-      </div>
-
-      {/* Movement Trend */}
+      {/* Unified Category & Brand Summary */}
       {loading ? (
-        <LoadingSection height="h-64" />
+        <LoadingSection height="h-96" />
       ) : (
-        movementTrendData.length > 0 && (
-          <LineChart 
-            data={movementTrendData}
-            title="📈 แนวโน้มการเคลื่อนไหวสต็อก (7 วันล่าสุด)"
-          />
-        )
-      )}
-
-      {/* Top Sellers */}
-      {/* This section is removed - use Insights page instead for detailed sales data */}
-
-      {/* Movement Summary */}
-      {loading ? (
-        <LoadingSection height="h-48" />
-      ) : (
-        movements?.byType?.length > 0 && (
-          <div className="bg-white rounded-xl shadow p-6">
-          <h2 className="text-lg font-semibold text-gray-800 mb-4">📦 การเคลื่อนไหวสต็อก (7 วันล่าสุด)</h2>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-            {(movements.byType || []).map((item) => (
-              <div key={item._id} className={`rounded-xl p-4 ${
-                item._id === 'in' ? 'bg-green-50 border border-green-200' :
-                item._id === 'out' ? 'bg-blue-50 border border-blue-200' :
-                item._id === 'damage' ? 'bg-red-50 border border-red-200' :
-                item._id === 'expired' ? 'bg-orange-50 border border-orange-200' :
-                'bg-gray-50 border border-gray-200'
-              }`}>
-                <p className="text-sm text-gray-600">
-                  {item._id === 'in' && '📥 รับเข้า'}
-                  {item._id === 'out' && '📤 จ่ายออก'}
-                  {item._id === 'adjust' && '🔄 ปรับปรุง'}
-                  {item._id === 'return' && '↩️ รับคืน'}
-                  {item._id === 'damage' && '💔 เสียหาย'}
-                  {item._id === 'expired' && '⏰ หมดอายุ'}
-                </p>
-                <p className="text-2xl font-bold text-gray-800">{fmtNumber.format(item.count)}</p>
-                <p className="text-xs text-gray-500">{fmtNumber.format(Math.abs(item.totalQuantity))} ชิ้น</p>
-              </div>
-            ))}
-          </div>
-        </div>
-        )
-      )}
-
-      {/* Alerts Summary */}
-      {loading ? (
-        <LoadingSection height="h-56" />
-      ) : (
-        alerts?.total > 0 && (
-          <div className="bg-white rounded-xl shadow p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-800">🔔 การแจ้งเตือน</h2>
-            <div className="flex gap-2">
-              {alerts.critical > 0 && (
-                <span className="bg-red-500 text-white text-xs px-3 py-1 rounded-full">
-                  {alerts.critical} ด่วน
-                </span>
-              )}
-              {alerts.warning > 0 && (
-                <span className="bg-amber-500 text-white text-xs px-3 py-1 rounded-full">
-                  {alerts.warning} เตือน
-                </span>
-              )}
-            </div>
-          </div>
-          <div className="grid grid-cols-3 gap-4">
-            <div className="text-center p-4 bg-red-50 rounded-lg">
-              <p className="text-3xl font-bold text-red-600">{alerts.outOfStock || 0}</p>
-              <p className="text-sm text-gray-600">หมดสต็อก</p>
-            </div>
-            <div className="text-center p-4 bg-amber-50 rounded-lg">
-              <p className="text-3xl font-bold text-amber-600">{alerts.lowStock || 0}</p>
-              <p className="text-sm text-gray-600">สต็อกต่ำ</p>
-            </div>
-            <div className="text-center p-4 bg-orange-50 rounded-lg">
-              <p className="text-3xl font-bold text-orange-600">{alerts.nearExpiry || 0}</p>
-              <p className="text-sm text-gray-600">ใกล้หมดอายุ</p>
-            </div>
-          </div>
-        </div>
-        )
-      )}
-
-      {/* Category & Brand Tables */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {loading ? (
-          <>
-            <LoadingSection height="h-96" />
-            <LoadingSection height="h-96" />
-          </>
-        ) : (
-          <>
-            {/* Category Table */}
+        <div className="bg-white rounded-xl shadow p-6">
+          <h2 className="text-lg font-semibold text-gray-800 mb-4">📊 สรุปสต็อกตามหมวดหมู่ และแบรนด์</h2>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            {/* Category Section */}
             {(data?.byCategory || []).length > 0 && (
-              <div className="bg-white rounded-xl shadow p-6">
-            <h2 className="text-lg font-semibold text-gray-800 mb-4">📁 สต็อกตามหมวดหมู่</h2>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-gray-200">
-                    <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">หมวดหมู่</th>
-                    <th className="text-right py-2 px-3 text-sm font-semibold text-gray-600">สต็อก</th>
-                    <th className="text-right py-2 px-3 text-sm font-semibold text-gray-600">มูลค่า</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(data?.byCategory || []).slice(0, 8).map((cat, idx) => (
-                    <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
-                      <td className="py-2 px-3 text-sm text-gray-800">{cat.name}</td>
-                      <td className="py-2 px-3 text-sm text-gray-600 text-right">{fmtNumber.format(cat.stock)}</td>
-                      <td className="py-2 px-3 text-sm text-gray-600 text-right">{fmtCurrency.format(cat.value)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-            )}
-
-            {/* Brand Table */}
-            {(data?.byBrand || []).length > 0 && (
-              <div className="bg-white rounded-xl shadow p-6">
-                <h2 className="text-lg font-semibold text-gray-800 mb-4">🏷️ สต็อกตามแบรนด์</h2>
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700 bg-blue-50 px-4 py-2 rounded-lg mb-3 inline-block">📁 หมวดหมู่</h3>
                 <div className="overflow-x-auto">
-                  <table className="w-full">
+                  <table className="w-full text-sm">
                     <thead>
-                      <tr className="border-b border-gray-200">
-                        <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">แบรนด์</th>
-                        <th className="text-right py-2 px-3 text-sm font-semibold text-gray-600">สต็อก</th>
-                        <th className="text-right py-2 px-3 text-sm font-semibold text-gray-600">มูลค่า</th>
+                      <tr className="border-b-2 border-gray-300 bg-gray-50">
+                        <th className="text-left py-2 px-3 font-semibold text-gray-700">ชื่อ</th>
+                        <th 
+                          className="text-right py-2 px-3 font-semibold text-gray-700 cursor-pointer hover:bg-gray-100"
+                          onClick={() => handleCategorySort('stock')}
+                        >
+                          สต็อก (ชิ้น) <SortIndicator isActive={sortCategory === 'stock'} order={sortOrderCategory} />
+                        </th>
+                        <th 
+                          className="text-right py-2 px-3 font-semibold text-gray-700 cursor-pointer hover:bg-gray-100"
+                          onClick={() => handleCategorySort('value')}
+                        >
+                          มูลค่า (บาท) <SortIndicator isActive={sortCategory === 'value'} order={sortOrderCategory} />
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
-                      {(data?.byBrand || []).slice(0, 8).map((brand, idx) => (
-                        <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
-                          <td className="py-2 px-3 text-sm text-gray-800">{brand.name}</td>
-                          <td className="py-2 px-3 text-sm text-gray-600 text-right">{fmtNumber.format(brand.stock)}</td>
-                          <td className="py-2 px-3 text-sm text-gray-600 text-right">{fmtCurrency.format(brand.value)}</td>
+                      {sortTableData(data?.byCategory || [], sortCategory, sortOrderCategory).map((cat, idx) => (
+                        <tr key={idx} className="border-b border-gray-100 hover:bg-blue-50">
+                          <td className="py-2.5 px-3 text-gray-800 font-medium">{cat.name}</td>
+                          <td className="py-2.5 px-3 text-gray-600 text-right font-semibold">{fmtNumber.format(cat.stock)}</td>
+                          <td className="py-2.5 px-3 text-gray-600 text-right">{fmtCurrency.format(cat.value)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -590,9 +612,107 @@ export default function Dashboard() {
                 </div>
               </div>
             )}
+
+            {/* Brand Section */}
+            {(data?.byBrand || []).length > 0 && (
+              <div>
+                <h3 className="text-sm font-semibold text-gray-700 bg-purple-50 px-4 py-2 rounded-lg mb-3 inline-block">🏷️ แบรนด์</h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b-2 border-gray-300 bg-gray-50">
+                        <th className="text-left py-2 px-3 font-semibold text-gray-700">ชื่อ</th>
+                        <th 
+                          className="text-right py-2 px-3 font-semibold text-gray-700 cursor-pointer hover:bg-gray-100"
+                          onClick={() => handleBrandSort('stock')}
+                        >
+                          สต็อก (ชิ้น) <SortIndicator isActive={sortBrand === 'stock'} order={sortOrderBrand} />
+                        </th>
+                        <th 
+                          className="text-right py-2 px-3 font-semibold text-gray-700 cursor-pointer hover:bg-gray-100"
+                          onClick={() => handleBrandSort('value')}
+                        >
+                          มูลค่า (บาท) <SortIndicator isActive={sortBrand === 'value'} order={sortOrderBrand} />
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortTableData(data?.byBrand || [], sortBrand, sortOrderBrand).map((brand, idx) => (
+                        <tr key={idx} className="border-b border-gray-100 hover:bg-purple-50">
+                          <td className="py-2.5 px-3 text-gray-800 font-medium">{brand.name}</td>
+                          <td className="py-2.5 px-3 text-gray-600 text-right font-semibold">{fmtNumber.format(brand.stock)}</td>
+                          <td className="py-2.5 px-3 text-gray-600 text-right">{fmtCurrency.format(brand.value)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Charts Row 2: Daily Volume & Top Sales */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {loading ? (
+          <>
+            <LoadingSection height="h-64" />
+            <LoadingSection height="h-64" />
+          </>
+        ) : (
+          <>
+            <LineChart 
+              data={dailyVolume}
+              title="📈 ยอดออเดอร์ 7 วันย้อนหลัง"
+            />
+            {topSales.length > 0 && (
+              <BarChart 
+                data={topSales}
+                title="🔥 Top 5 สินค้าขายเยอะสุดวันนี้"
+                color="#10B981"
+                valueKey="value"
+                labelKey="label"
+              />
+            )}
           </>
         )}
       </div>
+
+
+
+      {/* Movement Summary */}
+      {loading ? (
+        <LoadingSection height="h-48" />
+      ) : (
+        movements?.byType?.length > 0 && (
+          <div className="bg-white rounded-xl shadow p-6">
+            <h2 className="text-lg font-semibold text-gray-800 mb-4">📦 การเคลื่อนไหวสต็อก (7 วันล่าสุด)</h2>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+              {(movements.byType || []).map((item) => (
+                <div key={item._id} className={`rounded-xl p-4 ${
+                  item._id === 'in' ? 'bg-green-50 border border-green-200' :
+                  item._id === 'out' ? 'bg-blue-50 border border-blue-200' :
+                  item._id === 'damage' ? 'bg-red-50 border border-red-200' :
+                  item._id === 'expired' ? 'bg-orange-50 border border-orange-200' :
+                  'bg-gray-50 border border-gray-200'
+                }`}>
+                  <p className="text-sm text-gray-600 font-medium">
+                    {item._id === 'in' && '📥 รับเข้า'}
+                    {item._id === 'out' && '📤 จ่ายออก'}
+                    {item._id === 'adjust' && '🔄 ปรับปรุง'}
+                    {item._id === 'return' && '↩️ รับคืน'}
+                    {item._id === 'damage' && '💔 เสียหาย'}
+                    {item._id === 'expired' && '⏰ หมดอายุ'}
+                  </p>
+                  <p className="text-2xl font-bold text-gray-800 mt-1">{fmtNumber.format(item.count)}</p>
+                  <p className="text-xs text-gray-500">{fmtNumber.format(Math.abs(item.totalQuantity))} ชิ้น</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      )}
     </div>
   );
 }

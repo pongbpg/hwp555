@@ -2,8 +2,67 @@ import { useEffect, useState, useCallback } from 'react';
 import api from '../api.js';
 import DateRangeFilter from '../components/DateRangeFilter.jsx';
 
-// Horizontal Bar Chart for comparison
-const HBarChart = ({ data, title, valueKey = 'value', labelKey = 'label', color = '#3B82F6', showTrend = false }) => {
+// ==================== Chart Components ====================
+
+// Pie Chart Component
+const PieChart = ({ data, title, dataKey = 'value', labelKey = 'label', colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#14B8A6', '#F97316'] }) => {
+  if (!data || data.length === 0) return null;
+  
+  const total = data.reduce((sum, item) => sum + (item[dataKey] || 0), 0);
+  let currentAngle = -90;
+  const slices = data.map((item, idx) => {
+    const value = item[dataKey] || 0;
+    const percentage = (value / total) * 100;
+    const sliceAngle = (percentage / 100) * 360;
+    const startAngle = currentAngle;
+    const endAngle = currentAngle + sliceAngle;
+    
+    const startRad = (startAngle * Math.PI) / 180;
+    const endRad = (endAngle * Math.PI) / 180;
+    const x1 = 50 + 40 * Math.cos(startRad);
+    const y1 = 50 + 40 * Math.sin(startRad);
+    const x2 = 50 + 40 * Math.cos(endRad);
+    const y2 = 50 + 40 * Math.sin(endRad);
+    const largeArc = sliceAngle > 180 ? 1 : 0;
+    
+    const path = `M 50 50 L ${x1} ${y1} A 40 40 0 ${largeArc} 1 ${x2} ${y2} Z`;
+    currentAngle = endAngle;
+    
+    return { path, color: colors[idx % colors.length], label: item[labelKey], value, percentage };
+  });
+  
+  const fmtNumber = new Intl.NumberFormat('th-TH');
+  
+  return (
+    <div className="bg-white rounded-xl shadow p-6">
+      <h3 className="text-lg font-semibold text-gray-800 mb-4">{title}</h3>
+      <div className="flex gap-6 justify-center items-center flex-wrap">
+        <svg viewBox="0 0 100 100" className="w-40 h-40 flex-shrink-0">
+          {slices.map((slice, idx) => (
+            <path key={idx} d={slice.path} fill={slice.color} stroke="white" strokeWidth="2" />
+          ))}
+        </svg>
+        <div className="flex-1 min-w-48 space-y-2 text-sm">
+          {slices.map((slice, idx) => (
+            <div key={idx} className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 flex-1">
+                <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: slice.color }}></div>
+                <span className="text-gray-700 truncate">{slice.label}</span>
+              </div>
+              <div className="text-right flex-shrink-0">
+                <div className="font-semibold text-gray-800">{fmtNumber.format(slice.value)}</div>
+                <div className="text-xs text-gray-500">{slice.percentage.toFixed(1)}%</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Horizontal Bar Chart
+const HBarChart = ({ data, title, valueKey = 'value', labelKey = 'label', color = '#3B82F6' }) => {
   if (!data || data.length === 0) return null;
   
   const maxValue = Math.max(...data.map(d => d[valueKey] || 0), 1);
@@ -13,13 +72,13 @@ const HBarChart = ({ data, title, valueKey = 'value', labelKey = 'label', color 
     <div className="bg-white rounded-xl shadow p-6">
       <h3 className="text-lg font-semibold text-gray-800 mb-4">{title}</h3>
       <div className="space-y-3">
-        {data.slice(0, 15).map((item, idx) => (
+        {data.slice(0, 12).map((item, idx) => (
           <div key={idx} className="flex items-center gap-3">
-            <div className="w-8 text-sm text-gray-400 text-right">#{idx + 1}</div>
-            <div className="w-40 text-sm text-gray-700 truncate" title={item[labelKey]}>
+            <div className="w-6 text-xs text-gray-400 text-right font-semibold">#{idx + 1}</div>
+            <div className="w-32 text-xs text-gray-700 truncate font-medium" title={item[labelKey]}>
               {item[labelKey]}
             </div>
-            <div className="flex-1 h-5 bg-gray-100 rounded-full overflow-hidden">
+            <div className="flex-1 h-6 bg-gray-100 rounded-full overflow-hidden">
               <div 
                 className="h-full rounded-full transition-all duration-500"
                 style={{ 
@@ -28,58 +87,8 @@ const HBarChart = ({ data, title, valueKey = 'value', labelKey = 'label', color 
                 }}
               ></div>
             </div>
-            <div className="w-24 text-right text-sm font-medium text-gray-700">
+            <div className="w-20 text-right text-xs font-semibold text-gray-700">
               {fmtNumber.format(item[valueKey])}
-            </div>
-            {showTrend && item.trend !== undefined && (
-              <div className={`w-16 text-right text-xs ${item.trend > 0 ? 'text-green-600' : item.trend < 0 ? 'text-red-600' : 'text-gray-400'}`}>
-                {item.trend > 0 ? '↑' : item.trend < 0 ? '↓' : '–'} {Math.abs(item.trend || 0).toFixed(1)}%
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
-
-// Comparison Bar Chart (side by side)
-const ComparisonChart = ({ data, title, value1Key, value2Key, label1, label2, labelKey = 'label' }) => {
-  if (!data || data.length === 0) return null;
-  
-  const maxValue = Math.max(...data.flatMap(d => [d[value1Key] || 0, d[value2Key] || 0]), 1);
-  const fmtNumber = new Intl.NumberFormat('th-TH');
-  
-  return (
-    <div className="bg-white rounded-xl shadow p-6">
-      <h3 className="text-lg font-semibold text-gray-800 mb-2">{title}</h3>
-      <div className="flex gap-4 text-xs text-gray-500 mb-4">
-        <span className="flex items-center gap-1"><span className="w-3 h-3 bg-blue-500 rounded"></span> {label1}</span>
-        <span className="flex items-center gap-1"><span className="w-3 h-3 bg-green-500 rounded"></span> {label2}</span>
-      </div>
-      <div className="space-y-4">
-        {data.slice(0, 10).map((item, idx) => (
-          <div key={idx}>
-            <div className="text-sm text-gray-700 mb-1 truncate">{item[labelKey]}</div>
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <div className="flex-1 h-4 bg-gray-100 rounded overflow-hidden">
-                  <div 
-                    className="h-full bg-blue-500 rounded"
-                    style={{ width: `${(item[value1Key] / maxValue) * 100}%` }}
-                  ></div>
-                </div>
-                <span className="w-20 text-right text-xs text-gray-600">{fmtNumber.format(item[value1Key] || 0)}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="flex-1 h-4 bg-gray-100 rounded overflow-hidden">
-                  <div 
-                    className="h-full bg-green-500 rounded"
-                    style={{ width: `${(item[value2Key] / maxValue) * 100}%` }}
-                  ></div>
-                </div>
-                <span className="w-20 text-right text-xs text-gray-600">{fmtNumber.format(item[value2Key] || 0)}</span>
-              </div>
             </div>
           </div>
         ))}
@@ -104,9 +113,7 @@ const GaugeChart = ({ value, max, title, unit = '', colorRange = ['#EF4444', '#F
       <h4 className="text-sm font-medium text-gray-600 mb-2">{title}</h4>
       <div className="relative w-32 h-16 mx-auto overflow-hidden">
         <svg viewBox="0 0 100 50" className="w-full h-full">
-          {/* Background arc */}
           <path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="#E5E7EB" strokeWidth="8" strokeLinecap="round" />
-          {/* Value arc */}
           <path 
             d="M 10 50 A 40 40 0 0 1 90 50" 
             fill="none" 
@@ -115,7 +122,6 @@ const GaugeChart = ({ value, max, title, unit = '', colorRange = ['#EF4444', '#F
             strokeLinecap="round"
             strokeDasharray={`${percentage * 1.26} 126`}
           />
-          {/* Needle */}
           <line 
             x1="50" y1="50" 
             x2={50 + 30 * Math.cos(angle * Math.PI / 180)} 
@@ -126,116 +132,42 @@ const GaugeChart = ({ value, max, title, unit = '', colorRange = ['#EF4444', '#F
           <circle cx="50" cy="50" r="4" fill="#374151" />
         </svg>
       </div>
-      <div className="text-xl font-bold text-gray-800">{value.toLocaleString()}{unit}</div>
+      <div className="text-xl font-bold text-gray-800 mt-2">{value.toLocaleString()}{unit}</div>
       <div className="text-xs text-gray-500">จาก {max.toLocaleString()}</div>
     </div>
   );
 };
 
-// Heat Map Component
-const HeatMap = ({ data, title, xLabels, yLabels }) => {
-  if (!data || data.length === 0) return null;
-  
-  const maxValue = Math.max(...data.flat(), 1);
-  
-  const getColor = (value) => {
-    const intensity = value / maxValue;
-    if (intensity === 0) return '#F3F4F6';
-    if (intensity < 0.25) return '#DBEAFE';
-    if (intensity < 0.5) return '#93C5FD';
-    if (intensity < 0.75) return '#3B82F6';
-    return '#1D4ED8';
+// Alert Cards
+const AlertCard = ({ severity = 'warning', title, items = [] }) => {
+  const severityConfig = {
+    critical: { bg: 'bg-red-50', border: 'border-red-300', badge: 'bg-red-100 text-red-700', icon: '🚨' },
+    warning: { bg: 'bg-amber-50', border: 'border-amber-300', badge: 'bg-amber-100 text-amber-700', icon: '⚠️' },
+    info: { bg: 'bg-blue-50', border: 'border-blue-300', badge: 'bg-blue-100 text-blue-700', icon: 'ℹ️' },
   };
+  const config = severityConfig[severity] || severityConfig.warning;
   
   return (
-    <div className="bg-white rounded-xl shadow p-6">
-      <h3 className="text-lg font-semibold text-gray-800 mb-4">{title}</h3>
-      <div className="overflow-x-auto">
-        <table className="text-xs">
-          <thead>
-            <tr>
-              <th></th>
-              {xLabels.map((label, idx) => (
-                <th key={idx} className="px-2 py-1 text-gray-500 font-normal">{label}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {data.map((row, rowIdx) => (
-              <tr key={rowIdx}>
-                <td className="px-2 py-1 text-gray-500 text-right">{yLabels[rowIdx]}</td>
-                {row.map((value, colIdx) => (
-                  <td key={colIdx} className="px-1 py-1">
-                    <div 
-                      className="w-8 h-8 rounded flex items-center justify-center text-white text-xs font-medium"
-                      style={{ backgroundColor: getColor(value) }}
-                      title={`${yLabels[rowIdx]} - ${xLabels[colIdx]}: ${value}`}
-                    >
-                      {value > 0 ? value : ''}
-                    </div>
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+    <div className={`${config.bg} border-2 ${config.border} rounded-xl p-4`}>
+      <div className="flex items-center gap-2 mb-3">
+        <span className={`px-3 py-1 rounded-lg text-xs font-semibold ${config.badge}`}>
+          {config.icon} {title}
+        </span>
+        <span className="text-sm font-bold text-gray-700 ml-auto">{items.length} รายการ</span>
       </div>
-    </div>
-  );
-};
-
-// Multi-line trend chart
-const TrendChart = ({ data, title, lines }) => {
-  if (!data || data.length === 0) return null;
-  
-  const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
-  const maxValue = Math.max(...data.flatMap(d => lines.map(l => d[l.key] || 0)), 1);
-  
-  const getPoints = (key) => {
-    return data.map((d, idx) => ({
-      x: 50 + (idx * (300 / Math.max(data.length - 1, 1))),
-      y: 150 - ((d[key] / maxValue) * 120),
-      value: d[key] || 0,
-      label: d.label
-    }));
-  };
-  
-  return (
-    <div className="bg-white rounded-xl shadow p-6">
-      <h3 className="text-lg font-semibold text-gray-800 mb-2">{title}</h3>
-      <div className="flex gap-4 text-xs mb-4">
-        {lines.map((line, idx) => (
-          <span key={idx} className="flex items-center gap-1">
-            <span className="w-3 h-3 rounded-full" style={{ backgroundColor: colors[idx] }}></span>
-            {line.label}
-          </span>
+      <div className="space-y-2 max-h-48 overflow-y-auto">
+        {items.slice(0, 8).map((item, idx) => (
+          <div key={idx} className="text-xs text-gray-700 flex items-center justify-between gap-2 bg-white/60 px-2 py-1 rounded">
+            <span className="truncate font-medium">{item.productName} ({item.sku})</span>
+            <span className="text-gray-600 whitespace-nowrap font-semibold flex-shrink-0">{item.value}</span>
+          </div>
         ))}
+        {items.length > 8 && (
+          <div className="text-xs text-gray-600 font-medium pt-2 border-t border-gray-300">
+            +{items.length - 8} รายการเพิ่มเติม
+          </div>
+        )}
       </div>
-      <svg viewBox="0 0 400 170" className="w-full h-40">
-        {/* Grid */}
-        {[0, 30, 60, 90, 120].map(y => (
-          <line key={y} x1="50" y1={30 + y} x2="350" y2={30 + y} stroke="#E5E7EB" strokeWidth="1" />
-        ))}
-        {/* Lines */}
-        {lines.map((line, lineIdx) => {
-          const points = getPoints(line.key);
-          const pathD = points.map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
-          return (
-            <g key={lineIdx}>
-              <path d={pathD} fill="none" stroke={colors[lineIdx]} strokeWidth="2" />
-              {points.map((p, idx) => (
-                <circle key={idx} cx={p.x} cy={p.y} r="3" fill={colors[lineIdx]}>
-                  <title>{p.label}: {p.value.toLocaleString()}</title>
-                </circle>
-              ))}
-            </g>
-          );
-        })}
-        {/* X Labels */}
-        {data.filter((_, i) => i % Math.ceil(data.length / 7) === 0).map((d, idx) => (
-          <text key={idx} x={50 + (idx * Math.ceil(data.length / 7) * (300 / Math.max(data.length - 1, 1)))} y="165" textAnchor="middle" className="text-xs fill-gray-500">{d.label}</text>
-        ))}
-      </svg>
     </div>
   );
 };
@@ -252,9 +184,9 @@ const DataTable = ({ data, columns, title }) => {
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b-2 border-gray-200">
+            <tr className="border-b-2 border-gray-300">
               {columns.map((col, idx) => (
-                <th key={idx} className={`py-2 px-3 font-semibold text-gray-600 ${col.align === 'right' ? 'text-right' : 'text-left'}`}>
+                <th key={idx} className={`py-3 px-3 font-semibold text-gray-700 ${col.align === 'right' ? 'text-right' : 'text-left'}`}>
                   {col.label}
                 </th>
               ))}
@@ -262,7 +194,7 @@ const DataTable = ({ data, columns, title }) => {
           </thead>
           <tbody>
             {data.map((row, rowIdx) => (
-              <tr key={rowIdx} className="border-b border-gray-100 hover:bg-gray-50">
+              <tr key={rowIdx} className="border-b border-gray-100 hover:bg-blue-50 transition">
                 {columns.map((col, colIdx) => {
                   let value = row[col.key];
                   if (col.format === 'number') value = fmtNumber.format(value || 0);
@@ -270,8 +202,8 @@ const DataTable = ({ data, columns, title }) => {
                   if (col.format === 'days') value = value === 999999 ? '∞' : `${Math.round(value || 0)} วัน`;
                   
                   return (
-                    <td key={colIdx} className={`py-2 px-3 ${col.align === 'right' ? 'text-right' : ''} ${
-                      col.highlight && value < col.highlightThreshold ? 'text-red-600 font-medium' : 'text-gray-700'
+                    <td key={colIdx} className={`py-3 px-3 ${col.align === 'right' ? 'text-right' : ''} ${
+                      col.highlight && value < col.highlightThreshold ? 'text-red-600 font-semibold' : 'text-gray-700'
                     }`}>
                       {value ?? '-'}
                     </td>
@@ -300,19 +232,21 @@ const StatCardTrend = ({ title, value, trend, trendLabel, icon, color = 'blue' }
     <div className={`bg-gradient-to-br ${colorClasses[color]} rounded-xl shadow-lg p-4 text-white`}>
       <div className="flex justify-between items-start">
         <div>
-          <p className="text-sm opacity-90">{icon} {title}</p>
+          <p className="text-sm opacity-90 font-medium">{icon} {title}</p>
           <p className="text-2xl font-bold mt-1">{value}</p>
         </div>
         {trend !== undefined && (
-          <div className={`text-xs px-2 py-1 rounded-full ${trend >= 0 ? 'bg-white/20' : 'bg-red-400/30'}`}>
+          <div className={`text-xs px-2 py-1 rounded-full font-semibold ${trend >= 0 ? 'bg-white/20' : 'bg-red-400/30'}`}>
             {trend >= 0 ? '↑' : '↓'} {Math.abs(trend).toFixed(1)}%
           </div>
         )}
       </div>
-      {trendLabel && <p className="text-xs opacity-75 mt-2">{trendLabel}</p>}
+      {trendLabel && <p className="text-xs opacity-80 mt-2">{trendLabel}</p>}
     </div>
   );
 };
+
+// ==================== Main Component ====================
 
 export default function Insights() {
   const [data, setData] = useState(null);
@@ -325,18 +259,14 @@ export default function Insights() {
   const [useDateRange, setUseDateRange] = useState(false);
 
   const fmtNumber = new Intl.NumberFormat('th-TH');
-  const fmtCurrency = new Intl.NumberFormat('th-TH', { style: 'currency', currency: 'THB' });
 
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      let url = `/inventory/insights?top=${topN}`;
-      if (useDateRange) {
-        url += `&dateFrom=${dateFrom}&dateTo=${dateTo}`;
-      } else {
-        url += `&days=${days}`;
-      }
+      const url = useDateRange && dateFrom && dateTo
+        ? `/inventory/insights?dateFrom=${dateFrom}&dateTo=${dateTo}&top=${topN}`
+        : `/inventory/insights?days=${days}&top=${topN}`;
       const res = await api.get(url);
       setData(res.data);
     } catch (err) {
@@ -346,7 +276,6 @@ export default function Insights() {
     }
   }, [days, useDateRange, dateFrom, dateTo, topN]);
 
-  // Load on component mount only
   useEffect(() => {
     const isInitialMount = data === null;
     if (isInitialMount) {
@@ -365,7 +294,6 @@ export default function Insights() {
     );
   }
 
-  // Loading indicator component for empty sections
   const LoadingSection = ({ height = 'h-32' }) => (
     <div className={`bg-white rounded-xl shadow p-6 flex items-center justify-center ${height}`}>
       <div className="flex flex-col items-center gap-2">
@@ -377,7 +305,6 @@ export default function Insights() {
 
   const counts = data?.meta?.counts || {};
   
-  // Prepare analysis data
   const fastMoversData = (data?.fastMovers || []).map(fm => ({
     label: `${fm.productName} (${fm.sku})`,
     productName: fm.productName,
@@ -393,6 +320,7 @@ export default function Insights() {
 
   const categoryAnalysis = (data?.categorySummaries || []).map(cat => ({
     label: cat.categoryName,
+    value: cat.totalSold,
     totalSold: cat.totalSold,
     totalStock: cat.totalStock,
     dailySalesRate: cat.dailySalesRate,
@@ -402,6 +330,7 @@ export default function Insights() {
 
   const brandAnalysis = (data?.brandSummaries || []).map(brand => ({
     label: brand.brandName,
+    value: brand.totalSold,
     totalSold: brand.totalSold,
     totalStock: brand.totalStock,
     dailySalesRate: brand.dailySalesRate,
@@ -414,59 +343,59 @@ export default function Insights() {
     urgency: item.daysUntilStockOut <= 7 ? 'ด่วนมาก' : item.daysUntilStockOut <= 14 ? 'ด่วน' : 'ปกติ',
     urgencyColor: item.daysUntilStockOut <= 7 ? 'bg-red-100 text-red-700' : item.daysUntilStockOut <= 14 ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700',
   }))
-    .filter(item => item.enableStockAlerts !== false); // ⛔ แสดงเฉพาะสินค้าที่เปิดการแจ้งเตือน
+    .filter(item => item.enableStockAlerts !== false);
 
   const lowStockData = (data?.lowStock || []);
   const nearExpiryData = (data?.nearExpiry || []);
 
-  // Calculate totals
   const totalSold = fastMoversData.reduce((sum, f) => sum + f.quantitySold, 0);
   const avgDailyRate = fastMoversData.reduce((sum, f) => sum + f.dailySalesRate, 0);
   const criticalItems = reorderData.filter(r => r.daysUntilStockOut <= 7).length;
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-wrap justify-between items-center gap-4">
+      {/* Header Section */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">📈 Insights & Analytics</h1>
-          <p className="text-gray-500 text-sm">วิเคราะห์เชิงลึก{useDateRange ? ` (${dateFrom} ถึง ${dateTo})` : ` (${days} วันย้อนหลัง)`}</p>
+          <h1 className="text-3xl font-bold text-gray-800">📈 Insights & Analytics</h1>
+          <p className="text-gray-500 text-sm mt-1">วิเคราะห์เชิงลึก{useDateRange ? ` (${dateFrom} ถึง ${dateTo})` : ` (${days} วันย้อนหลัง)`}</p>
         </div>
         <button
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
+          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors font-medium whitespace-nowrap"
           onClick={load}
         >
           🔄 วิเคราะห์ใหม่
         </button>
       </div>
 
-      {/* Date Range Filter */}
-      <div className="flex items-end gap-4 flex-wrap">
-        <div className="flex-1 min-w-64">
-          <DateRangeFilter 
-            dateFrom={dateFrom}
-            setDateFrom={setDateFrom}
-            dateTo={dateTo}
-            setDateTo={setDateTo}
-            useDateRange={useDateRange}
-            setUseDateRange={setUseDateRange}
-            onSearch={load}
-          />
-        </div>
-
-        {/* Top N Selector */}
-        <div className="flex items-center gap-2 bg-white rounded-lg shadow p-4 mb-0">
-          <label className="text-sm text-gray-600 whitespace-nowrap">แสดง:</label>
-          <select
-            className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-            value={topN}
-            onChange={(e) => setTopN(Number(e.target.value))}
-          >
-            <option value={10}>Top 10</option>
-            <option value={20}>Top 20</option>
-            <option value={30}>Top 30</option>
-            <option value={50}>Top 50</option>
-          </select>
+      {/* Filter Section - Improved Layout */}
+      <div className="bg-white rounded-xl shadow p-4 space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+          <div className="md:col-span-1">
+            <DateRangeFilter 
+              dateFrom={dateFrom}
+              setDateFrom={setDateFrom}
+              dateTo={dateTo}
+              setDateTo={setDateTo}
+              useDateRange={useDateRange}
+              setUseDateRange={setUseDateRange}
+              onSearch={load}
+            />
+          </div>
+          
+          <div className="flex items-center gap-2 justify-between md:justify-end">
+            <label className="text-sm font-medium text-gray-700 whitespace-nowrap">แสดงสินค้า:</label>
+            <select
+              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm font-medium"
+              value={topN}
+              onChange={(e) => setTopN(Number(e.target.value))}
+            >
+              <option value={10}>Top 10</option>
+              <option value={20}>Top 20</option>
+              <option value={30}>Top 30</option>
+              <option value={50}>Top 50</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -495,7 +424,7 @@ export default function Insights() {
         <LoadingSection height="h-64" />
       ) : (
         <div className="bg-white rounded-xl shadow p-6">
-          <h3 className="text-lg font-semibold text-gray-800 mb-4">🏥 Inventory Health</h3>
+          <h3 className="text-lg font-semibold text-gray-800 mb-6">🏥 Inventory Health Metrics</h3>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <GaugeChart 
               value={counts.fastMovers || 0} 
@@ -511,8 +440,8 @@ export default function Insights() {
               colorRange={['#EF4444', '#F59E0B', '#10B981']}
             />
             <GaugeChart 
-              value={avgDailyRate} 
-              max={Math.max(100, avgDailyRate)} 
+              value={Math.round(avgDailyRate)} 
+              max={Math.max(100, Math.round(avgDailyRate))} 
               title="Velocity/วัน" 
               colorRange={['#3B82F6', '#10B981', '#10B981']}
             />
@@ -526,7 +455,7 @@ export default function Insights() {
         </div>
       )}
 
-      {/* Analysis Section 1: Sales Analysis */}
+      {/* Sales Analysis Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {loading ? (
           <>
@@ -551,7 +480,32 @@ export default function Insights() {
         )}
       </div>
 
-      {/* Analysis Section 2: Stock Days Remaining */}
+      {/* Category & Brand Analysis with Pie Charts */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {loading ? (
+          <>
+            <LoadingSection height="h-96" />
+            <LoadingSection height="h-96" />
+          </>
+        ) : (
+          <>
+            <PieChart 
+              data={categoryAnalysis}
+              title="📁 ยอดขายตามหมวดหมู่"
+              dataKey="totalSold"
+              labelKey="label"
+            />
+            <PieChart 
+              data={brandAnalysis}
+              title="🏷️ ยอดขายตามแบรนด์"
+              dataKey="totalSold"
+              labelKey="label"
+            />
+          </>
+        )}
+      </div>
+
+      {/* Stock Days Remaining Analysis */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {loading ? (
           <>
@@ -566,107 +520,109 @@ export default function Insights() {
               valueKey="daysRemaining"
               color="#F59E0B"
             />
-            <ComparisonChart
-              data={fastMoversData.slice(0, 10)}
-              title="📊 เปรียบเทียบ: ยอดขาย vs คงเหลือ"
-              value1Key="quantitySold"
-              value2Key="currentStock"
-              label1="ขายไป"
-              label2="คงเหลือ"
+            <DataTable
+              data={categoryAnalysis}
+              title="📁 ตัวชี้วัด: หมวดหมู่"
+              columns={[
+                { key: 'label', label: 'หมวดหมู่' },
+                { key: 'totalSold', label: 'ขาย', format: 'number', align: 'right' },
+                { key: 'totalStock', label: 'คงเหลือ', format: 'number', align: 'right' },
+                { key: 'turnoverRate', label: 'Turnover', format: 'percent', align: 'right' },
+                { key: 'daysRemaining', label: 'เหลือ', format: 'days', align: 'right', highlight: true, highlightThreshold: 14 },
+              ]}
             />
           </>
         )}
       </div>
 
-      {/* Category & Brand Analysis */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {/* Low Stock & Near Expiry Alert Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {loading ? (
           <>
-            <LoadingSection height="h-96" />
-            <LoadingSection height="h-96" />
+            <LoadingSection height="h-40" />
+            <LoadingSection height="h-40" />
           </>
         ) : (
           <>
-            <DataTable
-              data={categoryAnalysis}
-              title="📁 วิเคราะห์ตามหมวดหมู่"
-              columns={[
-                { key: 'label', label: 'หมวดหมู่' },
-                { key: 'totalSold', label: 'ขายแล้ว', format: 'number', align: 'right' },
-                { key: 'totalStock', label: 'คงเหลือ', format: 'number', align: 'right' },
-                { key: 'dailySalesRate', label: '/วัน', format: 'number', align: 'right' },
-                { key: 'daysRemaining', label: 'เหลือ', format: 'days', align: 'right', highlight: true, highlightThreshold: 14 },
-                { key: 'turnoverRate', label: 'Turnover', format: 'percent', align: 'right' },
-              ]}
-            />
-            <DataTable
-              data={brandAnalysis}
-              title="🏷️ วิเคราะห์ตามแบรนด์"
-              columns={[
-                { key: 'label', label: 'แบรนด์' },
-                { key: 'totalSold', label: 'ขายแล้ว', format: 'number', align: 'right' },
-                { key: 'totalStock', label: 'คงเหลือ', format: 'number', align: 'right' },
-                { key: 'dailySalesRate', label: '/วัน', format: 'number', align: 'right' },
-                { key: 'daysRemaining', label: 'เหลือ', format: 'days', align: 'right', highlight: true, highlightThreshold: 14 },
-                { key: 'turnoverRate', label: 'Turnover', format: 'percent', align: 'right' },
-              ]}
-            />
+            {lowStockData.length > 0 && (
+              <AlertCard 
+                severity="critical"
+                title="สต็อกต่ำ"
+                items={lowStockData.map(item => ({
+                  productName: item.productName,
+                  sku: item.sku,
+                  value: `${item.stockOnHand} ชิ้น (${item.daysRemaining} วัน)`,
+                }))}
+              />
+            )}
+            {nearExpiryData.length > 0 && (
+              <AlertCard 
+                severity="warning"
+                title="ใกล้หมดอายุ"
+                items={nearExpiryData.map(item => {
+                  const daysLeft = Math.ceil((new Date(item.expiryDate) - new Date()) / (1000 * 60 * 60 * 24));
+                  return {
+                    productName: item.productName,
+                    sku: item.sku,
+                    value: `${item.quantity} ชิ้น (${daysLeft} วัน)`,
+                  };
+                })}
+              />
+            )}
           </>
         )}
       </div>
 
-      {/* Reorder Suggestions - Urgent */}
+      {/* Reorder Suggestions Table */}
       {reorderData.length > 0 && (
         loading ? (
           <LoadingSection height="h-96" />
         ) : (
           <div className="bg-white rounded-xl shadow p-6">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
               <div>
                 <h3 className="text-lg font-semibold text-gray-800">🛒 แนะนำการสั่งซื้อ</h3>
                 <p className="text-xs text-gray-500 mt-1">💡 สำหรับการแบ่ง MOQ ตามแต่ละ Variant ให้ดูที่หน้า <strong>📦 Replenishment</strong></p>
               </div>
-              <div className="flex gap-2 text-xs">
-                <span className="px-2 py-1 bg-red-100 text-red-700 rounded">ด่วนมาก ≤7 วัน</span>
-                <span className="px-2 py-1 bg-amber-100 text-amber-700 rounded">ด่วน ≤14 วัน</span>
-                <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded">ปกติ</span>
+              <div className="flex gap-2 text-xs flex-wrap">
+                <span className="px-3 py-1 bg-red-100 text-red-700 rounded-lg font-medium">🚨 ด่วนมาก ≤7 วัน</span>
+                <span className="px-3 py-1 bg-amber-100 text-amber-700 rounded-lg font-medium">⚠️ ด่วน ≤14 วัน</span>
+                <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-lg font-medium">ℹ️ ปกติ</span>
               </div>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b-2 border-gray-200">
-                    <th className="py-2 px-3 text-left font-semibold text-gray-600">ความเร่งด่วน</th>
-                    <th className="py-2 px-3 text-left font-semibold text-gray-600">สินค้า</th>
-                    <th className="py-2 px-3 text-left font-semibold text-gray-600">SKU</th>
-                    <th className="py-2 px-3 text-right font-semibold text-gray-600">คงเหลือ</th>
-                    <th className="py-2 px-3 text-right font-semibold text-gray-600">ขาย/วัน</th>
-                    <th className="py-2 px-3 text-right font-semibold text-gray-600">เหลือใช้</th>
-                    <th className="py-2 px-3 text-right font-semibold text-gray-600">Lead Time</th>
-                    <th className="py-2 px-3 text-right font-semibold text-gray-600">จุดสั่งซื้อ</th>
-                    <th className="py-2 px-3 text-right font-semibold text-gray-600 bg-blue-50">แนะนำสั่ง</th>
+                  <tr className="bg-gray-50 border-b-2 border-gray-300">
+                    <th className="py-3 px-3 text-left font-semibold text-gray-700">ความเร่งด่วน</th>
+                    <th className="py-3 px-3 text-left font-semibold text-gray-700">สินค้า</th>
+                    <th className="py-3 px-3 text-left font-semibold text-gray-700">SKU</th>
+                    <th className="py-3 px-3 text-right font-semibold text-gray-700">คงเหลือ</th>
+                    <th className="py-3 px-3 text-right font-semibold text-gray-700">ขาย/วัน</th>
+                    <th className="py-3 px-3 text-right font-semibold text-gray-700">เหลือใช้</th>
+                    <th className="py-3 px-3 text-right font-semibold text-gray-700">Lead Time</th>
+                    <th className="py-3 px-3 text-right font-semibold text-gray-700">จุดสั่ง</th>
+                    <th className="py-3 px-3 text-right font-semibold text-gray-700 bg-blue-100">แนะนำสั่ง</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {reorderData.slice(0, 20).map((item, idx) => (
-                    <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
-                      <td className="py-2 px-3">
-                        <span className={`px-2 py-1 rounded text-xs font-medium ${item.urgencyColor}`}>
+                  {reorderData.slice(0, 15).map((item, idx) => (
+                    <tr key={idx} className="border-b border-gray-100 hover:bg-blue-50 transition">
+                      <td className="py-3 px-3">
+                        <span className={`px-2 py-1 rounded-lg text-xs font-semibold ${item.urgencyColor}`}>
                           {item.urgency}
                         </span>
                       </td>
-                      <td className="py-2 px-3 text-gray-700">{item.productName}</td>
-                      <td className="py-2 px-3 font-mono text-gray-500">{item.sku}</td>
-                      <td className="py-2 px-3 text-right text-gray-600">{fmtNumber.format(item.currentStock)}</td>
-                      <td className="py-2 px-3 text-right text-gray-600">{item.dailySalesRate}</td>
-                      <td className={`py-2 px-3 text-right font-medium ${item.daysUntilStockOut <= 7 ? 'text-red-600' : item.daysUntilStockOut <= 14 ? 'text-amber-600' : 'text-gray-600'}`}>
+                      <td className="py-3 px-3 text-gray-700 font-medium">{item.productName}</td>
+                      <td className="py-3 px-3 font-mono text-gray-500 text-xs">{item.sku}</td>
+                      <td className="py-3 px-3 text-right text-gray-700 font-medium">{fmtNumber.format(item.currentStock)}</td>
+                      <td className="py-3 px-3 text-right text-gray-700">{item.dailySalesRate.toFixed(1)}</td>
+                      <td className={`py-3 px-3 text-right font-semibold ${item.daysUntilStockOut <= 7 ? 'text-red-600' : item.daysUntilStockOut <= 14 ? 'text-amber-600' : 'text-gray-600'}`}>
                         {Math.round(item.daysUntilStockOut)} วัน
                       </td>
-                      <td className="py-2 px-3 text-right text-gray-600">{item.leadTimeDays} วัน</td>
-                      <td className="py-2 px-3 text-right text-gray-600"> {fmtNumber.format(item.suggestedReorderPoint)}</td>
-                      <td className="py-2 px-3 text-right font-bold text-blue-600 bg-blue-50">
-                        {fmtNumber.format(item.recommendedOrderQty)}
-                      </td>
+                      <td className="py-3 px-3 text-right text-gray-700">{item.leadTimeDays} วัน</td>
+                      <td className="py-3 px-3 text-right text-gray-700 font-medium">{fmtNumber.format(item.suggestedReorderPoint)}</td>
+                      <td className="py-3 px-3 text-right font-bold text-white bg-blue-600 rounded-lg">{fmtNumber.format(item.recommendedOrderQty)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -676,55 +632,12 @@ export default function Insights() {
         )
       )}
 
-      {/* Low Stock & Near Expiry */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {loading ? (
-          <>
-            <LoadingSection height="h-96" />
-            <LoadingSection height="h-96" />
-          </>
-        ) : (
-          <>
-            {lowStockData.length > 0 && (
-              <DataTable
-                data={lowStockData.slice(0, 15)}
-                title="🔴 สินค้าสต็อกต่ำ"
-                columns={[
-                  { key: 'productName', label: 'สินค้า' },
-                  { key: 'sku', label: 'SKU' },
-                  { key: 'stockOnHand', label: 'คงเหลือ', format: 'number', align: 'right' },
-                  { key: 'daysRemaining', label: 'เหลือใช้', format: 'days', align: 'right', highlight: true, highlightThreshold: 14 },
-                ]}
-              />
-            )}
-            {nearExpiryData.length > 0 && (
-              <DataTable
-                data={nearExpiryData.slice(0, 15).map(item => ({
-                  ...item,
-                  expiryDateFmt: new Date(item.expiryDate).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' }),
-                  daysLeft: Math.ceil((new Date(item.expiryDate) - new Date()) / (1000 * 60 * 60 * 24))
-                }))}
-                title="🟡 สินค้าใกล้หมดอายุ"
-                columns={[
-                  { key: 'productName', label: 'สินค้า' },
-                  { key: 'sku', label: 'SKU' },
-                  { key: 'batchRef', label: 'ล็อต' },
-                  { key: 'quantity', label: 'จำนวน', format: 'number', align: 'right' },
-                  { key: 'expiryDateFmt', label: 'หมดอายุ', align: 'right' },
-                  { key: 'daysLeft', label: 'เหลือ', format: 'days', align: 'right', highlight: true, highlightThreshold: 7 },
-                ]}
-              />
-            )}
-          </>
-        )}
-      </div>
-
-      {/* Full Product Analysis Table */}
+      {/* Detailed Analysis Table */}
       {loading ? (
         <LoadingSection height="h-96" />
       ) : (
         <DataTable
-          data={fastMoversData}
+          data={fastMoversData.slice(0, 25)}
           title="📋 รายละเอียดสินค้าขายดี"
           columns={[
             { key: 'productName', label: 'สินค้า' },
@@ -732,9 +645,8 @@ export default function Insights() {
             { key: 'categoryName', label: 'หมวดหมู่' },
             { key: 'brandName', label: 'แบรนด์' },
             { key: 'quantitySold', label: 'ขายแล้ว', format: 'number', align: 'right' },
-            { key: 'dailySalesRate', label: 'ขาย/วัน', format: 'number', align: 'right' },
+            { key: 'dailySalesRate', label: '/วัน', format: 'number', align: 'right' },
             { key: 'currentStock', label: 'คงเหลือ', format: 'number', align: 'right' },
-            { key: 'incoming', label: 'กำลังมา', format: 'number', align: 'right' },
             { key: 'daysRemaining', label: 'เหลือใช้', format: 'days', align: 'right', highlight: true, highlightThreshold: 14 },
           ]}
         />
