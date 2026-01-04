@@ -31,10 +31,46 @@ export default function ReplenishmentOrder() {
         const product = productMap.get(key);
         product.variants.push(item);
         product.totalRecommended += item.recommendedOrderQty || 0;
-        product.totalOrder = item.minOrderQty > 0 ? item.minOrderQty : product.totalRecommended;
       });
 
-      const groupedOrders = Array.from(productMap.values());
+      // Allocate MOQ using Largest Remainder Method for accuracy
+      const groupedOrders = Array.from(productMap.values()).map((product) => {
+        if (product.minOrderQty > 0 && product.minOrderQty > product.totalRecommended) {
+          // Use Largest Remainder Method to allocate MOQ exactly
+          const allocations = product.variants.map((v) => {
+            const percentage = product.totalRecommended > 0
+              ? (v.recommendedOrderQty || 0) / product.totalRecommended
+              : 0;
+            const baseAllocation = Math.floor(product.minOrderQty * percentage);
+            const remainder = product.minOrderQty * percentage - baseAllocation;
+            return { variant: v, baseAllocation, remainder };
+          });
+
+          // Sort by remainder (descending) and allocate remainder units
+          const sorted = allocations.sort((a, b) => b.remainder - a.remainder);
+          const remainderUnits = product.minOrderQty - allocations.reduce((sum, a) => sum + a.baseAllocation, 0);
+          
+          // Assign remainder units to variants with largest remainders
+          for (let i = 0; i < remainderUnits && i < sorted.length; i++) {
+            sorted[i].baseAllocation += 1;
+          }
+
+          product.variants = sorted.map(a => ({
+            ...a.variant,
+            _allocatedQty: a.baseAllocation
+          }));
+          product.totalOrder = product.minOrderQty;
+        } else {
+          product.variants = product.variants.map(v => ({
+            ...v,
+            _allocatedQty: v.recommendedOrderQty || 0
+          }));
+          product.totalOrder = product.totalRecommended;
+        }
+        
+        return product;
+      });
+
       setOrders(groupedOrders);
     } catch (err) {
       setError(err.response?.data?.error || 'ไม่สามารถโหลดข้อมูลได้');
@@ -109,11 +145,9 @@ export default function ReplenishmentOrder() {
                   className="w-full bg-white hover:bg-gray-50 p-4 flex items-center justify-between transition-colors"
                 >
                   <div className="flex items-center gap-4 flex-1 text-left">
-                    {hasMultiVariants && (
-                      <div className="text-xl text-gray-400">
-                        {isExpanded ? '▼' : '▶'}
-                      </div>
-                    )}
+                    <div className="text-xl text-gray-400">
+                      {isExpanded ? '▼' : '▶'}
+                    </div>
                     <div className="flex-1">
                       <h3 className="text-lg font-semibold text-gray-800">{product.productName}</h3>
                       <p className="text-sm text-gray-500">
@@ -149,7 +183,7 @@ export default function ReplenishmentOrder() {
                 </button>
 
                 {/* Variant Details */}
-                {isExpanded && hasMultiVariants && (
+                {isExpanded && (
                   <div className="border-t border-gray-100 bg-gray-50 p-4">
                     <div className="space-y-2">
                       <p className="text-xs font-semibold text-gray-600 uppercase mb-3">
@@ -160,9 +194,8 @@ export default function ReplenishmentOrder() {
                           const percentageOfTotal = product.totalOrder > 0
                             ? ((variant.recommendedOrderQty || 0) / product.totalRecommended) * 100
                             : 0;
-                          const allocatedQty = product.minOrderQty > 0
-                            ? Math.ceil(product.minOrderQty * percentageOfTotal / 100)
-                            : (variant.recommendedOrderQty || 0);
+                          const allocatedQty = variant._allocatedQty || (variant.recommendedOrderQty || 0);
+                          const moqAdjustment = allocatedQty - (variant.recommendedOrderQty || 0);
 
                           return (
                             <div key={idx} className="bg-white rounded p-3 border border-gray-200">
@@ -174,10 +207,7 @@ export default function ReplenishmentOrder() {
                                   </p>
                                 </div>
                                 <div className="text-right">
-                                  <p className="text-xs text-gray-500">เบิกจำนวน</p>
-                                  <p className="text-lg font-bold text-green-600">
-                                    {fmtNumber.format(allocatedQty)} ชิ้น
-                                  </p>
+                                  <p className="text-sm text-gray-700 mb-1">แนะนำ: <span className="font-bold text-blue-600">{fmtNumber.format(variant.recommendedOrderQty || 0)}</span> | สั่งจริง: <span className="font-bold text-green-600">{fmtNumber.format(allocatedQty)}</span> ชิ้น</p>
                                 </div>
                               </div>
 
@@ -190,9 +220,16 @@ export default function ReplenishmentOrder() {
                                   }}
                                 ></div>
                               </div>
-                              <p className="text-xs text-gray-500 mt-1">
-                                {percentageOfTotal.toFixed(1)}% ของการสั่งทั้งหมด
-                              </p>
+                              <div className="flex items-center justify-between mt-1">
+                                <p className="text-sm text-gray-600">
+                                  {percentageOfTotal.toFixed(1)}% ของการสั่งทั้งหมด
+                                </p>
+                                {moqAdjustment > 0 && (
+                                  <p className="text-sm text-amber-600 font-semibold">
+                                    +{fmtNumber.format(moqAdjustment)} (MOQ)
+                                  </p>
+                                )}
+                              </div>
                             </div>
                           );
                         })}
