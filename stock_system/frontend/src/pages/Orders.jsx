@@ -232,6 +232,7 @@ export default function Orders() {
       setOrderDate(new Date().toISOString().split('T')[0]);
       setPage(1);
       loadOrders(1);
+      loadProducts();
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to record');
     } finally {
