@@ -10,6 +10,7 @@ const batchSchema = new Schema(
     quantity: { type: Number, required: true },
     expiryDate: Date,
     receivedAt: { type: Date, default: Date.now },
+    orderId: { type: mongoose.Schema.Types.ObjectId, ref: 'InventoryOrder' },
   },
   { _id: true }
 );

@@ -156,7 +156,8 @@ export default function Orders() {
       }));
       await api.patch(`/inventory/orders/${order._id}/receive`, { items: payloadItems });
       setMessage('บันทึกรับของแล้ว');
-      loadOrders(page);
+      // ดึง order ใหม่เพื่อให้ frontend รู้เลขล็อตที่สร้างอัตโนมัติ
+      setTimeout(() => loadOrders(page), 500);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to receive');
     } finally {

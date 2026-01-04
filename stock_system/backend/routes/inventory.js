@@ -11,6 +11,43 @@ import { calculateInventoryValue, getBatchConsumptionOrder, consumeBatchesByOrde
 
 const router = express.Router();
 
+// ============= Helper Functions =============
+
+/**
+ * ดึง cancelled orders และสร้าง set ของ cancelled batchRefs
+ * ใช้สำหรับ filter batches ที่เกี่ยวข้องกับ cancelled orders
+ */
+const getCancelledBatchRefs = async () => {
+  const cancelledOrders = await InventoryOrder.find({ status: 'cancelled' }, { _id: 1, reference: 1, items: 1 }).lean();
+  const cancelledOrderIds = new Set(cancelledOrders.map(o => String(o._id)));
+  const cancelledBatchRefs = new Set();
+  
+  for (const order of cancelledOrders) {
+    for (const item of order.items || []) {
+      if (item.batchRef) {
+        cancelledBatchRefs.add(item.batchRef);
+      }
+    }
+  }
+  
+  return { cancelledOrderIds, cancelledBatchRefs };
+};
+
+/**
+ * ตรวจสอบว่า batch เกี่ยวข้องกับ cancelled order หรือไม่
+ */
+const isBatchFromCancelledOrder = (batch, cancelledOrderIds, cancelledBatchRefs) => {
+  // ถ้า batch มี orderId และ order นั้น cancelled → return true
+  if (batch.orderId && cancelledOrderIds.has(String(batch.orderId))) {
+    return true;
+  }
+  // ถ้า batch มี batchRef ที่อยู่ในรายการ cancelled orders → return true
+  if (batch.batchRef && cancelledBatchRefs.has(batch.batchRef)) {
+    return true;
+  }
+  return false;
+};
+
 const selectVariant = (product, variantId, sku) => {
   if (!product?.variants) return null;
   if (variantId) {
@@ -320,13 +357,16 @@ router.patch('/orders/:id/receive', authenticateToken, authorizeRoles('owner', '
 
       // เพิ่ม batch เมื่อรับของ ถ้ามีข้อมูล batchRef, expiryDate, หรือ unitPrice
       if (item.batchRef || item.expiryDate || item.unitPrice) {
+        const createdBatchRef = item.batchRef || generateBatchRef();
         variant.batches.push({
-          batchRef: item.batchRef || generateBatchRef(),
+          batchRef: createdBatchRef,
           cost: item.unitPrice || 0,
           quantity: delta,
           expiryDate: item.expiryDate,
           receivedAt: new Date(),
         });
+        // อัพเดท item.batchRef เพื่อให้ frontend รู้เลขล็อตที่สร้างแบบอัตโนมัติ
+        item.batchRef = createdBatchRef;
       }
       
       // เก็บข้อมูลสำหรับ movement
@@ -430,7 +470,30 @@ router.patch('/orders/:id/cancel', authenticateToken, authorizeRoles('owner', 'a
         const pendingQty = qty - receivedQty;
         variant.incoming = Math.max(0, (variant.incoming || 0) - pendingQty);
         variant.stockOnHand = (variant.stockOnHand || 0) - receivedQty;
-        // Note: ไม่ลบ batches เพราะอาจถูก consume ไปแล้ว
+        
+        // Debug: ตรวจสอบ batches และ orderId
+        const debugStockAlerts = process.env.DEBUG_STOCK_ALERTS === '1' || process.env.DEBUG_STOCK_ALERTS === 'true';
+        if (debugStockAlerts) {
+          console.log(`[Cancel Order] Order ID: ${order._id}, Variant: ${variant.sku}`);
+          console.log(`[Cancel Order] Batches before filter:`, variant.batches.map(b => ({
+            batchRef: b.batchRef,
+            orderId: b.orderId,
+            orderIdString: String(b.orderId),
+          })));
+        }
+        
+        // ✅ ลบ batches ที่สัมพันธ์กับ order นี้ (เพื่อไม่แสดงใน near-expiry alerts)
+        variant.batches = (variant.batches || []).filter((b) => {
+          const shouldKeep = !b.orderId || String(b.orderId) !== String(order._id);
+          if (debugStockAlerts && !shouldKeep) {
+            console.log(`[Cancel Order] Removing batch: ${b.batchRef} (orderId: ${b.orderId})`);
+          }
+          return shouldKeep;
+        });
+        
+        if (debugStockAlerts) {
+          console.log(`[Cancel Order] Batches after filter:`, variant.batches.map(b => b.batchRef));
+        }
       } else if (order.type === 'sale') {
         // Rollback: คืน stock กลับ (ต้องคืน batch ให้ถูกวิธี)
         // เพราะ batches อาจถูก consume บางส่วน ต้องกู้คืนให้ตรงกับที่มี
@@ -713,6 +776,9 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
     reorderSuggestions.sort((a, b) => a.daysUntilStockOut - b.daysUntilStockOut);
     lowStock.sort((a, b) => a.daysRemaining - b.daysRemaining);
 
+    // ดึง cancelled order batches data
+    const { cancelledOrderIds, cancelledBatchRefs } = await getCancelledBatchRefs();
+
     const nearExpiry = await Product.aggregate([
       { $unwind: '$variants' },
       { $unwind: '$variants.batches' },
@@ -724,6 +790,7 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
           variantId: '$variants._id',
           sku: '$variants.sku',
           batchRef: '$variants.batches.batchRef',
+          orderId: '$variants.batches.orderId',
           expiryDate: '$variants.batches.expiryDate',
           quantity: '$variants.batches.quantity',
         },
@@ -731,7 +798,49 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
       { $sort: { expiryDate: 1 } },
     ]);
 
+    // Filter out batches from cancelled orders
+    const filteredNearExpiry = nearExpiry.filter((item) => {
+      return !isBatchFromCancelledOrder(
+        { orderId: item.orderId, batchRef: item.batchRef },
+        cancelledOrderIds,
+        cancelledBatchRefs
+      );
+    });
+
     const fastMovers = fastMoversDetailed.sort((a, b) => b.quantitySold - a.quantitySold).slice(0, top);
+
+    // ✅ หาสินค้าขายไม่ออก (Dead Stock) - ไม่มีการขายเลยในช่วง
+    const deadStockDetailed = [];
+    for (const [productId, { product, variants }] of productVariantMap) {
+      variants.forEach((variant) => {
+        const key = `${product._id}-${variant._id}`;
+        const quantitySold = salesMap.get(key) || 0;
+        
+        // ตรวจสอบเฉพาะ variants ที่ไม่มีการขายแล้วมีสต็อกอยู่
+        if (quantitySold === 0) {
+          const currentStock = (variant.stockOnHand || 0) + (variant.incoming || 0);
+          if (currentStock > 0) {  // มีสต็อกแต่ไม่มีการขาย
+            deadStockDetailed.push({
+              productId: product._id,
+              productName: product.name,
+              categoryId: product.category || null,
+              categoryName: categoryNameMap.get(String(product.category)) || 'Uncategorized',
+              brandId: product.brand || null,
+              brandName: brandNameMap.get(String(product.brand)) || 'Unbranded',
+              variantId: variant._id,
+              sku: variant.sku,
+              currentStock,
+              incoming: variant.incoming || 0,
+              quantitySold: 0,
+              dailySalesRate: 0,
+            });
+          }
+        }
+      });
+    }
+    
+    // เรียงตามจำนวนสต็อก (มากสุดก่อน) แล้วตัด top N
+    const deadStock = deadStockDetailed.sort((a, b) => b.currentStock - a.currentStock).slice(0, top);
 
     // จัดรูป grouped summaries
     const categorySummaries = Array.from(groupByCategory.values())
@@ -759,8 +868,9 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
 
     res.json({
       lowStock,
-      nearExpiry,
+      nearExpiry: filteredNearExpiry,
       fastMovers,
+      deadStock,
       reorderSuggestions,
       categorySummaries,
       brandSummaries,
@@ -769,8 +879,9 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
         top,
         counts: {
           lowStock: lowStock.length,
-          nearExpiry: nearExpiry.length,
+          nearExpiry: filteredNearExpiry.length,
           fastMovers: fastMovers.length,
+          deadStock: deadStock.length,
           reorderSuggestions: reorderSuggestions.length,
         },
       },
@@ -894,11 +1005,18 @@ router.get('/dashboard', authenticateToken, authorizeRoles('owner', 'stock'), as
     
     // Alert counts
     const expiryBefore = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-    let nearExpiryCount = 0;
     
+    // ดึง cancelled order batches data
+    const { cancelledOrderIds, cancelledBatchRefs } = await getCancelledBatchRefs();
+    
+    let nearExpiryCount = 0;
     products.forEach((product) => {
       (product.variants || []).forEach((variant) => {
         (variant.batches || []).forEach((batch) => {
+          // ข้าม batches จาก cancelled orders
+          if (isBatchFromCancelledOrder(batch, cancelledOrderIds, cancelledBatchRefs)) {
+            return;
+          }
           if (batch.expiryDate && new Date(batch.expiryDate) <= expiryBefore && new Date(batch.expiryDate) >= now) {
             nearExpiryCount++;
           }
@@ -1149,6 +1267,9 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
       salesByVariant.set(key, s.quantitySold || 0);
     });
     
+    // ดึง cancelled order batches data
+    const { cancelledOrderIds, cancelledBatchRefs } = await getCancelledBatchRefs();
+    
     const products = await Product.find({ status: 'active' }).lean();
     
     const lowStockAlerts = [];
@@ -1227,8 +1348,13 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
           });
         }
 
-        // Near expiry batches
+        // Near expiry batches - ข้าม batches ที่เกี่ยวข้องกับ cancelled orders
         for (const batch of variant.batches || []) {
+          // ข้าม batches ที่มาจาก cancelled orders
+          if (isBatchFromCancelledOrder(batch, cancelledOrderIds, cancelledBatchRefs)) {
+            continue;
+          }
+          
           if (batch.expiryDate && new Date(batch.expiryDate) <= expiryBefore && new Date(batch.expiryDate) >= now) {
             const daysLeft = Math.ceil((new Date(batch.expiryDate) - now) / (1000 * 60 * 60 * 24));
             nearExpiryAlerts.push({
