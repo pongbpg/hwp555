@@ -939,6 +939,9 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
     const nearExpiryAlerts = [];
     
     for (const product of products) {
+      // ⛔ ข้ามสินค้าที่ปิดการแจ้งเตือน
+      if (!product.enableStockAlerts) continue;
+      
       for (const variant of product.variants || []) {
         if (variant.status !== 'active') continue;
         const stock = variant.stockOnHand || 0;

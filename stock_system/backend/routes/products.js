@@ -1,8 +1,35 @@
 import express from 'express';
 import Product from '../models/Product.js';
+import Category from '../models/Category.js';
+import Brand from '../models/Brand.js';
 import { authenticateToken, authorizeRoles } from '../middleware/auth.js';
 
 const router = express.Router();
+
+// Helper: Generate SKU based on new formula
+// Formula: {Brand} - {Category} - {Model} - {Color} - {Size} - {Material}
+const generateSKUFromVariant = async (product, variant) => {
+  // Get brand name
+  const brandDoc = await Brand.findById(product.brand);
+  const brandName = brandDoc?.name || 'UNKNOWN';
+  
+  // Get category name
+  const categoryDoc = await Category.findById(product.category);
+  const categoryName = categoryDoc?.name || 'UNKNOWN';
+  
+  // Collect parts
+  const parts = [
+    brandName,
+    categoryName,
+    variant.model,
+    variant.attributes?.color || variant.color,
+    variant.attributes?.size || variant.size,
+    variant.attributes?.material || variant.material,
+  ].filter(Boolean); // Remove empty parts
+  
+  // Join with ` - ` separator and convert to uppercase
+  return parts.join(' - ').toUpperCase();
+};
 
 const buildFilters = (query) => {
   const filters = {};
@@ -46,7 +73,24 @@ router.post('/', authenticateToken, authorizeRoles('owner', 'admin', 'hr'), asyn
       return res.status(400).json({ error: 'At least one variant is required' });
     }
 
-    const product = new Product({ ...body, createdBy: req.user?._id, updatedBy: req.user?._id });
+    // Auto-generate SKU for each variant if not provided
+    const variantsWithSKU = await Promise.all(
+      body.variants.map(async (variant) => {
+        if (!variant.sku) {
+          // Create temporary product object to generate SKU
+          const tempProduct = { brand: body.brand, category: body.category };
+          variant.sku = await generateSKUFromVariant(tempProduct, variant);
+        }
+        return variant;
+      })
+    );
+
+    const product = new Product({ 
+      ...body, 
+      variants: variantsWithSKU,
+      createdBy: req.user?._id, 
+      updatedBy: req.user?._id 
+    });
     await product.save();
     res.status(201).json(product);
   } catch (error) {
@@ -65,6 +109,7 @@ router.put('/:id', authenticateToken, authorizeRoles('owner', 'admin', 'hr'), as
       'unit',
       'tags',
       'status',
+      'enableStockAlerts',
       'attributesSchema',
       'variants',
       'skuPrefix',

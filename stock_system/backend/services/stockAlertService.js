@@ -62,6 +62,11 @@ export const calculateAverageDailySalesFromOrders = async (variantId, days = 30)
  * @returns {Promise<object|null>} - Alert object หรือ null ถ้าไม่มีความเสี่ยง
  */
 export const checkVariantStockRisk = async (product, variant, avgDailySales = null) => {
+  // ✅ ตรวจสอบว่าเปิดการแจ้งเตือนอยู่หรือไม่
+  if (!product.enableStockAlerts) {
+    return null;
+  }
+
   const currentStock = variant.stockOnHand || 0;
   const reorderPoint = variant.reorderPoint || 0;
   const leadTimeDays = product.leadTimeDays || 7; // Get from product level

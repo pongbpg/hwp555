@@ -12,10 +12,13 @@ const emptyProduct = {
   leadTimeDays: 7,
   reorderBufferDays: 7,
   minOrderQty: 0,
+  status: 'active',
+  enableStockAlerts: true,
 };
 
 const emptyVariant = {
   sku: '',
+  model: '',
   color: '',
   size: '',
   material: '',
@@ -165,7 +168,8 @@ export default function Products() {
     // สร้าง variants จาก variant codes
     variantCodes.forEach((code, idx) => {
       const variant = {
-        sku: code,
+        sku: '',
+        model: '',
         color: '',
         size: '',
         material: '',
@@ -229,7 +233,8 @@ export default function Products() {
       const categoryPrefix = categories.find((cat) => cat._id === newProduct.category)?.prefix || '';
       const brandPrefix = brands.find((brand) => brand._id === newProduct.brand)?.prefix || '';
       if (categoryPrefix || brandPrefix) {
-        const basePrefix = [categoryPrefix, brandPrefix].filter(Boolean).join('-');
+        // ลำดับใหม่: Brand-Prefix - Category-Prefix
+        const basePrefix = [brandPrefix, categoryPrefix].filter(Boolean).join('-');
         const runningNumber = getNextRunningNumber(basePrefix);
         const generatedSKU = `${basePrefix}-${runningNumber}`;
         if (newProduct.sku !== generatedSKU) {
@@ -240,34 +245,45 @@ export default function Products() {
   }, [newProduct.category, newProduct.brand, showVariants, categories, brands, products, editMode]);
 
   useEffect(() => {
-    if (!editMode && showVariants && (newProduct.category || newProduct.brand || skuPrefix)) {
-      const categoryPrefix = categories.find((cat) => cat._id === newProduct.category)?.prefix || '';
+    if (showVariants) {
       const brandPrefix = brands.find((brand) => brand._id === newProduct.brand)?.prefix || '';
-      const basePrefix = [categoryPrefix, brandPrefix].filter(Boolean).join('-');
+      const categoryPrefix = categories.find((cat) => cat._id === newProduct.category)?.prefix || '';
 
       const updatedVariants = variants.map((variant) => {
-        const variantSuffix = [variant.color, variant.size, variant.material]
-          .filter(Boolean)
-          .join('-')
-          .substring(0, 10)
-          .toUpperCase();
-        const fullPrefix = variantSuffix ? `${basePrefix}-${variantSuffix}` : basePrefix;
+        // เฉพาะ variant ใหม่เท่านั้นที่ให้ auto-generate SKU (variant เก่ามี _id)
+        const isNewVariant = !variant._id;
         
-        let sku = '';
-        if (skuPrefix) {
-          // ถ้ามี skuPrefix ให้เป็น basePrefix-color-size-material-SKU_PREFIX
-          sku = `${fullPrefix}-${skuPrefix}`;
-        } else {
-          // ไม่มี skuPrefix ให้ใช้ running number
-          const runningNumber = getNextRunningNumber(fullPrefix);
-          sku = `${fullPrefix}-${runningNumber}`;
+        // ถ้าเป็น variant เก่าและมี SKU เดิมแล้ว ให้คงไว้ (ไม่ auto-generate)
+        if (!isNewVariant && variant.sku) {
+          return variant;
         }
-        
-        return { ...variant, sku };
+
+        // ถ้าเป็น variant ใหม่ หรือไม่มี SKU ให้ generate
+        if (isNewVariant || !variant.sku) {
+          // สร้าง SKU ตามลำดับ: Brand-Category-SKU_Product-Model-Color-Size-Material
+          const skuParts = [
+            brandPrefix,
+            categoryPrefix,
+            skuPrefix,
+            variant.model,
+            variant.color,
+            variant.size,
+            variant.material,
+          ].filter(Boolean);
+          
+          let sku = '';
+          if (skuParts.length > 0) {
+            sku = skuParts.join('-').toUpperCase();
+          }
+          
+          return { ...variant, sku: sku || variant.sku };
+        }
+
+        return variant;
       });
       setVariants(updatedVariants);
     }
-  }, [newProduct.category, newProduct.brand, showVariants, products, editMode, skuPrefix]);
+  }, [newProduct.category, newProduct.brand, showVariants, editMode, skuPrefix, variants, brands, categories]);
 
   const handleEdit = (product) => {
     setEditMode(true);
@@ -283,6 +299,8 @@ export default function Products() {
       leadTimeDays: product.leadTimeDays ?? 7,
       reorderBufferDays: product.reorderBufferDays ?? 7,
       minOrderQty: product.minOrderQty ?? 0,
+      status: product.status || 'active',
+      enableStockAlerts: product.enableStockAlerts ?? true,
     });
     setCostingMethod(product.costingMethod || 'FIFO');
     
@@ -302,6 +320,7 @@ export default function Products() {
       const loadedVariants = product.variants.map((v) => ({
         _id: v._id,  // ✅ เก็บ variant ID เดิม
         sku: v.sku,
+        model: v.model || '',
         color: v.attributes?.color || '',
         size: v.attributes?.size || '',
         material: v.attributes?.material || '',
@@ -354,23 +373,11 @@ export default function Products() {
 
       const variantsPayload = showVariants
         ? variants.map((v) => {
-            const variantSuffix = [v.color, v.size, v.material].filter(Boolean).join('-').substring(0, 10).toUpperCase();
-            const fullPrefix = variantSuffix ? `${basePrefix}-${variantSuffix}` : basePrefix;
-            
-            let autoSku = '';
-            if (skuPrefix) {
-              // ถ้ามี skuPrefix ให้เป็น basePrefix-color-size-material-SKU_PREFIX
-              autoSku = `${fullPrefix}-${skuPrefix}`;
-            } else {
-              // ไม่มี skuPrefix ให้ใช้ running number
-              const runningNumber = getNextRunningNumber(fullPrefix);
-              autoSku = `${fullPrefix}-${runningNumber}`;
-            }
-            
             return {
               ...(v._id && { _id: v._id }),  // ✅ เก็บ _id เดิม
-              name: [v.color, v.size, v.material].filter(Boolean).join(' / ') || 'Default',
-              sku: v.sku || autoSku,
+              name: [v.model, v.color, v.size, v.material].filter(Boolean).join(' / ') || 'Default',
+              sku: v.sku,  // ส่งค่า SKU ที่ user ใส่ (backend จะ auto-gen ถ้าไม่มี)
+              model: v.model,
               attributes: {
                 ...(v.color && { color: v.color }),
                 ...(v.size && { size: v.size }),
@@ -383,7 +390,7 @@ export default function Products() {
           })
         : [
             {
-              sku: newProduct.sku || `${basePrefix}-${getNextRunningNumber(basePrefix)}`,
+              sku: newProduct.sku,
               price: Number(newProduct.price) || 0,
               cost: Number(newProduct.cost) || 0,
               stockOnHand: Number(newProduct.stockOnHand) || 0,
@@ -402,6 +409,8 @@ export default function Products() {
         leadTimeDays: Number(newProduct.leadTimeDays) || 7,
         reorderBufferDays: Number(newProduct.reorderBufferDays) || 7,
         minOrderQty: Number(newProduct.minOrderQty) || 0,
+        status: newProduct.status || 'active',
+        enableStockAlerts: newProduct.enableStockAlerts ?? true,
       };
 
       await api.put(`/products/${editingProductId}`, payload);
@@ -427,23 +436,11 @@ export default function Products() {
 
       const variantsPayload = showVariants
         ? variants.map((v) => {
-            const variantSuffix = [v.color, v.size, v.material].filter(Boolean).join('-').substring(0, 10).toUpperCase();
-            const fullPrefix = variantSuffix ? `${basePrefix}-${variantSuffix}` : basePrefix;
-            
-            let autoSku = '';
-            if (skuPrefix) {
-              // ถ้ามี skuPrefix ให้เป็น basePrefix-color-size-material-SKU_PREFIX
-              autoSku = `${fullPrefix}-${skuPrefix}`;
-            } else {
-              // ไม่มี skuPrefix ให้ใช้ running number
-              const runningNumber = getNextRunningNumber(fullPrefix);
-              autoSku = `${fullPrefix}-${runningNumber}`;
-            }
-            
             return {
               ...(v._id && { _id: v._id }),  // ✅ preserve variant ID if exists
-              name: [v.color, v.size, v.material].filter(Boolean).join(' / ') || 'Default',
-              sku: v.sku || autoSku,
+              name: [v.model, v.color, v.size, v.material].filter(Boolean).join(' / ') || 'Default',
+              sku: v.sku,
+              model: v.model,
               attributes: {
                 ...(v.color && { color: v.color }),
                 ...(v.size && { size: v.size }),
@@ -456,7 +453,7 @@ export default function Products() {
           })
         : [
             {
-              sku: newProduct.sku || `${basePrefix}-${getNextRunningNumber(basePrefix)}`,
+              sku: newProduct.sku,
               price: Number(newProduct.price) || 0,
               cost: Number(newProduct.cost) || 0,
               stockOnHand: Number(newProduct.stockOnHand) || 0,
@@ -475,6 +472,8 @@ export default function Products() {
         leadTimeDays: Number(newProduct.leadTimeDays) || 7,
         reorderBufferDays: Number(newProduct.reorderBufferDays) || 7,
         minOrderQty: Number(newProduct.minOrderQty) || 0,
+        status: newProduct.status || 'active',
+        enableStockAlerts: newProduct.enableStockAlerts ?? true,
       };
       await api.post('/products', payload);
       setNewProduct(emptyProduct);
@@ -529,7 +528,9 @@ export default function Products() {
   const addVariant = () => {
     if (variants.length > 0) {
       const lastVariant = variants[variants.length - 1];
-      setVariants([...variants, { ...lastVariant }]);
+      // ใหม่ variant ต้องไม่มี _id เพื่อให้ useEffect รู้ว่ามันเป็น variant ใหม่
+      const { _id, ...variantWithoutId } = lastVariant;
+      setVariants([...variants, { ...variantWithoutId, sku: '' }]);
     } else {
       setVariants([...variants, { ...emptyVariant }]);
     }
@@ -545,25 +546,33 @@ export default function Products() {
     const updated = [...variants];
     updated[index] = { ...updated[index], [field]: value };
 
-    if (!editMode && ['color', 'size', 'material'].includes(field)) {
+    // เฉพาะ variant ใหม่เท่านั้นที่ให้ auto-generate SKU (variant เก่ามี _id)
+    const isNewVariant = !updated[index]._id;
+    
+    if (!editMode && isNewVariant && (field === 'model' || field === 'color' || field === 'size' || field === 'material')) {
       const variant = updated[index];
-      const categoryPrefix = categories.find((cat) => cat._id === newProduct.category)?.prefix || '';
+      
+      // ใช้ prefix ย่อ (abbreviation) แบบเดิม ไม่เว้นวรรค
       const brandPrefix = brands.find((brand) => brand._id === newProduct.brand)?.prefix || '';
-      const basePrefix = [categoryPrefix, brandPrefix].filter(Boolean).join('-');
-      const variantSuffix = [variant.color, variant.size, variant.material].filter(Boolean).join('-').substring(0, 10).toUpperCase();
-      const fullPrefix = variantSuffix ? `${basePrefix}-${variantSuffix}` : basePrefix;
+      const categoryPrefix = categories.find((cat) => cat._id === newProduct.category)?.prefix || '';
+      
+      // สร้าง SKU ตามลำดับใหม่: Brand-prefix-Category-prefix-SKU_Product-Model-Color-Size-Material (ไม่มีเว้นวรรค)
+      const skuParts = [
+        brandPrefix,
+        categoryPrefix,
+        skuPrefix,  // SKU Product (เช่น IP)
+        variant.model,
+        variant.color,
+        variant.size,
+        variant.material,
+      ].filter(Boolean); // ลบค่าว่าง
       
       let sku = '';
-      if (skuPrefix) {
-        // ถ้ามี skuPrefix ให้เป็น basePrefix-color-size-material-SKU_PREFIX
-        sku = `${fullPrefix}-${skuPrefix}`;
-      } else {
-        // ไม่มี skuPrefix ให้ใช้ running number
-        const runningNumber = getNextRunningNumber(fullPrefix);
-        sku = `${fullPrefix}-${runningNumber}`;
+      if (skuParts.length > 0) {
+        sku = skuParts.join('-').toUpperCase();
       }
       
-      if (fullPrefix) {
+      if (sku) {
         updated[index].sku = sku;
       }
     }
@@ -589,15 +598,15 @@ export default function Products() {
   const handleCategoryChange = (categoryId) => {
     const updates = { category: categoryId };
     if (!showVariants && categoryId && newProduct.brand) {
-      const newCategoryPrefix = categories.find((cat) => cat._id === categoryId)?.prefix || '';
       const newBrandPrefix = brands.find((brand) => brand._id === newProduct.brand)?.prefix || '';
-      const newBasePrefix = [newCategoryPrefix, newBrandPrefix].filter(Boolean).join('-');
+      const newCategoryPrefix = categories.find((cat) => cat._id === categoryId)?.prefix || '';
+      const newBasePrefix = [newBrandPrefix, newCategoryPrefix].filter(Boolean).join('-');
       
       // เก็บ suffix จาก SKU เดิม
       const oldSku = newProduct.sku || '';
-      const oldCategoryPrefix = categories.find((cat) => cat._id === newProduct.category)?.prefix || '';
       const oldBrandPrefix = brands.find((brand) => brand._id === newProduct.brand)?.prefix || '';
-      const oldBasePrefix = [oldCategoryPrefix, oldBrandPrefix].filter(Boolean).join('-');
+      const oldCategoryPrefix = categories.find((cat) => cat._id === newProduct.category)?.prefix || '';
+      const oldBasePrefix = [oldBrandPrefix, oldCategoryPrefix].filter(Boolean).join('-');
       
       // แยก suffix จาก SKU เดิม
       let suffix = '';
@@ -622,13 +631,13 @@ export default function Products() {
     
     // แก้ไข variant SKU ด้วย
     if (showVariants && categoryId) {
-      const newCategoryPrefix = categories.find((cat) => cat._id === categoryId)?.prefix || '';
       const newBrandPrefix = brands.find((brand) => brand._id === newProduct.brand)?.prefix || '';
-      const newBasePrefix = [newCategoryPrefix, newBrandPrefix].filter(Boolean).join('-');
+      const newCategoryPrefix = categories.find((cat) => cat._id === categoryId)?.prefix || '';
+      const newBasePrefix = [newBrandPrefix, newCategoryPrefix].filter(Boolean).join('-');
       
-      const oldCategoryPrefix = categories.find((cat) => cat._id === newProduct.category)?.prefix || '';
       const oldBrandPrefix = brands.find((brand) => brand._id === newProduct.brand)?.prefix || '';
-      const oldBasePrefix = [oldCategoryPrefix, oldBrandPrefix].filter(Boolean).join('-');
+      const oldCategoryPrefix = categories.find((cat) => cat._id === newProduct.category)?.prefix || '';
+      const oldBasePrefix = [oldBrandPrefix, oldCategoryPrefix].filter(Boolean).join('-');
       
       const updatedVariants = variants.map((variant) => {
         const oldVariantSku = variant.sku || '';
@@ -658,13 +667,13 @@ export default function Products() {
     if (!showVariants && brandId && newProduct.category) {
       const newBrandPrefix = brands.find((brand) => brand._id === brandId)?.prefix || '';
       const newCategoryPrefix = categories.find((cat) => cat._id === newProduct.category)?.prefix || '';
-      const newBasePrefix = [newCategoryPrefix, newBrandPrefix].filter(Boolean).join('-');
+      const newBasePrefix = [newBrandPrefix, newCategoryPrefix].filter(Boolean).join('-');
       
       // เก็บ suffix จาก SKU เดิม
       const oldSku = newProduct.sku || '';
       const oldBrandPrefix = brands.find((brand) => brand._id === newProduct.brand)?.prefix || '';
       const oldCategoryPrefix = categories.find((cat) => cat._id === newProduct.category)?.prefix || '';
-      const oldBasePrefix = [oldCategoryPrefix, oldBrandPrefix].filter(Boolean).join('-');
+      const oldBasePrefix = [oldBrandPrefix, oldCategoryPrefix].filter(Boolean).join('-');
       
       // แยก suffix จาก SKU เดิม
       let suffix = '';
@@ -691,11 +700,11 @@ export default function Products() {
     if (showVariants && brandId) {
       const newBrandPrefix = brands.find((brand) => brand._id === brandId)?.prefix || '';
       const newCategoryPrefix = categories.find((cat) => cat._id === newProduct.category)?.prefix || '';
-      const newBasePrefix = [newCategoryPrefix, newBrandPrefix].filter(Boolean).join('-');
+      const newBasePrefix = [newBrandPrefix, newCategoryPrefix].filter(Boolean).join('-');
       
       const oldBrandPrefix = brands.find((brand) => brand._id === newProduct.brand)?.prefix || '';
       const oldCategoryPrefix = categories.find((cat) => cat._id === newProduct.category)?.prefix || '';
-      const oldBasePrefix = [oldCategoryPrefix, oldBrandPrefix].filter(Boolean).join('-');
+      const oldBasePrefix = [oldBrandPrefix, oldCategoryPrefix].filter(Boolean).join('-');
       
       const updatedVariants = variants.map((variant) => {
         const oldVariantSku = variant.sku || '';
@@ -736,73 +745,6 @@ export default function Products() {
       <div className="bg-white rounded-xl shadow p-6">
         <form onSubmit={editMode ? handleUpdate : handleCreate}>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* Category */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">หมวดหมู่</label>
-              {!showNewCategoryForm ? (
-                <div>
-                  <select
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                    value={newProduct.category || ''}
-                    onChange={(e) => handleCategoryChange(e.target.value)}
-                  >
-                    <option value="">-- เลือกหมวดหมู่ --</option>
-                    {categories.map((cat) => (
-                      <option key={cat._id} value={cat._id}>
-                        {cat.name}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={() => setShowNewCategoryForm(true)}
-                    className="mt-1 text-xs text-blue-600 hover:text-blue-700"
-                  >
-                    + เพิ่มใหม่
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <div className="flex gap-2">
-                    <input
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                      placeholder="ชื่อหมวดหมู่"
-                      value={newCategoryName}
-                      onChange={(e) => setNewCategoryName(e.target.value)}
-                    />
-                    <input
-                      className="w-20 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm uppercase"
-                      placeholder="Prefix"
-                      value={newCategoryPrefix}
-                      onChange={(e) => setNewCategoryPrefix(e.target.value.toUpperCase())}
-                      maxLength={10}
-                    />
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={handleAddCategory}
-                      disabled={savingCategory}
-                      className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm disabled:opacity-50"
-                    >
-                      {savingCategory ? '...' : 'เพิ่ม'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowNewCategoryForm(false);
-                        setNewCategoryName('');
-                        setNewCategoryPrefix('');
-                      }}
-                      className="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-sm"
-                    >
-                      ยกเลิก
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-
             {/* Brand */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">ยี่ห้อ</label>
@@ -870,6 +812,73 @@ export default function Products() {
               )}
             </div>
 
+            {/* Category */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">หมวดหมู่</label>
+              {!showNewCategoryForm ? (
+                <div>
+                  <select
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                    value={newProduct.category || ''}
+                    onChange={(e) => handleCategoryChange(e.target.value)}
+                  >
+                    <option value="">-- เลือกหมวดหมู่ --</option>
+                    {categories.map((cat) => (
+                      <option key={cat._id} value={cat._id}>
+                        {cat.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => setShowNewCategoryForm(true)}
+                    className="mt-1 text-xs text-blue-600 hover:text-blue-700"
+                  >
+                    + เพิ่มใหม่
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex gap-2">
+                    <input
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                      placeholder="ชื่อหมวดหมู่"
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                    />
+                    <input
+                      className="w-20 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm uppercase"
+                      placeholder="Prefix"
+                      value={newCategoryPrefix}
+                      onChange={(e) => setNewCategoryPrefix(e.target.value.toUpperCase())}
+                      maxLength={10}
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={handleAddCategory}
+                      disabled={savingCategory}
+                      className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm disabled:opacity-50"
+                    >
+                      {savingCategory ? '...' : 'เพิ่ม'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowNewCategoryForm(false);
+                        setNewCategoryName('');
+                        setNewCategoryPrefix('');
+                      }}
+                      className="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-sm"
+                    >
+                      ยกเลิก
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Product Name */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">ชื่อสินค้า *</label>
@@ -882,17 +891,17 @@ export default function Products() {
               />
             </div>
 
-            {/* SKU Prefix (for variants) */}
+            {/* SKU Product (for variants) */}
             {showVariants && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">SKU Prefix (ตัวอักษรนำหน้า)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">SKU Product (ชื่อสินค้าลัด)</label>
                 <input
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono"
-                  placeholder="เช่น SHIRT หรือเว้นว่างให้ใช้ prefix จาก category/brand"
+                  placeholder="เช่น IP (iPhone) หรือเว้นว่างให้ใช้ color-size-material"
                   value={skuPrefix || ''}
                   onChange={(e) => setSkuPrefix(e.target.value.toUpperCase())}
                 />
-                <p className="text-xs text-gray-500 mt-1">ถ้าใส่ค่านี้จะใช้เป็น prefix สำหรับ SKU variant โดยไม่มี running number</p>
+                <p className="text-xs text-gray-500 mt-1">ชื่อลัดสินค้า ที่จะแสดงหลัง Brand-Category (เช่น APPL-MOBI-IP)</p>
               </div>
             )}
 
@@ -1032,7 +1041,7 @@ export default function Products() {
                 <div key={idx} className="border border-gray-200 rounded-lg p-4 mb-3 bg-gray-50">
                   <div className="flex justify-between items-center mb-3">
                     <span className="font-medium text-gray-700">Variant {idx + 1}</span>
-                    {variants.length > 1 && (
+                    {variants.length > 1 && !variant._id && (
                       <button
                         type="button"
                         onClick={() => removeVariant(idx)}
@@ -1042,7 +1051,16 @@ export default function Products() {
                       </button>
                     )}
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">รุ่น</label>
+                      <input
+                        className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                        placeholder="เช่น AirMax90"
+                        value={variant.model || ''}
+                        onChange={(e) => updateVariant(idx, 'model', e.target.value)}
+                      />
+                    </div>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">สี</label>
                       <input
@@ -1073,10 +1091,13 @@ export default function Products() {
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">SKU *</label>
                       <input
-                        className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-sm font-mono"
+                        className={`w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-sm font-mono ${
+                          variant._id ? 'bg-gray-200 cursor-not-allowed' : ''
+                        }`}
                         placeholder="เช่น SHIRT-RED-L"
                         value={variant.sku || ''}
                         onChange={(e) => updateVariant(idx, 'sku', e.target.value)}
+                        disabled={!!variant._id}
                         required
                       />
                     </div>
@@ -1155,7 +1176,38 @@ export default function Products() {
               </div>
             </div>
 
-            {/* Row 2: Lead Time & Reorder Buffer Days */}
+            {/* Row 2: Status & Enable Stock Alerts */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">สถานะสินค้า</label>
+                <select
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                  value={newProduct.status || 'active'}
+                  onChange={(e) => setNewProduct({ ...newProduct, status: e.target.value })}
+                >
+                  <option value="active">✅ ใช้งาน</option>
+                  <option value="archived">📦 หยุดใช้งาน</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">หยุดใช้งาน = ไม่แสดงในช่องสั่งซื้อ</p>
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="enableStockAlerts"
+                    type="checkbox"
+                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                    checked={newProduct.enableStockAlerts === true}
+                    onChange={(e) => setNewProduct({ ...newProduct, enableStockAlerts: e.target.checked })}
+                  />
+                  <label htmlFor="enableStockAlerts" className="text-sm font-medium text-gray-700 cursor-pointer">
+                    🔔 เปิดการแจ้งเตือนสต็อกต่ำ
+                  </label>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">ปิด = ไม่แจ้งเตือนเมื่อสต็อกต่ำ</p>
+              </div>
+            </div>
+
+            {/* Row 3: Lead Time & Reorder Buffer Days */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">จำนวนวันที่ผลิต (Lead Time)</label>
@@ -1216,6 +1268,7 @@ export default function Products() {
                 <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">Name</th>
                 <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">Category</th>
                 <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">Brand</th>
+                <th className="text-center py-2 px-3 text-sm font-semibold text-gray-600">Status</th>
                 <th className="text-center py-2 px-3 text-sm font-semibold text-gray-600">Variants</th>
                 <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">Details</th>
                 <th className="text-center py-2 px-3 text-sm font-semibold text-gray-600">Actions</th>
@@ -1223,10 +1276,19 @@ export default function Products() {
             </thead>
             <tbody>
               {products.map((p) => (
-                <tr key={p._id} className="border-b border-gray-100 hover:bg-gray-50">
+                <tr key={p._id} className={`border-b border-gray-100 hover:bg-gray-50 ${p.status === 'archived' ? 'opacity-60' : ''}`}>
                   <td className="py-2 px-3 text-sm font-medium">{p.name}</td>
                   <td className="py-2 px-3 text-sm text-gray-600">{getCategoryName(p.category)}</td>
                   <td className="py-2 px-3 text-sm text-gray-600">{getBrandName(p.brand)}</td>
+                  <td className="py-2 px-3 text-sm text-center">
+                    <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${
+                      p.status === 'active' 
+                        ? 'bg-green-100 text-green-700' 
+                        : 'bg-gray-100 text-gray-700'
+                    }`}>
+                      {p.status === 'active' ? '✅ ใช้งาน' : '📦 หยุดใช้'}
+                    </span>
+                  </td>
                   <td className="py-2 px-3 text-sm text-center">{p.variants?.length || 0}</td>
                   <td className="py-2 px-3">
                     {p.variants?.map((v, idx) => (
@@ -1245,10 +1307,11 @@ export default function Products() {
                         </span>
                       </div>
                     ))}
-                    {(p.reorderBufferDays || p.minOrderQty) && (
-                      <div className="text-xs text-blue-600 mt-1 pt-1 border-t border-gray-100">
-                        {p.reorderBufferDays && <div>📌 Buffer: {p.reorderBufferDays} วัน</div>}
-                        {p.minOrderQty && <div>📦 MOQ: {p.minOrderQty} ชิ้น</div>}
+                    {(p.reorderBufferDays || p.minOrderQty || !p.enableStockAlerts) && (
+                      <div className="text-xs mt-1 pt-1 border-t border-gray-100">
+                        {p.reorderBufferDays && <div className="text-blue-600">📌 Buffer: {p.reorderBufferDays} วัน</div>}
+                        {p.minOrderQty && <div className="text-blue-600">📦 MOQ: {p.minOrderQty} ชิ้น</div>}
+                        {!p.enableStockAlerts && <div className="text-orange-600">🔇 ปิดแจ้งเตือน</div>}
                       </div>
                     )}
                   </td>

@@ -305,6 +305,9 @@ export default function Orders() {
                 .filter((it, i) => i !== idx && it.productId === item.productId && it.variantId)
                 .map((it) => it.variantId);
               const availableVariants = variants.filter((v) => !selectedVariantIds.includes(v._id));
+              
+              // Filter out archived products for selection
+              const activeProducts = products.filter((p) => p.status !== 'archived');
 
               return (
                 <div key={idx} className="border border-dashed border-gray-300 rounded-lg p-4 bg-gray-50">
@@ -313,7 +316,7 @@ export default function Orders() {
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">สินค้า</label>
                       <SearchableSelect
-                        options={products}
+                        options={activeProducts}
                         value={item.productId}
                         onChange={(val) => updateItem(idx, { productId: val, variantId: '' })}
                         placeholder="ค้นหาสินค้า..."
