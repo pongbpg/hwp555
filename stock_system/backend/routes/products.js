@@ -112,7 +112,7 @@ router.put('/:id', authenticateToken, authorizeRoles('owner', 'admin', 'hr'), as
       'enableStockAlerts',
       'attributesSchema',
       'variants',
-      'skuPrefix',
+      'skuProduct',
       'costingMethod',
       'leadTimeDays',
       'reorderBufferDays',

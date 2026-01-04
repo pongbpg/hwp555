@@ -80,7 +80,7 @@ const productSchema = new Schema(
       },
     ],
     variants: { type: [variantSchema], default: [] },
-    skuPrefix: { type: String, default: '' },
+    skuProduct: { type: String, default: '' },
     costingMethod: {
       type: String,
       enum: ['FIFO', 'LIFO', 'WAC'],

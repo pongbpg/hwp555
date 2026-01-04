@@ -47,7 +47,7 @@ export default function Products() {
   const [savingBrand, setSavingBrand] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [editingProductId, setEditingProductId] = useState(null);
-  const [skuPrefix, setSkuPrefix] = useState('');
+  const [skuProduct, setSkuProduct] = useState('');
   const [defaultPrice, setDefaultPrice] = useState(0);
   const [defaultCost, setDefaultCost] = useState(0);
   const [defaultStockOnHand, setDefaultStockOnHand] = useState(0);
@@ -89,7 +89,7 @@ export default function Products() {
     loadBrands();
   }, []);
 
-  const getNextRunningNumber = (prefix) => {
+  const generateRunningNumber = (prefix) => {
     if (!prefix) return '0001';
     const matchingSKUs = [];
     products.forEach((product) => {
@@ -230,13 +230,9 @@ export default function Products() {
 
   useEffect(() => {
     if (!editMode && !showVariants && newProduct.category && newProduct.brand && categories.length > 0 && brands.length > 0) {
-      const categoryPrefix = categories.find((cat) => cat._id === newProduct.category)?.prefix || '';
-      const brandPrefix = brands.find((brand) => brand._id === newProduct.brand)?.prefix || '';
-      if (categoryPrefix || brandPrefix) {
-        // ลำดับใหม่: Brand-Prefix - Category-Prefix
-        const basePrefix = [brandPrefix, categoryPrefix].filter(Boolean).join('-');
-        const runningNumber = getNextRunningNumber(basePrefix);
-        const generatedSKU = `${basePrefix}-${runningNumber}`;
+      const basePrefix = getBasePrefix(newProduct.brand, newProduct.category);
+      if (basePrefix) {
+        const generatedSKU = generateSingleProductSKU(basePrefix);
         if (newProduct.sku !== generatedSKU) {
           setNewProduct((prev) => ({ ...prev, sku: generatedSKU }));
         }
@@ -246,36 +242,25 @@ export default function Products() {
 
   useEffect(() => {
     if (showVariants) {
-      const brandPrefix = brands.find((brand) => brand._id === newProduct.brand)?.prefix || '';
-      const categoryPrefix = categories.find((cat) => cat._id === newProduct.category)?.prefix || '';
-
       const updatedVariants = variants.map((variant) => {
-        // เฉพาะ variant ใหม่เท่านั้นที่ให้ auto-generate SKU (variant เก่ามี _id)
         const isNewVariant = !variant._id;
         
-        // ถ้าเป็น variant เก่าและมี SKU เดิมแล้ว ให้คงไว้ (ไม่ auto-generate)
+        // variant เก่า (มี _id) ให้คงไว้ ไม่ auto-generate
         if (!isNewVariant && variant.sku) {
           return variant;
         }
 
-        // ถ้าเป็น variant ใหม่ หรือไม่มี SKU ให้ generate
+        // variant ใหม่ หรือไม่มี SKU ให้ generate
         if (isNewVariant || !variant.sku) {
-          // สร้าง SKU ตามลำดับ: Brand-Category-SKU_Product-Model-Color-Size-Material
-          const skuParts = [
-            brandPrefix,
-            categoryPrefix,
-            skuPrefix,
+          const sku = generateVariantSKU(
+            newProduct.brand,
+            newProduct.category,
+            skuProduct,
             variant.model,
             variant.color,
             variant.size,
-            variant.material,
-          ].filter(Boolean);
-          
-          let sku = '';
-          if (skuParts.length > 0) {
-            sku = skuParts.join('-').toUpperCase();
-          }
-          
+            variant.material
+          );
           return { ...variant, sku: sku || variant.sku };
         }
 
@@ -283,7 +268,7 @@ export default function Products() {
       });
       setVariants(updatedVariants);
     }
-  }, [newProduct.category, newProduct.brand, showVariants, editMode, skuPrefix, variants, brands, categories]);
+  }, [newProduct.category, newProduct.brand, showVariants, editMode, skuProduct, variants, brands, categories]);
 
   const handleEdit = (product) => {
     setEditMode(true);
@@ -304,8 +289,8 @@ export default function Products() {
     });
     setCostingMethod(product.costingMethod || 'FIFO');
     
-    // ✅ เรียกใช้ skuPrefix จาก database (ไม่ต้องคำนวณจาก SKU)
-    setSkuPrefix(product.skuPrefix || '');
+    // ✅ เรียกใช้ skuProduct จาก database (ไม่ต้องคำนวณจาก SKU)
+    setSkuProduct(product.skuProduct || '');
 
     const hasVariants =
       product.variants?.length > 1 ||
@@ -344,7 +329,7 @@ export default function Products() {
     setShowVariants(false);
     setShowNewCategoryForm(false);
     setShowNewBrandForm(false);
-    setSkuPrefix('');
+    setSkuProduct('');
     setDefaultPrice(0);
     setDefaultCost(0);
     setDefaultStockOnHand(0);
@@ -404,7 +389,7 @@ export default function Products() {
         category: newProduct.category,
         brand: newProduct.brand,
         variants: variantsPayload,
-        skuPrefix: showVariants ? skuPrefix : '',
+        skuProduct: showVariants ? skuProduct : '',
         costingMethod,
         leadTimeDays: Number(newProduct.leadTimeDays) || 7,
         reorderBufferDays: Number(newProduct.reorderBufferDays) || 7,
@@ -430,10 +415,6 @@ export default function Products() {
     setSaving(true);
     setError('');
     try {
-      const categoryPrefix = categories.find((cat) => cat._id === newProduct.category)?.prefix || '';
-      const brandPrefix = brands.find((brand) => brand._id === newProduct.brand)?.prefix || '';
-      const basePrefix = [categoryPrefix, brandPrefix].filter(Boolean).join('-');
-
       const variantsPayload = showVariants
         ? variants.map((v) => {
             return {
@@ -467,7 +448,7 @@ export default function Products() {
         category: newProduct.category,
         brand: newProduct.brand,
         variants: variantsPayload,
-        skuPrefix: showVariants ? skuPrefix : '',
+        skuProduct: showVariants ? skuProduct : '',
         costingMethod,
         leadTimeDays: Number(newProduct.leadTimeDays) || 7,
         reorderBufferDays: Number(newProduct.reorderBufferDays) || 7,
@@ -481,7 +462,7 @@ export default function Products() {
       setShowVariants(false);
       setShowNewCategoryForm(false);
       setShowNewBrandForm(false);
-      setSkuPrefix('');
+      setSkuProduct('');
       setCostingMethod('FIFO');
       loadProducts();
     } catch (err) {
@@ -546,114 +527,124 @@ export default function Products() {
     const updated = [...variants];
     updated[index] = { ...updated[index], [field]: value };
 
-    // เฉพาะ variant ใหม่เท่านั้นที่ให้ auto-generate SKU (variant เก่ามี _id)
+    // เฉพาะ variant ใหม่เท่านั้นที่ให้ auto-generate SKU
     const isNewVariant = !updated[index]._id;
+    const attributeFields = ['model', 'color', 'size', 'material'];
     
-    if (!editMode && isNewVariant && (field === 'model' || field === 'color' || field === 'size' || field === 'material')) {
+    if (isNewVariant && attributeFields.includes(field)) {
       const variant = updated[index];
-      
-      // ใช้ prefix ย่อ (abbreviation) แบบเดิม ไม่เว้นวรรค
-      const brandPrefix = brands.find((brand) => brand._id === newProduct.brand)?.prefix || '';
-      const categoryPrefix = categories.find((cat) => cat._id === newProduct.category)?.prefix || '';
-      
-      // สร้าง SKU ตามลำดับใหม่: Brand-prefix-Category-prefix-SKU_Product-Model-Color-Size-Material (ไม่มีเว้นวรรค)
-      const skuParts = [
-        brandPrefix,
-        categoryPrefix,
-        skuPrefix,  // SKU Product (เช่น IP)
+      const sku = generateVariantSKU(
+        newProduct.brand,
+        newProduct.category,
+        skuProduct,
         variant.model,
         variant.color,
         variant.size,
-        variant.material,
-      ].filter(Boolean); // ลบค่าว่าง
-      
-      let sku = '';
-      if (skuParts.length > 0) {
-        sku = skuParts.join('-').toUpperCase();
-      }
-      
+        variant.material
+      );
       if (sku) {
         updated[index].sku = sku;
       }
     }
+    
     setVariants(updated);
   };
 
+  // ========== Helper Functions ==========
+  
+  // ดึงชื่อหมวดหมู่
   const getCategoryName = (categoryId) => {
     return categories.find((cat) => cat._id === categoryId)?.name || categoryId || '-';
   };
 
+  // ดึงชื่อยี่ห้อ
   const getBrandName = (brandId) => {
     return brands.find((brand) => brand._id === brandId)?.name || brandId || '-';
   };
 
-  const generateSKU = (catId, brandId) => {
-    const categoryPrefix = categories.find((cat) => cat._id === (catId || newProduct.category))?.prefix || '';
-    const brandPrefix = brands.find((brand) => brand._id === (brandId || newProduct.brand))?.prefix || '';
-    const basePrefix = [categoryPrefix, brandPrefix].filter(Boolean).join('-');
-    const runningNumber = getNextRunningNumber(basePrefix);
+  // ดึง prefix ของ brand และ category
+  const getPrefixes = (brandId, categoryId) => {
+    const brandPrefix = brands.find((brand) => brand._id === brandId)?.prefix || '';
+    const categoryPrefix = categories.find((cat) => cat._id === categoryId)?.prefix || '';
+    return { brandPrefix, categoryPrefix };
+  };
+
+  // สร้าง base prefix (Brand-Category)
+  const getBasePrefix = (brandId, categoryId) => {
+    const { brandPrefix, categoryPrefix } = getPrefixes(brandId, categoryId);
+    return [brandPrefix, categoryPrefix].filter(Boolean).join('-');
+  };
+
+  // สร้าง SKU สำหรับ single product
+  const generateSingleProductSKU = (basePrefix) => {
+    const runningNumber = generateRunningNumber(basePrefix);
     return `${basePrefix}-${runningNumber}`;
   };
 
+  // สร้าง SKU สำหรับ variant
+  const generateVariantSKU = (brandId, categoryId, skuProductValue, model, color, size, material) => {
+    const { brandPrefix, categoryPrefix } = getPrefixes(brandId, categoryId);
+    const skuParts = [
+      brandPrefix,
+      categoryPrefix,
+      skuProductValue,
+      model,
+      color,
+      size,
+      material,
+    ].filter(Boolean);
+    
+    return skuParts.length > 0 ? skuParts.join('-').toUpperCase() : '';
+  };
+
+  // ========== End Helper Functions ==========
+
   const handleCategoryChange = (categoryId) => {
     const updates = { category: categoryId };
+    
+    // อัพเดท SKU สำหรับ single product
     if (!showVariants && categoryId && newProduct.brand) {
-      const newBrandPrefix = brands.find((brand) => brand._id === newProduct.brand)?.prefix || '';
-      const newCategoryPrefix = categories.find((cat) => cat._id === categoryId)?.prefix || '';
-      const newBasePrefix = [newBrandPrefix, newCategoryPrefix].filter(Boolean).join('-');
+      const newBasePrefix = getBasePrefix(newProduct.brand, categoryId);
+      const oldBasePrefix = getBasePrefix(newProduct.brand, newProduct.category);
       
       // เก็บ suffix จาก SKU เดิม
       const oldSku = newProduct.sku || '';
-      const oldBrandPrefix = brands.find((brand) => brand._id === newProduct.brand)?.prefix || '';
-      const oldCategoryPrefix = categories.find((cat) => cat._id === newProduct.category)?.prefix || '';
-      const oldBasePrefix = [oldBrandPrefix, oldCategoryPrefix].filter(Boolean).join('-');
-      
-      // แยก suffix จาก SKU เดิม
       let suffix = '';
       if (oldBasePrefix && oldSku.startsWith(oldBasePrefix + '-')) {
         suffix = oldSku.substring(oldBasePrefix.length + 1);
       }
       
-      // สร้าง SKU ใหม่ = newBasePrefix + suffix
+      // สร้าง SKU ใหม่
       if (suffix) {
         updates.sku = `${newBasePrefix}-${suffix}`;
       } else {
-        const runningNumber = getNextRunningNumber(newBasePrefix);
+        const runningNumber = generateRunningNumber(newBasePrefix);
         updates.sku = `${newBasePrefix}-${runningNumber}`;
       }
     } else if (!showVariants && categoryId) {
       const categoryPrefix = categories.find((cat) => cat._id === categoryId)?.prefix || '';
       if (categoryPrefix) {
-        const runningNumber = getNextRunningNumber(categoryPrefix);
+        const runningNumber = generateRunningNumber(categoryPrefix);
         updates.sku = `${categoryPrefix}-${runningNumber}`;
       }
     }
     
-    // แก้ไข variant SKU ด้วย
+    // อัพเดท variant SKU
     if (showVariants && categoryId) {
-      const newBrandPrefix = brands.find((brand) => brand._id === newProduct.brand)?.prefix || '';
-      const newCategoryPrefix = categories.find((cat) => cat._id === categoryId)?.prefix || '';
-      const newBasePrefix = [newBrandPrefix, newCategoryPrefix].filter(Boolean).join('-');
-      
-      const oldBrandPrefix = brands.find((brand) => brand._id === newProduct.brand)?.prefix || '';
-      const oldCategoryPrefix = categories.find((cat) => cat._id === newProduct.category)?.prefix || '';
-      const oldBasePrefix = [oldBrandPrefix, oldCategoryPrefix].filter(Boolean).join('-');
+      const newBasePrefix = getBasePrefix(newProduct.brand, categoryId);
+      const oldBasePrefix = getBasePrefix(newProduct.brand, newProduct.category);
       
       const updatedVariants = variants.map((variant) => {
         const oldVariantSku = variant.sku || '';
         
-        // แยก suffix จาก variant SKU เดิม
+        // เก็บ suffix จาก SKU เดิม
         let suffix = '';
         if (oldBasePrefix && oldVariantSku.startsWith(oldBasePrefix + '-')) {
           suffix = oldVariantSku.substring(oldBasePrefix.length + 1);
         }
         
-        // สร้าง variant SKU ใหม่
-        let newSku = oldVariantSku;
-        if (suffix) {
-          newSku = `${newBasePrefix}-${suffix}`;
-        }
-        
+        // สร้าง SKU ใหม่
+        const newSku = suffix ? `${newBasePrefix}-${suffix}` : oldVariantSku;
         return { ...variant, sku: newSku };
       });
       setVariants(updatedVariants);
@@ -664,63 +655,50 @@ export default function Products() {
 
   const handleBrandChange = (brandId) => {
     const updates = { brand: brandId };
+    
+    // อัพเดท SKU สำหรับ single product
     if (!showVariants && brandId && newProduct.category) {
-      const newBrandPrefix = brands.find((brand) => brand._id === brandId)?.prefix || '';
-      const newCategoryPrefix = categories.find((cat) => cat._id === newProduct.category)?.prefix || '';
-      const newBasePrefix = [newBrandPrefix, newCategoryPrefix].filter(Boolean).join('-');
+      const newBasePrefix = getBasePrefix(brandId, newProduct.category);
+      const oldBasePrefix = getBasePrefix(newProduct.brand, newProduct.category);
       
       // เก็บ suffix จาก SKU เดิม
       const oldSku = newProduct.sku || '';
-      const oldBrandPrefix = brands.find((brand) => brand._id === newProduct.brand)?.prefix || '';
-      const oldCategoryPrefix = categories.find((cat) => cat._id === newProduct.category)?.prefix || '';
-      const oldBasePrefix = [oldBrandPrefix, oldCategoryPrefix].filter(Boolean).join('-');
-      
-      // แยก suffix จาก SKU เดิม
       let suffix = '';
       if (oldBasePrefix && oldSku.startsWith(oldBasePrefix + '-')) {
         suffix = oldSku.substring(oldBasePrefix.length + 1);
       }
       
-      // สร้าง SKU ใหม่ = newBasePrefix + suffix
+      // สร้าง SKU ใหม่
       if (suffix) {
         updates.sku = `${newBasePrefix}-${suffix}`;
       } else {
-        const runningNumber = getNextRunningNumber(newBasePrefix);
+        const runningNumber = generateRunningNumber(newBasePrefix);
         updates.sku = `${newBasePrefix}-${runningNumber}`;
       }
     } else if (!showVariants && brandId) {
       const brandPrefix = brands.find((brand) => brand._id === brandId)?.prefix || '';
       if (brandPrefix) {
-        const runningNumber = getNextRunningNumber(brandPrefix);
+        const runningNumber = generateRunningNumber(brandPrefix);
         updates.sku = `${brandPrefix}-${runningNumber}`;
       }
     }
     
-    // แก้ไข variant SKU ด้วย
+    // อัพเดท variant SKU
     if (showVariants && brandId) {
-      const newBrandPrefix = brands.find((brand) => brand._id === brandId)?.prefix || '';
-      const newCategoryPrefix = categories.find((cat) => cat._id === newProduct.category)?.prefix || '';
-      const newBasePrefix = [newBrandPrefix, newCategoryPrefix].filter(Boolean).join('-');
-      
-      const oldBrandPrefix = brands.find((brand) => brand._id === newProduct.brand)?.prefix || '';
-      const oldCategoryPrefix = categories.find((cat) => cat._id === newProduct.category)?.prefix || '';
-      const oldBasePrefix = [oldBrandPrefix, oldCategoryPrefix].filter(Boolean).join('-');
+      const newBasePrefix = getBasePrefix(brandId, newProduct.category);
+      const oldBasePrefix = getBasePrefix(newProduct.brand, newProduct.category);
       
       const updatedVariants = variants.map((variant) => {
         const oldVariantSku = variant.sku || '';
         
-        // แยก suffix จาก variant SKU เดิม
+        // เก็บ suffix จาก SKU เดิม
         let suffix = '';
         if (oldBasePrefix && oldVariantSku.startsWith(oldBasePrefix + '-')) {
           suffix = oldVariantSku.substring(oldBasePrefix.length + 1);
         }
         
-        // สร้าง variant SKU ใหม่
-        let newSku = oldVariantSku;
-        if (suffix) {
-          newSku = `${newBasePrefix}-${suffix}`;
-        }
-        
+        // สร้าง SKU ใหม่
+        const newSku = suffix ? `${newBasePrefix}-${suffix}` : oldVariantSku;
         return { ...variant, sku: newSku };
       });
       setVariants(updatedVariants);
@@ -898,8 +876,8 @@ export default function Products() {
                 <input
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono"
                   placeholder="เช่น IP (iPhone) หรือเว้นว่างให้ใช้ color-size-material"
-                  value={skuPrefix || ''}
-                  onChange={(e) => setSkuPrefix(e.target.value.toUpperCase())}
+                  value={skuProduct || ''}
+                  onChange={(e) => setSkuProduct(e.target.value.toUpperCase())}
                 />
                 <p className="text-xs text-gray-500 mt-1">ชื่อลัดสินค้า ที่จะแสดงหลัง Brand-Category (เช่น APPL-MOBI-IP)</p>
               </div>
