@@ -7,13 +7,12 @@ const emptyProduct = {
   category: '',
   brand: '',
   price: 0,
-  cost: 0,
-  stockOnHand: 0,
   leadTimeDays: 7,
   reorderBufferDays: 7,
   minOrderQty: 0,
   status: 'active',
   enableStockAlerts: true,
+  skuProduct: '',
 };
 
 const emptyVariant = {
@@ -23,8 +22,6 @@ const emptyVariant = {
   size: '',
   material: '',
   price: 0,
-  cost: 0,
-  stockOnHand: 0,
 };
 
 export default function Products() {
@@ -49,8 +46,6 @@ export default function Products() {
   const [editingProductId, setEditingProductId] = useState(null);
   const [skuProduct, setSkuProduct] = useState('');
   const [defaultPrice, setDefaultPrice] = useState(0);
-  const [defaultCost, setDefaultCost] = useState(0);
-  const [defaultStockOnHand, setDefaultStockOnHand] = useState(0);
   const [costingMethod, setCostingMethod] = useState('FIFO');
 
   const loadProducts = async () => {
@@ -241,7 +236,8 @@ export default function Products() {
   }, [newProduct.category, newProduct.brand, showVariants, categories, brands, products, editMode]);
 
   useEffect(() => {
-    if (showVariants) {
+    if (showVariants && !editMode) {
+      // ✅ เฉพาะตอน create ใหม่ ไม่ใช่ตอนแก้ไข เพื่อไม่ให้ batches หาย
       const updatedVariants = variants.map((variant) => {
         const isNewVariant = !variant._id;
         
@@ -261,35 +257,33 @@ export default function Products() {
             variant.size,
             variant.material
           );
-          return { ...variant, sku: sku || variant.sku };
+          // ✅ เมื่อ generate SKU ต้องรักษา batches ไว้
+          return { ...variant, sku: sku || variant.sku, batches: variant.batches };
         }
 
         return variant;
       });
       setVariants(updatedVariants);
     }
-  }, [newProduct.category, newProduct.brand, showVariants, editMode, skuProduct, variants, brands, categories]);
+  }, [newProduct.category, newProduct.brand, showVariants, editMode, skuProduct, brands, categories]);
 
   const handleEdit = (product) => {
     setEditMode(true);
     setEditingProductId(product._id);
     setNewProduct({
-      name: product.name,
+      name: product.name || '',
       sku: product.sku || '',
       category: product.category || '',
       brand: product.brand || '',
       price: product.variants?.[0]?.price || 0,
-      cost: product.variants?.[0]?.cost || 0,
-      stockOnHand: product.variants?.[0]?.stockOnHand || 0,
       leadTimeDays: product.leadTimeDays ?? 7,
       reorderBufferDays: product.reorderBufferDays ?? 7,
       minOrderQty: product.minOrderQty ?? 0,
       status: product.status || 'active',
       enableStockAlerts: product.enableStockAlerts ?? true,
+      skuProduct: product.skuProduct || '',
     });
     setCostingMethod(product.costingMethod || 'FIFO');
-    
-    // ✅ เรียกใช้ skuProduct จาก database (ไม่ต้องคำนวณจาก SKU)
     setSkuProduct(product.skuProduct || '');
 
     const hasVariants =
@@ -301,17 +295,17 @@ export default function Products() {
 
     setShowVariants(hasVariants);
 
-    if (hasVariants) {
+    // ✅ ALWAYS load variant data with _id and batches, regardless of hasVariants
+    if (product.variants && product.variants.length > 0) {
       const loadedVariants = product.variants.map((v) => ({
-        _id: v._id,  // ✅ เก็บ variant ID เดิม
-        sku: v.sku,
+        _id: v._id || null,
+        sku: v.sku || '',
         model: v.model || '',
         color: v.attributes?.color || '',
         size: v.attributes?.size || '',
         material: v.attributes?.material || '',
-        price: v.price || 0,
-        cost: v.cost || 0,
-        stockOnHand: v.stockOnHand || 0,
+        price: v.price ?? 0,
+        batches: v.batches || [],
       }));
       setVariants(loadedVariants);
     } else {
@@ -330,17 +324,12 @@ export default function Products() {
     setShowNewCategoryForm(false);
     setShowNewBrandForm(false);
     setSkuProduct('');
-    setDefaultPrice(0);
-    setDefaultCost(0);
-    setDefaultStockOnHand(0);
   };
 
   const applyDefaultsToAllVariants = () => {
     const updated = variants.map((v) => ({
       ...v,
       price: defaultPrice || v.price,
-      cost: defaultCost || v.cost,
-      stockOnHand: defaultStockOnHand || v.stockOnHand,
     }));
     setVariants(updated);
   };
@@ -361,7 +350,7 @@ export default function Products() {
             return {
               ...(v._id && { _id: v._id }),  // ✅ เก็บ _id เดิม
               name: [v.model, v.color, v.size, v.material].filter(Boolean).join(' / ') || 'Default',
-              sku: v.sku,  // ส่งค่า SKU ที่ user ใส่ (backend จะ auto-gen ถ้าไม่มี)
+              sku: v.sku,
               model: v.model,
               attributes: {
                 ...(v.color && { color: v.color }),
@@ -369,16 +358,15 @@ export default function Products() {
                 ...(v.material && { material: v.material }),
               },
               price: Number(v.price) || 0,
-              cost: Number(v.cost) || 0,
-              stockOnHand: Number(v.stockOnHand) || 0,
+              // ✅ ไม่ส่ง batches เลย ให้ backend preserve เอง
             };
           })
         : [
             {
+              // ✅ FIX: For single variant, still send _id so backend preserves batches
+              ...(variants[0]?._id && { _id: variants[0]._id }),
               sku: newProduct.sku,
               price: Number(newProduct.price) || 0,
-              cost: Number(newProduct.cost) || 0,
-              stockOnHand: Number(newProduct.stockOnHand) || 0,
               attributes: {},
             },
           ];
@@ -428,16 +416,12 @@ export default function Products() {
                 ...(v.material && { material: v.material }),
               },
               price: Number(v.price) || 0,
-              cost: Number(v.cost) || 0,
-              stockOnHand: Number(v.stockOnHand) || 0,
             };
           })
         : [
             {
               sku: newProduct.sku,
               price: Number(newProduct.price) || 0,
-              cost: Number(newProduct.cost) || 0,
-              stockOnHand: Number(newProduct.stockOnHand) || 0,
               attributes: {},
             },
           ];
@@ -547,6 +531,7 @@ export default function Products() {
       }
     }
     
+    // ✅ ยังคง batches ให้อยู่
     setVariants(updated);
   };
 
@@ -730,7 +715,7 @@ export default function Products() {
                 <div>
                   <select
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                    value={newProduct.brand || ''}
+                    value={newProduct.brand ?? ''}
                     onChange={(e) => handleBrandChange(e.target.value)}
                   >
                     <option value="">-- เลือกยี่ห้อ --</option>
@@ -797,7 +782,7 @@ export default function Products() {
                 <div>
                   <select
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                    value={newProduct.category || ''}
+                    value={newProduct.category ?? ''}
                     onChange={(e) => handleCategoryChange(e.target.value)}
                   >
                     <option value="">-- เลือกหมวดหมู่ --</option>
@@ -863,7 +848,7 @@ export default function Products() {
               <input
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                 placeholder="Name"
-                value={newProduct.name || ''}
+                value={newProduct.name ?? ''}
                 onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })}
                 required
               />
@@ -876,7 +861,7 @@ export default function Products() {
                 <input
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono"
                   placeholder="เช่น IP (iPhone) หรือเว้นว่างให้ใช้ color-size-material"
-                  value={skuProduct || ''}
+                  value={skuProduct ?? ''}
                   onChange={(e) => setSkuProduct(e.target.value.toUpperCase())}
                 />
                 <p className="text-xs text-gray-500 mt-1">ชื่อลัดสินค้า ที่จะแสดงหลัง Brand-Category (เช่น APPL-MOBI-IP)</p>
@@ -890,7 +875,7 @@ export default function Products() {
                 <input
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono"
                   placeholder="SKU"
-                  value={newProduct.sku || ''}
+                  value={newProduct.sku ?? ''}
                   onChange={(e) => setNewProduct({ ...newProduct, sku: e.target.value })}
                 />
               </div>
@@ -907,7 +892,7 @@ export default function Products() {
                 onChange={(e) => {
                   setShowVariants(e.target.checked);
                   if (e.target.checked) {
-                    setNewProduct((prev) => ({ ...prev, price: 0, stockOnHand: 0 }));
+                    setNewProduct((prev) => ({ ...prev, price: 0 }));
                   }
                 }}
               />
@@ -931,39 +916,19 @@ export default function Products() {
             </div>
           </div>
 
-          {/* Default Price, Cost, Stock (for variants) */}
+          {/* Default Price (for variants) */}
           {showVariants && variants.length > 0 && (
             <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-              <h3 className="text-sm font-semibold text-gray-800 mb-3">📋 ตั้งค่าเดียวให้ทั้งหมด</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-3">
+              <h3 className="text-sm font-semibold text-gray-800 mb-3">📋 ตั้งค่าราคาเดียวให้ทั้งหมด</h3>
+              <div className="grid grid-cols-1 gap-4 mb-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">ราคา</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">ราคาขาย</label>
                   <input
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                     type="number"
                     placeholder="ราคาขาย"
-                    value={defaultPrice || ''}
+                    value={defaultPrice ?? ''}
                     onChange={(e) => setDefaultPrice(Number(e.target.value) || 0)}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">ต้นทุน</label>
-                  <input
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                    type="number"
-                    placeholder="ต้นทุน"
-                    value={defaultCost || ''}
-                    onChange={(e) => setDefaultCost(Number(e.target.value) || 0)}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">คงคลัง</label>
-                  <input
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                    type="number"
-                    placeholder="คงคลัง"
-                    value={defaultStockOnHand || ''}
-                    onChange={(e) => setDefaultStockOnHand(Number(e.target.value) || 0)}
                   />
                 </div>
               </div>
@@ -972,14 +937,14 @@ export default function Products() {
                 onClick={applyDefaultsToAllVariants}
                 className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
               >
-                ✓ ก็อบค่าเหล่านี้ไปยัง Variant ทั้งหมด
+                ✓ ก็อบค่านี้ไปยัง Variant ทั้งหมด
               </button>
             </div>
           )}
 
           {/* Non-variant fields */}
           {!showVariants ? (
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mt-4">
+            <div className="grid grid-cols-1 gap-4 mt-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">ราคาขาย</label>
                 <input
@@ -988,26 +953,6 @@ export default function Products() {
                   placeholder="ราคาขาย"
                   value={newProduct.price ?? 0}
                   onChange={(e) => setNewProduct({ ...newProduct, price: e.target.value })}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">ต้นทุน (Cost)</label>
-                <input
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  type="number"
-                  placeholder="ต้นทุน"
-                  value={newProduct.cost ?? 0}
-                  onChange={(e) => setNewProduct({ ...newProduct, cost: e.target.value })}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">คงคลัง</label>
-                <input
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  type="number"
-                  placeholder="Stock"
-                  value={newProduct.stockOnHand ?? 0}
-                  onChange={(e) => setNewProduct({ ...newProduct, stockOnHand: e.target.value })}
                 />
               </div>
             </div>
@@ -1029,7 +974,27 @@ export default function Products() {
                       </button>
                     )}
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+
+                  {/* แสดง batches ที่มีอยู่ */}
+                  {variant._id && variant.batches && Array.isArray(variant.batches) && variant.batches.length > 0 && (
+                    <div className="mb-3 p-2 bg-blue-50 border border-blue-200 rounded">
+                      <div className="text-xs font-semibold text-blue-700 mb-1">📦 Batches ({variant.batches.length}):</div>
+                      {variant.batches.map((batch, bIdx) => (
+                        <div key={bIdx} className="text-xs text-blue-600 py-0.5">
+                          • {batch.batchRef}: qty={batch.quantity}, cost={batch.cost}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Debug: ถ้าไม่มี batches บอก why */}
+                  {variant._id && (!variant.batches || variant.batches.length === 0) && (
+                    <div className="mb-3 p-2 bg-yellow-50 border border-yellow-200 rounded">
+                      <div className="text-xs font-semibold text-yellow-700">ℹ️ ไม่มี batches</div>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">รุ่น</label>
                       <input
@@ -1089,26 +1054,6 @@ export default function Products() {
                         onChange={(e) => updateVariant(idx, 'price', e.target.value)}
                       />
                     </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">ต้นทุน</label>
-                      <input
-                        className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                        type="number"
-                        placeholder="Cost"
-                        value={variant.cost ?? 0}
-                        onChange={(e) => updateVariant(idx, 'cost', e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">คงคลัง</label>
-                      <input
-                        className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                        type="number"
-                        placeholder="Stock"
-                        value={variant.stockOnHand ?? 0}
-                        onChange={(e) => updateVariant(idx, 'stockOnHand', e.target.value)}
-                      />
-                    </div>
                   </div>
                 </div>
               ))}
@@ -1160,7 +1105,7 @@ export default function Products() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">สถานะสินค้า</label>
                 <select
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  value={newProduct.status || 'active'}
+                  value={newProduct.status ?? 'active'}
                   onChange={(e) => setNewProduct({ ...newProduct, status: e.target.value })}
                 >
                   <option value="active">✅ ใช้งาน</option>
@@ -1281,7 +1226,7 @@ export default function Products() {
                         {v.attributes?.material && ` | วัสดุ: ${v.attributes.material}`}
                         <br />
                         <span className="text-gray-500">
-                          ราคา: {v.price} บาท | ต้นทุน: {v.cost ?? 0} บาท | คงคลัง: {v.stockOnHand ?? 0} ชิ้น
+                          ราคา: {v.price} บาท | คงคลัง: {v.stockOnHand ?? 0} ชิ้น
                         </span>
                       </div>
                     ))}

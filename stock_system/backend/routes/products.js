@@ -49,7 +49,7 @@ const buildFilters = (query) => {
 router.get('/', authenticateToken, async (req, res) => {
   try {
     const filters = buildFilters(req.query);
-    const products = await Product.find(filters).lean();
+    const products = await Product.find(filters);  // ✅ ลบ .lean() เพื่อให้ virtual field (stockOnHand) ทำงาน
     res.json(products);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -58,7 +58,7 @@ router.get('/', authenticateToken, async (req, res) => {
 
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id).lean();
+    const product = await Product.findById(req.params.id);  // ✅ ลบ .lean() เพื่อให้ virtual field (stockOnHand) ทำงาน
     if (!product) return res.status(404).json({ error: 'Product not found' });
     res.json(product);
   } catch (error) {
@@ -100,6 +100,60 @@ router.post('/', authenticateToken, authorizeRoles('owner', 'admin', 'hr'), asyn
 
 router.put('/:id', authenticateToken, authorizeRoles('owner', 'admin', 'hr'), async (req, res) => {
   try {
+    const product = await Product.findById(req.params.id);
+    if (!product) return res.status(404).json({ error: 'Product not found' });
+
+    // ✅ CRITICAL: Merge variants with proper batch preservation
+    // Strategy: Build NEW variant array by matching old variants with new data
+    if (req.body.variants && Array.isArray(req.body.variants)) {
+      const newVariants = [];
+      
+      for (const newVariant of req.body.variants) {
+        if (newVariant._id) {
+          // OLD VARIANT: Find by _id and preserve batches + other fields
+          const oldVariantIdx = product.variants.findIndex(v => String(v._id) === String(newVariant._id));
+          
+          if (oldVariantIdx !== -1) {
+            // Found old variant - merge data carefully
+            const oldVariant = product.variants[oldVariantIdx];
+            
+            // Create merged variant object
+            const mergedVariant = {
+              _id: oldVariant._id,  // ✅ Keep original _id
+              sku: newVariant.sku || oldVariant.sku,
+              name: newVariant.name || oldVariant.name,
+              barcode: newVariant.barcode || oldVariant.barcode,
+              model: newVariant.model !== undefined ? newVariant.model : oldVariant.model,
+              attributes: newVariant.attributes || oldVariant.attributes || {},
+              price: newVariant.price !== undefined ? newVariant.price : oldVariant.price,
+              committed: newVariant.committed !== undefined ? newVariant.committed : oldVariant.committed,
+              incoming: newVariant.incoming !== undefined ? newVariant.incoming : oldVariant.incoming,
+              reorderPoint: newVariant.reorderPoint !== undefined ? newVariant.reorderPoint : oldVariant.reorderPoint,
+              reorderQty: newVariant.reorderQty !== undefined ? newVariant.reorderQty : oldVariant.reorderQty,
+              allowBackorder: newVariant.allowBackorder !== undefined ? newVariant.allowBackorder : oldVariant.allowBackorder,
+              status: newVariant.status || oldVariant.status || 'active',
+              // ✅ CRITICAL: Always preserve batches from old variant
+              batches: (newVariant.batches && newVariant.batches.length > 0) 
+                ? newVariant.batches 
+                : (oldVariant.batches || []),
+            };
+            
+            newVariants.push(mergedVariant);
+          } else {
+            // Old variant not found - treat as new
+            newVariants.push(newVariant);
+          }
+        } else {
+          // NEW VARIANT: No _id means it's a new variant
+          newVariants.push(newVariant);
+        }
+      }
+      
+      // ✅ Replace entire variants array with merged variants
+      product.variants = newVariants;
+    }
+
+    // Update other product fields (NOT variants - already handled above)
     const updatableFields = [
       'name',
       'sku',
@@ -111,7 +165,6 @@ router.put('/:id', authenticateToken, authorizeRoles('owner', 'admin', 'hr'), as
       'status',
       'enableStockAlerts',
       'attributesSchema',
-      'variants',
       'skuProduct',
       'costingMethod',
       'leadTimeDays',
@@ -119,13 +172,16 @@ router.put('/:id', authenticateToken, authorizeRoles('owner', 'admin', 'hr'), as
       'minOrderQty',
     ];
 
-    const updatePayload = { updatedBy: req.user?._id };
     updatableFields.forEach((field) => {
-      if (req.body[field] !== undefined) updatePayload[field] = req.body[field];
+      if (req.body[field] !== undefined) {
+        product[field] = req.body[field];
+      }
     });
+    
+    product.updatedBy = req.user?._id;
 
-    const product = await Product.findByIdAndUpdate(req.params.id, updatePayload, { new: true, runValidators: true });
-    if (!product) return res.status(404).json({ error: 'Product not found' });
+    // ✅ Use product.save() to ensure Mongoose handles subdocuments correctly
+    await product.save();
 
     res.json(product);
   } catch (error) {

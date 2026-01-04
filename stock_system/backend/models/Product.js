@@ -8,6 +8,17 @@ const batchSchema = new Schema(
     supplier: String,
     cost: Number,
     quantity: { type: Number, required: true },
+    // ✅ ฟิลด์เก็บประวัติการบริหจัดการ batch
+    quantityConsumed: { type: Number, default: 0, description: 'จำนวนที่ถูกขายออก' },
+    lastConsumedAt: { type: Date, description: 'วันเวลาที่ขายออกครั้งล่าสุด' },
+    consumptionOrder: [
+      {
+        orderId: mongoose.Schema.Types.ObjectId,
+        orderReference: String,
+        quantityConsumedThisTime: Number,
+        consumedAt: { type: Date, default: Date.now }
+      }
+    ],
     expiryDate: Date,
     receivedAt: { type: Date, default: Date.now },
     orderId: { type: mongoose.Schema.Types.ObjectId, ref: 'InventoryOrder' },
@@ -23,8 +34,7 @@ const variantSchema = new Schema(
     model: String,
     attributes: { type: Map, of: String, default: {} },
     price: { type: Number, default: 0 },
-    cost: { type: Number, default: 0 },
-    stockOnHand: { type: Number, default: 0 },
+    // ⚠️ stockOnHand เลิกเก็บเป็น field - คำนวณจาก batch แทน (ดูด้านล่าง virtual)
     committed: { type: Number, default: 0 },
     incoming: { type: Number, default: 0 },
     reorderPoint: { type: Number, default: 0 },
@@ -35,6 +45,15 @@ const variantSchema = new Schema(
   },
   { _id: true }
 );
+
+// ✅ stockOnHand = virtual field คำนวณจากผลรวม batch.quantity
+variantSchema.virtual('stockOnHand').get(function () {
+  return (this.batches || []).reduce((sum, batch) => sum + (batch.quantity || 0), 0);
+});
+
+variantSchema.virtual('totalConsumed').get(function () {
+  return (this.batches || []).reduce((sum, batch) => sum + (batch.quantityConsumed || 0), 0);
+});
 
 variantSchema.virtual('available').get(function () {
   return (this.stockOnHand || 0) - (this.committed || 0);

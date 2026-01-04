@@ -66,8 +66,10 @@ export default function Orders() {
     try {
       const res = await api.get('/products');
       setProducts(res.data || []);
+      return true;
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to load products');
+      return false;
     }
   };
 
@@ -156,8 +158,8 @@ export default function Orders() {
       }));
       await api.patch(`/inventory/orders/${order._id}/receive`, { items: payloadItems });
       setMessage('บันทึกรับของแล้ว');
-      // ดึง order ใหม่เพื่อให้ frontend รู้เลขล็อตที่สร้างอัตโนมัติ
-      setTimeout(() => loadOrders(page), 500);
+      // โหลดข้อมูลใหม่ - รอให้ทั้งสองเสร็จ
+      await Promise.all([loadOrders(page), loadProducts()]);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to receive');
     } finally {
@@ -174,7 +176,8 @@ export default function Orders() {
       const reason = window.prompt('เหตุผลในการยกเลิก (ไม่บังคับ):', '') || '';
       await api.patch(`/inventory/orders/${order._id}/cancel`, { reason });
       setMessage('ยกเลิก Order แล้ว');
-      loadOrders(page);
+      // โหลดข้อมูลใหม่ - รอให้ทั้งสองเสร็จ
+      await Promise.all([loadOrders(page), loadProducts()]);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to cancel order');
     }
@@ -191,7 +194,7 @@ export default function Orders() {
     try {
       await api.patch(`/inventory/orders/${order._id}`, { reference: newReference, notes: newNotes });
       setMessage('แก้ไข Order แล้ว');
-      loadOrders(page);
+      await loadOrders(page);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to edit order');
     }
@@ -232,8 +235,8 @@ export default function Orders() {
       setType('sale');
       setOrderDate(new Date().toISOString().split('T')[0]);
       setPage(1);
-      loadOrders(1);
-      loadProducts();
+      // โหลดข้อมูลใหม่ - รอให้ทั้งสอง request เสร็จก่อนเคลียร์ message
+      await Promise.all([loadOrders(1), loadProducts()]);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to record');
     } finally {
