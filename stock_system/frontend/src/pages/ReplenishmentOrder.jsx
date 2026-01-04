@@ -9,6 +9,49 @@ export default function ReplenishmentOrder() {
 
   const fmtNumber = new Intl.NumberFormat('th-TH');
 
+  // ฟังก์ชันคำนวณ allocation ใหม่เมื่อปรับ totalOrder
+  const recalculateAllocation = (product, newTotalOrder) => {
+    if (newTotalOrder <= 0) return product.variants;
+
+    // Largest Remainder Method
+    const allocations = product.variants.map((v) => {
+      const percentage = product.totalRecommended > 0
+        ? (v.recommendedOrderQty || 0) / product.totalRecommended
+        : 0;
+      const baseAllocation = Math.floor(newTotalOrder * percentage);
+      const remainder = newTotalOrder * percentage - baseAllocation;
+      return { variant: v, baseAllocation, remainder };
+    });
+
+    const sorted = allocations.sort((a, b) => b.remainder - a.remainder);
+    const remainderUnits = newTotalOrder - allocations.reduce((sum, a) => sum + a.baseAllocation, 0);
+    
+    for (let i = 0; i < remainderUnits && i < sorted.length; i++) {
+      sorted[i].baseAllocation += 1;
+    }
+
+    return sorted.map(a => ({
+      ...a.variant,
+      _allocatedQty: a.baseAllocation
+    }));
+  };
+
+  // ฟังก์ชันปรับ totalOrder
+  const handleTotalOrderChange = (productId, newValue) => {
+    setOrders((prev) =>
+      prev.map((product) => {
+        if (product.productId !== productId) return product;
+        
+        const newTotalOrder = Math.max(0, Number(newValue) || 0);
+        return {
+          ...product,
+          totalOrder: newTotalOrder,
+          variants: recalculateAllocation(product, newTotalOrder),
+        };
+      })
+    );
+  };
+
   const loadReplenishmentData = async () => {
     setLoading(true);
     try {
@@ -25,47 +68,62 @@ export default function ReplenishmentOrder() {
             minOrderQty: item.minOrderQty,
             variants: [],
             totalRecommended: 0,
+            totalCurrentStock: 0,
+            totalNetOrder: 0,
             totalOrder: 0,
           });
         }
         const product = productMap.get(key);
         product.variants.push(item);
         product.totalRecommended += item.recommendedOrderQty || 0;
+        product.totalCurrentStock += item.currentStock || 0;
+        // คำนวณจำนวนที่ต้องสั่งจริง (แนะนำ - คงเหลือ)
+        const netOrder = Math.max(0, (item.recommendedOrderQty || 0) - (item.currentStock || 0));
+        product.totalNetOrder += netOrder;
       });
 
       // Allocate MOQ using Largest Remainder Method for accuracy
       const groupedOrders = Array.from(productMap.values()).map((product) => {
-        if (product.minOrderQty > 0 && product.minOrderQty > product.totalRecommended) {
-          // Use Largest Remainder Method to allocate MOQ exactly
+        // ใช้ totalNetOrder (จำนวนที่ต้องสั่งเพิ่ม) เป็นพื้นฐาน
+        const baseOrderQty = Math.max(product.totalNetOrder, product.minOrderQty > 0 ? product.minOrderQty : 0);
+        
+        if (product.minOrderQty > 0 && product.minOrderQty > product.totalNetOrder) {
+          // ต้องเพิ่มเพื่อให้ครบ MOQ
           const allocations = product.variants.map((v) => {
+            // ใช้ recommendedOrderQty แต่คำนวณสัดส่วนเทียบกับยอดขาย ไม่ใช่สต็อก
+            const netOrder = Math.max(0, (v.recommendedOrderQty || 0) - (v.currentStock || 0));
             const percentage = product.totalRecommended > 0
               ? (v.recommendedOrderQty || 0) / product.totalRecommended
               : 0;
             const baseAllocation = Math.floor(product.minOrderQty * percentage);
             const remainder = product.minOrderQty * percentage - baseAllocation;
-            return { variant: v, baseAllocation, remainder };
+            return { variant: v, netOrder, baseAllocation, remainder };
           });
 
-          // Sort by remainder (descending) and allocate remainder units
           const sorted = allocations.sort((a, b) => b.remainder - a.remainder);
           const remainderUnits = product.minOrderQty - allocations.reduce((sum, a) => sum + a.baseAllocation, 0);
           
-          // Assign remainder units to variants with largest remainders
           for (let i = 0; i < remainderUnits && i < sorted.length; i++) {
             sorted[i].baseAllocation += 1;
           }
 
           product.variants = sorted.map(a => ({
             ...a.variant,
-            _allocatedQty: a.baseAllocation
+            _allocatedQty: a.baseAllocation,
+            _netOrder: a.netOrder
           }));
           product.totalOrder = product.minOrderQty;
         } else {
-          product.variants = product.variants.map(v => ({
-            ...v,
-            _allocatedQty: v.recommendedOrderQty || 0
-          }));
-          product.totalOrder = product.totalRecommended;
+          // ไม่ต้องเพิ่มเพื่อ MOQ ใช้ totalNetOrder เลย
+          product.variants = product.variants.map(v => {
+            const netOrder = Math.max(0, (v.recommendedOrderQty || 0) - (v.currentStock || 0));
+            return {
+              ...v,
+              _allocatedQty: Math.max(0, (v.recommendedOrderQty || 0) - (v.currentStock || 0)),
+              _netOrder: netOrder
+            };
+          });
+          product.totalOrder = product.totalNetOrder;
         }
         
         return product;
@@ -157,27 +215,42 @@ export default function ReplenishmentOrder() {
                   </div>
 
                   <div className="flex items-center gap-8">
+                    {/* สต็อกคงเหลือ */}
+                    <div className="text-right">
+                      <p className="text-xs text-gray-500">สต็อกคงเหลือ</p>
+                      <p className="text-lg font-medium text-gray-700">
+                        {fmtNumber.format(product.totalCurrentStock)} ชิ้น
+                      </p>
+                    </div>
+
                     {/* ยอดแนะนำ */}
                     <div className="text-right">
-                      <p className="text-xs text-gray-500">แนะนำขั้นต่ำ</p>
+                      <p className="text-xs text-gray-500">แนะนำทั้งหมด</p>
                       <p className="text-lg font-medium text-blue-600">
                         {fmtNumber.format(product.totalRecommended)} ชิ้น
                       </p>
                     </div>
 
-                    {/* ยอดสั่ง */}
-                    <div className="text-right min-w-[180px]">
+                    {/* ยอดสั่ง - สามารถแก้ไขได้ */}
+                    <div className="text-right min-w-[220px]">
                       <div className="flex items-center gap-2 justify-end mb-1">
-                        <p className="text-xs text-gray-500">ต้องสั่ง</p>
-                        {moqAlert && (
+                        <p className="text-xs text-gray-500">ต้องสั่งเพิ่ม</p>
+                        {product.minOrderQty > 0 && product.minOrderQty > product.totalNetOrder && (
                           <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-xs rounded font-medium">
                             📦 MOQ {fmtNumber.format(product.minOrderQty)}
                           </span>
                         )}
                       </div>
-                      <p className="text-2xl font-bold text-green-600">
-                        {fmtNumber.format(product.totalOrder)} ชิ้น
-                      </p>
+                      <div className="flex items-center gap-2 justify-end">
+                        <input
+                          type="number"
+                          value={product.totalOrder}
+                          onChange={(e) => handleTotalOrderChange(product.productId, e.target.value)}
+                          className="w-24 px-2 py-1 border border-gray-300 rounded text-right text-lg font-bold text-green-600 focus:ring-2 focus:ring-blue-500 outline-none"
+                          min="0"
+                        />
+                        <span className="text-gray-600 text-sm">ชิ้น</span>
+                      </div>
                     </div>
                   </div>
                 </button>
@@ -195,7 +268,8 @@ export default function ReplenishmentOrder() {
                             ? ((variant.recommendedOrderQty || 0) / product.totalRecommended) * 100
                             : 0;
                           const allocatedQty = variant._allocatedQty || (variant.recommendedOrderQty || 0);
-                          const moqAdjustment = allocatedQty - (variant.recommendedOrderQty || 0);
+                          const moqAdjustment = allocatedQty - (variant._netOrder || 0);
+                          const currentStock = variant.currentStock || 0;
 
                           return (
                             <div key={idx} className="bg-white rounded p-3 border border-gray-200">
@@ -207,7 +281,11 @@ export default function ReplenishmentOrder() {
                                   </p>
                                 </div>
                                 <div className="text-right">
-                                  <p className="text-sm text-gray-700 mb-1">แนะนำ: <span className="font-bold text-blue-600">{fmtNumber.format(variant.recommendedOrderQty || 0)}</span> | สั่งจริง: <span className="font-bold text-green-600">{fmtNumber.format(allocatedQty)}</span> ชิ้น</p>
+                                  <p className="text-xs text-gray-600 mb-1">
+                                    คงเหลือ: <span className="font-semibold text-gray-800">{fmtNumber.format(currentStock)}</span> | 
+                                    แนะนำ: <span className="font-bold text-blue-600">{fmtNumber.format(variant.recommendedOrderQty || 0)}</span>
+                                  </p>
+                                  <p className="text-sm text-gray-700">สั่งเพิ่ม: <span className="font-bold text-green-600">{fmtNumber.format(allocatedQty)}</span> ชิ้น</p>
                                 </div>
                               </div>
 
@@ -235,11 +313,11 @@ export default function ReplenishmentOrder() {
                         })}
                       </div>
 
-                      {product.minOrderQty > 0 && product.minOrderQty > product.totalRecommended && (
+                      {product.minOrderQty > 0 && product.minOrderQty > product.totalNetOrder && (
                         <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded">
                           <p className="text-xs text-amber-700">
                             <strong>💡 MOQ Adjustment:</strong> เพิ่ม{' '}
-                            <strong>{fmtNumber.format(product.minOrderQty - product.totalRecommended)}</strong> ชิ้นเพื่อให้ครบขั้นต่ำการสั่ง ({fmtNumber.format(product.minOrderQty)} ชิ้น)
+                            <strong>{fmtNumber.format(product.minOrderQty - product.totalNetOrder)}</strong> ชิ้นเพื่อให้ครบขั้นต่ำการสั่ง ({fmtNumber.format(product.minOrderQty)} ชิ้น)
                             โดยแบ่งตามสัดส่วนยอดขายของแต่ละ Variant
                           </p>
                         </div>

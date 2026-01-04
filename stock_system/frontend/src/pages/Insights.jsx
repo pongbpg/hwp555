@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import api from '../api.js';
+import DateRangeFilter from '../components/DateRangeFilter.jsx';
 
 // Horizontal Bar Chart for comparison
 const HBarChart = ({ data, title, valueKey = 'value', labelKey = 'label', color = '#3B82F6', showTrend = false }) => {
@@ -319,34 +320,39 @@ export default function Insights() {
   const [error, setError] = useState('');
   const [days, setDays] = useState(30);
   const [topN, setTopN] = useState(20);
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [useDateRange, setUseDateRange] = useState(false);
 
   const fmtNumber = new Intl.NumberFormat('th-TH');
   const fmtCurrency = new Intl.NumberFormat('th-TH', { style: 'currency', currency: 'THB' });
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const res = await api.get(`/inventory/insights?days=${days}&top=${topN}`);
+      let url = `/inventory/insights?top=${topN}`;
+      if (useDateRange) {
+        url += `&dateFrom=${dateFrom}&dateTo=${dateTo}`;
+      } else {
+        url += `&days=${days}`;
+      }
+      const res = await api.get(url);
       setData(res.data);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to load insights');
     } finally {
       setLoading(false);
     }
-  };
+  }, [days, useDateRange, dateFrom, dateTo, topN]);
 
+  // Load on component mount only
   useEffect(() => {
-    load();
+    const isInitialMount = data === null;
+    if (isInitialMount) {
+      load();
+    }
   }, []);
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-      </div>
-    );
-  }
 
   if (error) {
     return (
@@ -358,6 +364,16 @@ export default function Insights() {
       </div>
     );
   }
+
+  // Loading indicator component for empty sections
+  const LoadingSection = ({ height = 'h-32' }) => (
+    <div className={`bg-white rounded-xl shadow p-6 flex items-center justify-center ${height}`}>
+      <div className="flex flex-col items-center gap-2">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        <p className="text-sm text-gray-500">กำลังโหลดข้อมูล...</p>
+      </div>
+    </div>
+  );
 
   const counts = data?.meta?.counts || {};
   
@@ -397,7 +413,8 @@ export default function Insights() {
     ...item,
     urgency: item.daysUntilStockOut <= 7 ? 'ด่วนมาก' : item.daysUntilStockOut <= 14 ? 'ด่วน' : 'ปกติ',
     urgencyColor: item.daysUntilStockOut <= 7 ? 'bg-red-100 text-red-700' : item.daysUntilStockOut <= 14 ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700',
-  }));
+  }))
+    .filter(item => item.enableStockAlerts !== false); // ⛔ แสดงเฉพาะสินค้าที่เปิดการแจ้งเตือน
 
   const lowStockData = (data?.lowStock || []);
   const nearExpiryData = (data?.nearExpiry || []);
@@ -413,256 +430,315 @@ export default function Insights() {
       <div className="flex flex-wrap justify-between items-center gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-800">📈 Insights & Analytics</h1>
-          <p className="text-gray-500 text-sm">วิเคราะห์เชิงลึก ({days} วันย้อนหลัง)</p>
+          <p className="text-gray-500 text-sm">วิเคราะห์เชิงลึก{useDateRange ? ` (${dateFrom} ถึง ${dateTo})` : ` (${days} วันย้อนหลัง)`}</p>
         </div>
-        <div className="flex gap-3 items-center flex-wrap">
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-gray-600">ช่วงวัน</label>
-            <select
-              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-              value={days}
-              onChange={(e) => setDays(Number(e.target.value))}
-            >
-              <option value={7}>7 วัน</option>
-              <option value={15}>15 วัน</option>
-              <option value={30}>30 วัน</option>
-              <option value={60}>60 วัน</option>
-              <option value={90}>90 วัน</option>
-            </select>
-          </div>
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-gray-600">แสดง</label>
-            <select
-              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-              value={topN}
-              onChange={(e) => setTopN(Number(e.target.value))}
-            >
-              <option value={10}>Top 10</option>
-              <option value={20}>Top 20</option>
-              <option value={30}>Top 30</option>
-              <option value={50}>Top 50</option>
-            </select>
-          </div>
-          <button
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
-            onClick={load}
+        <button
+          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
+          onClick={load}
+        >
+          🔄 วิเคราะห์ใหม่
+        </button>
+      </div>
+
+      {/* Date Range Filter */}
+      <div className="flex items-end gap-4 flex-wrap">
+        <div className="flex-1 min-w-64">
+          <DateRangeFilter 
+            dateFrom={dateFrom}
+            setDateFrom={setDateFrom}
+            dateTo={dateTo}
+            setDateTo={setDateTo}
+            useDateRange={useDateRange}
+            setUseDateRange={setUseDateRange}
+            onSearch={load}
+          />
+        </div>
+
+        {/* Top N Selector */}
+        <div className="flex items-center gap-2 bg-white rounded-lg shadow p-4 mb-0">
+          <label className="text-sm text-gray-600 whitespace-nowrap">แสดง:</label>
+          <select
+            className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+            value={topN}
+            onChange={(e) => setTopN(Number(e.target.value))}
           >
-            🔄 วิเคราะห์ใหม่
-          </button>
+            <option value={10}>Top 10</option>
+            <option value={20}>Top 20</option>
+            <option value={30}>Top 30</option>
+            <option value={50}>Top 50</option>
+          </select>
         </div>
       </div>
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-        <StatCardTrend title="ขายทั้งหมด" value={fmtNumber.format(totalSold)} icon="📦" color="blue" trendLabel={`${days} วันที่ผ่านมา`} />
-        <StatCardTrend title="ขายเฉลี่ย/วัน" value={fmtNumber.format(Math.round(avgDailyRate))} icon="📊" color="green" trendLabel="ทุกสินค้ารวม" />
-        <StatCardTrend title="สินค้าขายดี" value={fmtNumber.format(counts.fastMovers || 0)} icon="🔥" color="purple" />
-        <StatCardTrend title="ต้องสั่งเติม" value={fmtNumber.format(counts.reorderSuggestions || 0)} icon="🛒" color="amber" />
-        <StatCardTrend title="สต็อกวิกฤต" value={fmtNumber.format(criticalItems)} icon="🚨" color="red" trendLabel="เหลือ < 7 วัน" />
-        <StatCardTrend title="ใกล้หมดอายุ" value={fmtNumber.format(counts.nearExpiry || 0)} icon="⏰" color="amber" />
+        {loading ? (
+          <>
+            {[...Array(6)].map((_, i) => (
+              <div key={i} className="bg-gradient-to-br from-gray-200 to-gray-300 rounded-xl shadow-lg p-4 text-white animate-pulse h-24"></div>
+            ))}
+          </>
+        ) : (
+          <>
+            <StatCardTrend title="ขายทั้งหมด" value={fmtNumber.format(totalSold)} icon="📦" color="blue" trendLabel={useDateRange ? `${dateFrom} - ${dateTo}` : `${days} วันที่ผ่านมา`} />
+            <StatCardTrend title="ขายเฉลี่ย/วัน" value={fmtNumber.format(Math.round(avgDailyRate))} icon="📊" color="green" trendLabel="ทุกสินค้ารวม" />
+            <StatCardTrend title="สินค้าขายดี" value={fmtNumber.format(counts.fastMovers || 0)} icon="🔥" color="purple" />
+            <StatCardTrend title="ต้องสั่งเติม" value={fmtNumber.format(counts.reorderSuggestions || 0)} icon="🛒" color="amber" />
+            <StatCardTrend title="สต็อกวิกฤต" value={fmtNumber.format(criticalItems)} icon="🚨" color="red" trendLabel="เหลือ < 7 วัน" />
+            <StatCardTrend title="ใกล้หมดอายุ" value={fmtNumber.format(counts.nearExpiry || 0)} icon="⏰" color="amber" />
+          </>
+        )}
       </div>
 
       {/* Inventory Health Gauges */}
-      <div className="bg-white rounded-xl shadow p-6">
-        <h3 className="text-lg font-semibold text-gray-800 mb-4">🏥 Inventory Health</h3>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <GaugeChart 
-            value={counts.fastMovers || 0} 
-            max={Math.max(50, counts.fastMovers || 0)} 
-            title="สินค้าขายดี" 
-            colorRange={['#EF4444', '#F59E0B', '#10B981']}
-          />
-          <GaugeChart 
-            value={100 - Math.min(100, (criticalItems / Math.max(counts.reorderSuggestions, 1)) * 100)} 
-            max={100} 
-            title="Stock Health %" 
-            unit="%"
-            colorRange={['#EF4444', '#F59E0B', '#10B981']}
-          />
-          <GaugeChart 
-            value={avgDailyRate} 
-            max={Math.max(100, avgDailyRate)} 
-            title="Velocity/วัน" 
-            colorRange={['#3B82F6', '#10B981', '#10B981']}
-          />
-          <GaugeChart 
-            value={Math.max(0, 30 - (counts.nearExpiry || 0))} 
-            max={30} 
-            title="Expiry Safety" 
-            colorRange={['#EF4444', '#F59E0B', '#10B981']}
-          />
-        </div>
-      </div>
-
-      {/* Analysis Section 1: Sales Analysis */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <HBarChart 
-          data={fastMoversData}
-          title={`🔥 Top ${topN} สินค้าขายดี (${days} วัน)`}
-          valueKey="quantitySold"
-          color="#10B981"
-        />
-        <HBarChart 
-          data={fastMoversData.sort((a, b) => b.dailySalesRate - a.dailySalesRate)}
-          title="📈 อัตราขายสูงสุด (ต่อวัน)"
-          valueKey="dailySalesRate"
-          color="#3B82F6"
-        />
-      </div>
-
-      {/* Analysis Section 2: Stock Days Remaining */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <HBarChart 
-          data={fastMoversData.filter(f => f.daysRemaining < 999).sort((a, b) => a.daysRemaining - b.daysRemaining)}
-          title="⚠️ สินค้าที่เหลือใช้ได้น้อย (วัน)"
-          valueKey="daysRemaining"
-          color="#F59E0B"
-        />
-        <ComparisonChart
-          data={fastMoversData.slice(0, 10)}
-          title="📊 เปรียบเทียบ: ยอดขาย vs คงเหลือ"
-          value1Key="quantitySold"
-          value2Key="currentStock"
-          label1="ขายไป"
-          label2="คงเหลือ"
-        />
-      </div>
-
-      {/* Category & Brand Analysis */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <DataTable
-          data={categoryAnalysis}
-          title="📁 วิเคราะห์ตามหมวดหมู่"
-          columns={[
-            { key: 'label', label: 'หมวดหมู่' },
-            { key: 'totalSold', label: 'ขายแล้ว', format: 'number', align: 'right' },
-            { key: 'totalStock', label: 'คงเหลือ', format: 'number', align: 'right' },
-            { key: 'dailySalesRate', label: '/วัน', format: 'number', align: 'right' },
-            { key: 'daysRemaining', label: 'เหลือ', format: 'days', align: 'right', highlight: true, highlightThreshold: 14 },
-            { key: 'turnoverRate', label: 'Turnover', format: 'percent', align: 'right' },
-          ]}
-        />
-        <DataTable
-          data={brandAnalysis}
-          title="🏷️ วิเคราะห์ตามแบรนด์"
-          columns={[
-            { key: 'label', label: 'แบรนด์' },
-            { key: 'totalSold', label: 'ขายแล้ว', format: 'number', align: 'right' },
-            { key: 'totalStock', label: 'คงเหลือ', format: 'number', align: 'right' },
-            { key: 'dailySalesRate', label: '/วัน', format: 'number', align: 'right' },
-            { key: 'daysRemaining', label: 'เหลือ', format: 'days', align: 'right', highlight: true, highlightThreshold: 14 },
-            { key: 'turnoverRate', label: 'Turnover', format: 'percent', align: 'right' },
-          ]}
-        />
-      </div>
-
-      {/* Reorder Suggestions - Urgent */}
-      {reorderData.length > 0 && (
+      {loading ? (
+        <LoadingSection height="h-64" />
+      ) : (
         <div className="bg-white rounded-xl shadow p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="text-lg font-semibold text-gray-800">🛒 แนะนำการสั่งซื้อ</h3>
-              <p className="text-xs text-gray-500 mt-1">💡 สำหรับการแบ่ง MOQ ตามแต่ละ Variant ให้ดูที่หน้า <strong>📦 Replenishment</strong></p>
-            </div>
-            <div className="flex gap-2 text-xs">
-              <span className="px-2 py-1 bg-red-100 text-red-700 rounded">ด่วนมาก ≤7 วัน</span>
-              <span className="px-2 py-1 bg-amber-100 text-amber-700 rounded">ด่วน ≤14 วัน</span>
-              <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded">ปกติ</span>
-            </div>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b-2 border-gray-200">
-                  <th className="py-2 px-3 text-left font-semibold text-gray-600">ความเร่งด่วน</th>
-                  <th className="py-2 px-3 text-left font-semibold text-gray-600">สินค้า</th>
-                  <th className="py-2 px-3 text-left font-semibold text-gray-600">SKU</th>
-                  <th className="py-2 px-3 text-right font-semibold text-gray-600">คงเหลือ</th>
-                  <th className="py-2 px-3 text-right font-semibold text-gray-600">ขาย/วัน</th>
-                  <th className="py-2 px-3 text-right font-semibold text-gray-600">เหลือใช้</th>
-                  <th className="py-2 px-3 text-right font-semibold text-gray-600">Lead Time</th>
-                  <th className="py-2 px-3 text-right font-semibold text-gray-600">จุดสั่งซื้อ</th>
-                  <th className="py-2 px-3 text-right font-semibold text-gray-600 bg-blue-50">แนะนำสั่ง</th>
-                </tr>
-              </thead>
-              <tbody>
-                {reorderData.slice(0, 20).map((item, idx) => (
-                  <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
-                    <td className="py-2 px-3">
-                      <span className={`px-2 py-1 rounded text-xs font-medium ${item.urgencyColor}`}>
-                        {item.urgency}
-                      </span>
-                    </td>
-                    <td className="py-2 px-3 text-gray-700">{item.productName}</td>
-                    <td className="py-2 px-3 font-mono text-gray-500">{item.sku}</td>
-                    <td className="py-2 px-3 text-right text-gray-600">{fmtNumber.format(item.currentStock)}</td>
-                    <td className="py-2 px-3 text-right text-gray-600">{item.dailySalesRate}</td>
-                    <td className={`py-2 px-3 text-right font-medium ${item.daysUntilStockOut <= 7 ? 'text-red-600' : item.daysUntilStockOut <= 14 ? 'text-amber-600' : 'text-gray-600'}`}>
-                      {Math.round(item.daysUntilStockOut)} วัน
-                    </td>
-                    <td className="py-2 px-3 text-right text-gray-600">{item.leadTimeDays} วัน</td>
-                    <td className="py-2 px-3 text-right text-gray-600"> {fmtNumber.format(item.suggestedReorderPoint)}</td>
-                    <td className="py-2 px-3 text-right font-bold text-blue-600 bg-blue-50">
-                      {fmtNumber.format(item.recommendedOrderQty)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <h3 className="text-lg font-semibold text-gray-800 mb-4">🏥 Inventory Health</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <GaugeChart 
+              value={counts.fastMovers || 0} 
+              max={Math.max(50, counts.fastMovers || 0)} 
+              title="สินค้าขายดี" 
+              colorRange={['#EF4444', '#F59E0B', '#10B981']}
+            />
+            <GaugeChart 
+              value={100 - Math.min(100, (criticalItems / Math.max(counts.reorderSuggestions, 1)) * 100)} 
+              max={100} 
+              title="Stock Health %" 
+              unit="%"
+              colorRange={['#EF4444', '#F59E0B', '#10B981']}
+            />
+            <GaugeChart 
+              value={avgDailyRate} 
+              max={Math.max(100, avgDailyRate)} 
+              title="Velocity/วัน" 
+              colorRange={['#3B82F6', '#10B981', '#10B981']}
+            />
+            <GaugeChart 
+              value={Math.max(0, 30 - (counts.nearExpiry || 0))} 
+              max={30} 
+              title="Expiry Safety" 
+              colorRange={['#EF4444', '#F59E0B', '#10B981']}
+            />
           </div>
         </div>
       )}
 
+      {/* Analysis Section 1: Sales Analysis */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {loading ? (
+          <>
+            <LoadingSection height="h-96" />
+            <LoadingSection height="h-96" />
+          </>
+        ) : (
+          <>
+            <HBarChart 
+              data={fastMoversData}
+              title={`🔥 Top ${topN} สินค้าขายดี${useDateRange ? ` (${dateFrom} - ${dateTo})` : ` (${days} วัน)`}`}
+              valueKey="quantitySold"
+              color="#10B981"
+            />
+            <HBarChart 
+              data={fastMoversData.sort((a, b) => b.dailySalesRate - a.dailySalesRate)}
+              title="📈 อัตราขายสูงสุด (ต่อวัน)"
+              valueKey="dailySalesRate"
+              color="#3B82F6"
+            />
+          </>
+        )}
+      </div>
+
+      {/* Analysis Section 2: Stock Days Remaining */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {loading ? (
+          <>
+            <LoadingSection height="h-96" />
+            <LoadingSection height="h-96" />
+          </>
+        ) : (
+          <>
+            <HBarChart 
+              data={fastMoversData.filter(f => f.daysRemaining < 999).sort((a, b) => a.daysRemaining - b.daysRemaining)}
+              title="⚠️ สินค้าที่เหลือใช้ได้น้อย (วัน)"
+              valueKey="daysRemaining"
+              color="#F59E0B"
+            />
+            <ComparisonChart
+              data={fastMoversData.slice(0, 10)}
+              title="📊 เปรียบเทียบ: ยอดขาย vs คงเหลือ"
+              value1Key="quantitySold"
+              value2Key="currentStock"
+              label1="ขายไป"
+              label2="คงเหลือ"
+            />
+          </>
+        )}
+      </div>
+
+      {/* Category & Brand Analysis */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {loading ? (
+          <>
+            <LoadingSection height="h-96" />
+            <LoadingSection height="h-96" />
+          </>
+        ) : (
+          <>
+            <DataTable
+              data={categoryAnalysis}
+              title="📁 วิเคราะห์ตามหมวดหมู่"
+              columns={[
+                { key: 'label', label: 'หมวดหมู่' },
+                { key: 'totalSold', label: 'ขายแล้ว', format: 'number', align: 'right' },
+                { key: 'totalStock', label: 'คงเหลือ', format: 'number', align: 'right' },
+                { key: 'dailySalesRate', label: '/วัน', format: 'number', align: 'right' },
+                { key: 'daysRemaining', label: 'เหลือ', format: 'days', align: 'right', highlight: true, highlightThreshold: 14 },
+                { key: 'turnoverRate', label: 'Turnover', format: 'percent', align: 'right' },
+              ]}
+            />
+            <DataTable
+              data={brandAnalysis}
+              title="🏷️ วิเคราะห์ตามแบรนด์"
+              columns={[
+                { key: 'label', label: 'แบรนด์' },
+                { key: 'totalSold', label: 'ขายแล้ว', format: 'number', align: 'right' },
+                { key: 'totalStock', label: 'คงเหลือ', format: 'number', align: 'right' },
+                { key: 'dailySalesRate', label: '/วัน', format: 'number', align: 'right' },
+                { key: 'daysRemaining', label: 'เหลือ', format: 'days', align: 'right', highlight: true, highlightThreshold: 14 },
+                { key: 'turnoverRate', label: 'Turnover', format: 'percent', align: 'right' },
+              ]}
+            />
+          </>
+        )}
+      </div>
+
+      {/* Reorder Suggestions - Urgent */}
+      {reorderData.length > 0 && (
+        loading ? (
+          <LoadingSection height="h-96" />
+        ) : (
+          <div className="bg-white rounded-xl shadow p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-800">🛒 แนะนำการสั่งซื้อ</h3>
+                <p className="text-xs text-gray-500 mt-1">💡 สำหรับการแบ่ง MOQ ตามแต่ละ Variant ให้ดูที่หน้า <strong>📦 Replenishment</strong></p>
+              </div>
+              <div className="flex gap-2 text-xs">
+                <span className="px-2 py-1 bg-red-100 text-red-700 rounded">ด่วนมาก ≤7 วัน</span>
+                <span className="px-2 py-1 bg-amber-100 text-amber-700 rounded">ด่วน ≤14 วัน</span>
+                <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded">ปกติ</span>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b-2 border-gray-200">
+                    <th className="py-2 px-3 text-left font-semibold text-gray-600">ความเร่งด่วน</th>
+                    <th className="py-2 px-3 text-left font-semibold text-gray-600">สินค้า</th>
+                    <th className="py-2 px-3 text-left font-semibold text-gray-600">SKU</th>
+                    <th className="py-2 px-3 text-right font-semibold text-gray-600">คงเหลือ</th>
+                    <th className="py-2 px-3 text-right font-semibold text-gray-600">ขาย/วัน</th>
+                    <th className="py-2 px-3 text-right font-semibold text-gray-600">เหลือใช้</th>
+                    <th className="py-2 px-3 text-right font-semibold text-gray-600">Lead Time</th>
+                    <th className="py-2 px-3 text-right font-semibold text-gray-600">จุดสั่งซื้อ</th>
+                    <th className="py-2 px-3 text-right font-semibold text-gray-600 bg-blue-50">แนะนำสั่ง</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reorderData.slice(0, 20).map((item, idx) => (
+                    <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
+                      <td className="py-2 px-3">
+                        <span className={`px-2 py-1 rounded text-xs font-medium ${item.urgencyColor}`}>
+                          {item.urgency}
+                        </span>
+                      </td>
+                      <td className="py-2 px-3 text-gray-700">{item.productName}</td>
+                      <td className="py-2 px-3 font-mono text-gray-500">{item.sku}</td>
+                      <td className="py-2 px-3 text-right text-gray-600">{fmtNumber.format(item.currentStock)}</td>
+                      <td className="py-2 px-3 text-right text-gray-600">{item.dailySalesRate}</td>
+                      <td className={`py-2 px-3 text-right font-medium ${item.daysUntilStockOut <= 7 ? 'text-red-600' : item.daysUntilStockOut <= 14 ? 'text-amber-600' : 'text-gray-600'}`}>
+                        {Math.round(item.daysUntilStockOut)} วัน
+                      </td>
+                      <td className="py-2 px-3 text-right text-gray-600">{item.leadTimeDays} วัน</td>
+                      <td className="py-2 px-3 text-right text-gray-600"> {fmtNumber.format(item.suggestedReorderPoint)}</td>
+                      <td className="py-2 px-3 text-right font-bold text-blue-600 bg-blue-50">
+                        {fmtNumber.format(item.recommendedOrderQty)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )
+      )}
+
       {/* Low Stock & Near Expiry */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {lowStockData.length > 0 && (
-          <DataTable
-            data={lowStockData.slice(0, 15)}
-            title="🔴 สินค้าสต็อกต่ำ"
-            columns={[
-              { key: 'productName', label: 'สินค้า' },
-              { key: 'sku', label: 'SKU' },
-              { key: 'stockOnHand', label: 'คงเหลือ', format: 'number', align: 'right' },
-              { key: 'daysRemaining', label: 'เหลือใช้', format: 'days', align: 'right', highlight: true, highlightThreshold: 14 },
-            ]}
-          />
-        )}
-        {nearExpiryData.length > 0 && (
-          <DataTable
-            data={nearExpiryData.slice(0, 15).map(item => ({
-              ...item,
-              expiryDateFmt: new Date(item.expiryDate).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' }),
-              daysLeft: Math.ceil((new Date(item.expiryDate) - new Date()) / (1000 * 60 * 60 * 24))
-            }))}
-            title="🟡 สินค้าใกล้หมดอายุ"
-            columns={[
-              { key: 'productName', label: 'สินค้า' },
-              { key: 'sku', label: 'SKU' },
-              { key: 'batchRef', label: 'ล็อต' },
-              { key: 'quantity', label: 'จำนวน', format: 'number', align: 'right' },
-              { key: 'expiryDateFmt', label: 'หมดอายุ', align: 'right' },
-              { key: 'daysLeft', label: 'เหลือ', format: 'days', align: 'right', highlight: true, highlightThreshold: 7 },
-            ]}
-          />
+        {loading ? (
+          <>
+            <LoadingSection height="h-96" />
+            <LoadingSection height="h-96" />
+          </>
+        ) : (
+          <>
+            {lowStockData.length > 0 && (
+              <DataTable
+                data={lowStockData.slice(0, 15)}
+                title="🔴 สินค้าสต็อกต่ำ"
+                columns={[
+                  { key: 'productName', label: 'สินค้า' },
+                  { key: 'sku', label: 'SKU' },
+                  { key: 'stockOnHand', label: 'คงเหลือ', format: 'number', align: 'right' },
+                  { key: 'daysRemaining', label: 'เหลือใช้', format: 'days', align: 'right', highlight: true, highlightThreshold: 14 },
+                ]}
+              />
+            )}
+            {nearExpiryData.length > 0 && (
+              <DataTable
+                data={nearExpiryData.slice(0, 15).map(item => ({
+                  ...item,
+                  expiryDateFmt: new Date(item.expiryDate).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' }),
+                  daysLeft: Math.ceil((new Date(item.expiryDate) - new Date()) / (1000 * 60 * 60 * 24))
+                }))}
+                title="🟡 สินค้าใกล้หมดอายุ"
+                columns={[
+                  { key: 'productName', label: 'สินค้า' },
+                  { key: 'sku', label: 'SKU' },
+                  { key: 'batchRef', label: 'ล็อต' },
+                  { key: 'quantity', label: 'จำนวน', format: 'number', align: 'right' },
+                  { key: 'expiryDateFmt', label: 'หมดอายุ', align: 'right' },
+                  { key: 'daysLeft', label: 'เหลือ', format: 'days', align: 'right', highlight: true, highlightThreshold: 7 },
+                ]}
+              />
+            )}
+          </>
         )}
       </div>
 
       {/* Full Product Analysis Table */}
-      <DataTable
-        data={fastMoversData}
-        title="📋 รายละเอียดสินค้าขายดี"
-        columns={[
-          { key: 'productName', label: 'สินค้า' },
-          { key: 'sku', label: 'SKU' },
-          { key: 'categoryName', label: 'หมวดหมู่' },
-          { key: 'brandName', label: 'แบรนด์' },
-          { key: 'quantitySold', label: 'ขายแล้ว', format: 'number', align: 'right' },
-          { key: 'dailySalesRate', label: 'ขาย/วัน', format: 'number', align: 'right' },
-          { key: 'currentStock', label: 'คงเหลือ', format: 'number', align: 'right' },
-          { key: 'incoming', label: 'กำลังมา', format: 'number', align: 'right' },
-          { key: 'daysRemaining', label: 'เหลือใช้', format: 'days', align: 'right', highlight: true, highlightThreshold: 14 },
-        ]}
-      />
+      {loading ? (
+        <LoadingSection height="h-96" />
+      ) : (
+        <DataTable
+          data={fastMoversData}
+          title="📋 รายละเอียดสินค้าขายดี"
+          columns={[
+            { key: 'productName', label: 'สินค้า' },
+            { key: 'sku', label: 'SKU' },
+            { key: 'categoryName', label: 'หมวดหมู่' },
+            { key: 'brandName', label: 'แบรนด์' },
+            { key: 'quantitySold', label: 'ขายแล้ว', format: 'number', align: 'right' },
+            { key: 'dailySalesRate', label: 'ขาย/วัน', format: 'number', align: 'right' },
+            { key: 'currentStock', label: 'คงเหลือ', format: 'number', align: 'right' },
+            { key: 'incoming', label: 'กำลังมา', format: 'number', align: 'right' },
+            { key: 'daysRemaining', label: 'เหลือใช้', format: 'days', align: 'right', highlight: true, highlightThreshold: 14 },
+          ]}
+        />
+      )}
     </div>
   );
 }

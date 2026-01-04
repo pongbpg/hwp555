@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import api from '../api.js';
+import DateRangeFilter from '../components/DateRangeFilter.jsx';
 
 // Simple Pie Chart Component
 const PieChart = ({ data, title }) => {
@@ -220,6 +221,9 @@ export default function Dashboard() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [useDateRange, setUseDateRange] = useState(false);
 
   const fmtNumber = new Intl.NumberFormat('th-TH');
   const fmtCurrency = new Intl.NumberFormat('th-TH', { style: 'currency', currency: 'THB' });
@@ -228,7 +232,12 @@ export default function Dashboard() {
     setLoading(true);
     setError('');
     try {
-      const res = await api.get('/inventory/dashboard');
+      const params = new URLSearchParams();
+      if (useDateRange) {
+        params.append('dateFrom', dateFrom);
+        params.append('dateTo', dateTo);
+      }
+      const res = await api.get(`/inventory/dashboard?${params.toString()}`);
       setData(res.data);
     } catch (err) {
       const status = err.response?.status;
@@ -251,14 +260,6 @@ export default function Dashboard() {
     loadData();
   }, []);
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-      </div>
-    );
-  }
-
   if (error) {
     return (
       <div className="bg-white rounded-xl shadow p-8 text-center">
@@ -270,6 +271,16 @@ export default function Dashboard() {
       </div>
     );
   }
+
+  // Loading indicator component for empty sections
+  const LoadingSection = ({ height = 'h-32' }) => (
+    <div className={`bg-white rounded-xl shadow p-6 flex items-center justify-center ${height}`}>
+      <div className="flex flex-col items-center gap-2">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        <p className="text-sm text-gray-500">กำลังโหลดข้อมูล...</p>
+      </div>
+    </div>
+  );
 
   const summary = data?.summary || {};
   const alerts = data?.alerts || {};
@@ -323,92 +334,151 @@ export default function Dashboard() {
         </button>
       </div>
 
+      {/* Date Range Filter */}
+      <DateRangeFilter 
+        dateFrom={dateFrom}
+        setDateFrom={setDateFrom}
+        dateTo={dateTo}
+        setDateTo={setDateTo}
+        useDateRange={useDateRange}
+        setUseDateRange={setUseDateRange}
+        onSearch={loadData}
+      />
+
       {/* Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-        <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-lg p-4 text-white">
-          <p className="text-sm opacity-90">📦 สินค้าทั้งหมด</p>
-          <p className="text-2xl font-bold">{fmtNumber.format(summary.totalProducts || 0)}</p>
-        </div>
-        <div className="bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-xl shadow-lg p-4 text-white">
-          <p className="text-sm opacity-90">🏷️ รายการสินค้า</p>
-          <p className="text-2xl font-bold">{fmtNumber.format(summary.totalVariants || 0)}</p>
-        </div>
-        <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-xl shadow-lg p-4 text-white">
-          <p className="text-sm opacity-90">📈 สต็อกรวม</p>
-          <p className="text-2xl font-bold">{fmtNumber.format(summary.totalStock || 0)}</p>
-        </div>
-        <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl shadow-lg p-4 text-white">
-          <p className="text-sm opacity-90">💰 มูลค่าสต็อก</p>
-          <p className="text-2xl font-bold">{fmtCurrency.format(summary.totalValue || 0)}</p>
-        </div>
-        <div className="bg-gradient-to-br from-amber-500 to-amber-600 rounded-xl shadow-lg p-4 text-white">
-          <p className="text-sm opacity-90">⚠️ สต็อกต่ำ</p>
-          <p className="text-2xl font-bold">{fmtNumber.format(summary.lowStockCount || 0)}</p>
-        </div>
-        <div className="bg-gradient-to-br from-red-500 to-red-600 rounded-xl shadow-lg p-4 text-white">
-          <p className="text-sm opacity-90">❌ หมดสต็อก</p>
-          <p className="text-2xl font-bold">{fmtNumber.format(summary.outOfStockCount || 0)}</p>
-        </div>
+        {loading ? (
+          <>
+            {[...Array(6)].map((_, i) => (
+              <div key={i} className="bg-gradient-to-br from-gray-200 to-gray-300 rounded-xl shadow-lg p-4 text-white animate-pulse h-24"></div>
+            ))}
+          </>
+        ) : (
+          <>
+            <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-lg p-4 text-white">
+              <p className="text-sm opacity-90">📦 สินค้าทั้งหมด</p>
+              <p className="text-2xl font-bold">{fmtNumber.format(summary.totalProducts || 0)}</p>
+            </div>
+            <div className="bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-xl shadow-lg p-4 text-white">
+              <p className="text-sm opacity-90">🏷️ รายการสินค้า</p>
+              <p className="text-2xl font-bold">{fmtNumber.format(summary.totalVariants || 0)}</p>
+            </div>
+            <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-xl shadow-lg p-4 text-white">
+              <p className="text-sm opacity-90">📈 สต็อกรวม</p>
+              <p className="text-2xl font-bold">{fmtNumber.format(summary.totalStock || 0)}</p>
+            </div>
+            <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl shadow-lg p-4 text-white">
+              <p className="text-sm opacity-90">💰 มูลค่าสต็อก</p>
+              <p className="text-2xl font-bold">{fmtCurrency.format(summary.totalValue || 0)}</p>
+            </div>
+            <div className="bg-gradient-to-br from-amber-500 to-amber-600 rounded-xl shadow-lg p-4 text-white">
+              <p className="text-sm opacity-90">⚠️ สต็อกต่ำ</p>
+              <p className="text-2xl font-bold">{fmtNumber.format(summary.lowStockCount || 0)}</p>
+            </div>
+            <div className="bg-gradient-to-br from-red-500 to-red-600 rounded-xl shadow-lg p-4 text-white">
+              <p className="text-sm opacity-90">❌ หมดสต็อก</p>
+              <p className="text-2xl font-bold">{fmtNumber.format(summary.outOfStockCount || 0)}</p>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Quick Stats Row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl shadow p-4 border-l-4 border-blue-500">
-          <p className="text-sm text-gray-500">📋 ใบสั่งซื้อรอรับ</p>
-          <p className="text-xl font-bold text-gray-800">{fmtNumber.format(summary.pendingOrders || 0)}</p>
-        </div>
-        <div className="bg-white rounded-xl shadow p-4 border-l-4 border-green-500">
-          <p className="text-sm text-gray-500">📝 ใบสั่งวันนี้</p>
-          <p className="text-xl font-bold text-gray-800">{fmtNumber.format(summary.ordersToday || 0)}</p>
-        </div>
-        <div className="bg-white rounded-xl shadow p-4 border-l-4 border-purple-500">
-          <p className="text-sm text-gray-500">📁 หมวดหมู่</p>
-          <p className="text-xl font-bold text-gray-800">{fmtNumber.format((data?.byCategory || []).length)}</p>
-        </div>
-        <div className="bg-white rounded-xl shadow p-4 border-l-4 border-pink-500">
-          <p className="text-sm text-gray-500">🏷️ แบรนด์</p>
-          <p className="text-xl font-bold text-gray-800">{fmtNumber.format((data?.byBrand || []).length)}</p>
-        </div>
+        {loading ? (
+          <>
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="bg-gray-200 rounded-xl shadow p-4 animate-pulse h-20"></div>
+            ))}
+          </>
+        ) : (
+          <>
+            <div className="bg-white rounded-xl shadow p-4 border-l-4 border-blue-500">
+              <p className="text-sm text-gray-500">📋 ใบสั่งซื้อรอรับ</p>
+              <p className="text-xl font-bold text-gray-800">{fmtNumber.format(summary.pendingOrders || 0)}</p>
+            </div>
+            <div className="bg-white rounded-xl shadow p-4 border-l-4 border-green-500">
+              <p className="text-sm text-gray-500">📝 ใบสั่งวันนี้</p>
+              <p className="text-xl font-bold text-gray-800">{fmtNumber.format(summary.ordersToday || 0)}</p>
+            </div>
+            <div className="bg-white rounded-xl shadow p-4 border-l-4 border-purple-500">
+              <p className="text-sm text-gray-500">📁 หมวดหมู่</p>
+              <p className="text-xl font-bold text-gray-800">{fmtNumber.format((data?.byCategory || []).length)}</p>
+            </div>
+            <div className="bg-white rounded-xl shadow p-4 border-l-4 border-pink-500">
+              <p className="text-sm text-gray-500">🏷️ แบรนด์</p>
+              <p className="text-xl font-bold text-gray-800">{fmtNumber.format((data?.byBrand || []).length)}</p>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Charts Row 1 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <PieChart 
-          data={categoryPieData} 
-          title="📊 สัดส่วนสต็อกตามหมวดหมู่" 
-        />
-        <DonutChart 
-          data={stockStatusData} 
-          title="📈 สถานะสต็อก" 
-          centerText={fmtNumber.format(summary.totalVariants || 0)}
-        />
+        {loading ? (
+          <>
+            <LoadingSection height="h-96" />
+            <LoadingSection height="h-96" />
+          </>
+        ) : (
+          <>
+            <PieChart 
+              data={categoryPieData} 
+              title="📊 สัดส่วนสต็อกตามหมวดหมู่" 
+            />
+            <DonutChart 
+              data={stockStatusData} 
+              title="📈 สถานะสต็อก" 
+              centerText={fmtNumber.format(summary.totalVariants || 0)}
+            />
+          </>
+        )}
       </div>
 
       {/* Charts Row 2 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <BarChart 
-          data={topCategoriesBar}
-          title="📦 Top 10 หมวดหมู่ (จำนวนสต็อก)"
-          color="#3B82F6"
-        />
-        <BarChart 
-          data={topBrandsBar}
-          title="🏷️ Top 10 แบรนด์ (จำนวนสต็อก)"
-          color="#8B5CF6"
-        />
+        {loading ? (
+          <>
+            <LoadingSection height="h-96" />
+            <LoadingSection height="h-96" />
+          </>
+        ) : (
+          <>
+            <BarChart 
+              data={topCategoriesBar}
+              title="📦 Top 10 หมวดหมู่ (จำนวนสต็อก)"
+              color="#3B82F6"
+            />
+            <BarChart 
+              data={topBrandsBar}
+              title="🏷️ Top 10 แบรนด์ (จำนวนสต็อก)"
+              color="#8B5CF6"
+            />
+          </>
+        )}
       </div>
 
       {/* Movement Trend */}
-      {movementTrendData.length > 0 && (
-        <LineChart 
-          data={movementTrendData}
-          title="📈 แนวโน้มการเคลื่อนไหวสต็อก (7 วันล่าสุด)"
-        />
+      {loading ? (
+        <LoadingSection height="h-64" />
+      ) : (
+        movementTrendData.length > 0 && (
+          <LineChart 
+            data={movementTrendData}
+            title="📈 แนวโน้มการเคลื่อนไหวสต็อก (7 วันล่าสุด)"
+          />
+        )
       )}
 
+      {/* Top Sellers */}
+      {/* This section is removed - use Insights page instead for detailed sales data */}
+
       {/* Movement Summary */}
-      {movements?.byType?.length > 0 && (
-        <div className="bg-white rounded-xl shadow p-6">
+      {loading ? (
+        <LoadingSection height="h-48" />
+      ) : (
+        movements?.byType?.length > 0 && (
+          <div className="bg-white rounded-xl shadow p-6">
           <h2 className="text-lg font-semibold text-gray-800 mb-4">📦 การเคลื่อนไหวสต็อก (7 วันล่าสุด)</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
             {(movements.byType || []).map((item) => (
@@ -433,11 +503,15 @@ export default function Dashboard() {
             ))}
           </div>
         </div>
+        )
       )}
 
       {/* Alerts Summary */}
-      {alerts?.total > 0 && (
-        <div className="bg-white rounded-xl shadow p-6">
+      {loading ? (
+        <LoadingSection height="h-56" />
+      ) : (
+        alerts?.total > 0 && (
+          <div className="bg-white rounded-xl shadow p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-gray-800">🔔 การแจ้งเตือน</h2>
             <div className="flex gap-2">
@@ -468,13 +542,21 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
+        )
       )}
 
       {/* Category & Brand Tables */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Category Table */}
-        {(data?.byCategory || []).length > 0 && (
-          <div className="bg-white rounded-xl shadow p-6">
+        {loading ? (
+          <>
+            <LoadingSection height="h-96" />
+            <LoadingSection height="h-96" />
+          </>
+        ) : (
+          <>
+            {/* Category Table */}
+            {(data?.byCategory || []).length > 0 && (
+              <div className="bg-white rounded-xl shadow p-6">
             <h2 className="text-lg font-semibold text-gray-800 mb-4">📁 สต็อกตามหมวดหมู่</h2>
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -497,33 +579,35 @@ export default function Dashboard() {
               </table>
             </div>
           </div>
-        )}
+            )}
 
-        {/* Brand Table */}
-        {(data?.byBrand || []).length > 0 && (
-          <div className="bg-white rounded-xl shadow p-6">
-            <h2 className="text-lg font-semibold text-gray-800 mb-4">🏷️ สต็อกตามแบรนด์</h2>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-gray-200">
-                    <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">แบรนด์</th>
-                    <th className="text-right py-2 px-3 text-sm font-semibold text-gray-600">สต็อก</th>
-                    <th className="text-right py-2 px-3 text-sm font-semibold text-gray-600">มูลค่า</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(data?.byBrand || []).slice(0, 8).map((brand, idx) => (
-                    <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
-                      <td className="py-2 px-3 text-sm text-gray-800">{brand.name}</td>
-                      <td className="py-2 px-3 text-sm text-gray-600 text-right">{fmtNumber.format(brand.stock)}</td>
-                      <td className="py-2 px-3 text-sm text-gray-600 text-right">{fmtCurrency.format(brand.value)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+            {/* Brand Table */}
+            {(data?.byBrand || []).length > 0 && (
+              <div className="bg-white rounded-xl shadow p-6">
+                <h2 className="text-lg font-semibold text-gray-800 mb-4">🏷️ สต็อกตามแบรนด์</h2>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-gray-200">
+                        <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">แบรนด์</th>
+                        <th className="text-right py-2 px-3 text-sm font-semibold text-gray-600">สต็อก</th>
+                        <th className="text-right py-2 px-3 text-sm font-semibold text-gray-600">มูลค่า</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(data?.byBrand || []).slice(0, 8).map((brand, idx) => (
+                        <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
+                          <td className="py-2 px-3 text-sm text-gray-800">{brand.name}</td>
+                          <td className="py-2 px-3 text-sm text-gray-600 text-right">{fmtNumber.format(brand.stock)}</td>
+                          <td className="py-2 px-3 text-sm text-gray-600 text-right">{fmtCurrency.format(brand.value)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

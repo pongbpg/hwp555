@@ -521,16 +521,31 @@ router.get('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr'),
 router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), async (req, res) => {
   try {
     const now = new Date();
-    const days = Number(req.query.days) || 30;
     const expiryDays = Number(req.query.expiryDays) || 30;
     const top = Math.min(50, Math.max(1, Number(req.query.top) || 10));
+    const days = Number(req.query.days) || 30; // ✅ ประกาศ days ข้างนอก if/else
     
-    // ใช้ช่วงยอดขาย 30 วันคงที่ เพื่อให้ dailySalesRate ตรงกับ LINE/Alerts
-    const salesPeriodDays = 30;
-    const salesSince = new Date(now.getTime() - salesPeriodDays * 24 * 60 * 60 * 1000);
+    // ✅ รองรับ dateFrom และ dateTo หรือ days
+    let salesSince;
+    if (req.query.dateFrom && req.query.dateTo) {
+      // ถ้าระบุช่วงวันที่ ให้ใช้ช่วงนั้น
+      salesSince = new Date(req.query.dateFrom);
+      const dateToObj = new Date(req.query.dateTo);
+      // ตั้งให้จบวันสุดท้ายนี้
+      dateToObj.setHours(23, 59, 59, 999);
+    } else {
+      // ถ้าไม่ระบุ ให้ใช้ days (default 30)
+      salesSince = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+    }
+    
     const expiryBefore = new Date(now.getTime() + expiryDays * 24 * 60 * 60 * 1000);
 
-    // คำนวณยอดขายใน 30 วันที่ผ่านมา (ใช้ orderDate แทน createdAt เพื่อความถูกต้อง)
+    // ✅ Determine salesPeriodDays for calculations
+    const salesPeriodDays = req.query.dateFrom && req.query.dateTo
+      ? Math.ceil((new Date(req.query.dateTo) - new Date(req.query.dateFrom)) / (1000 * 60 * 60 * 24)) + 1
+      : (Number(req.query.days) || 30);
+
+    // คำนวณยอดขาย (ใช้ orderDate แทน createdAt เพื่อความถูกต้อง)
     const salesData = await InventoryOrder.aggregate([
       { $match: { type: 'sale', orderDate: { $gte: salesSince }, status: { $ne: 'cancelled' } } },
       { $unwind: '$items' },
@@ -668,6 +683,7 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
               bufferDays,
               minOrderQty: product.minOrderQty || 0,
               avgDailySales: dailySalesRate,
+              enableStockAlerts: product.enableStockAlerts,
             });
 
             lowStock.push({
@@ -765,7 +781,7 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
 });
 
 // ============= Dashboard Summary =============
-router.get('/dashboard', authenticateToken, authorizeRoles('owner', 'stock'), async (_req, res) => {
+router.get('/dashboard', authenticateToken, authorizeRoles('owner', 'stock'), async (req, res) => {
   try {
     const products = await Product.find({ status: 'active' }).lean();
     
@@ -832,14 +848,36 @@ router.get('/dashboard', authenticateToken, authorizeRoles('owner', 'stock'), as
     });
     
     // วันนี้มี orders กี่รายการ
+    // Date range support for sales calculations
+    const now = new Date();
+    let salesSince = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000); // default 30 days
+    let salesUntil = new Date();
+    salesUntil.setHours(23, 59, 59, 999);
+    let salesPeriodDays = 30;
+
+    // Support custom date range
+    if (req.query.dateFrom && req.query.dateTo) {
+      salesSince = new Date(req.query.dateFrom);
+      salesUntil = new Date(req.query.dateTo);
+      salesUntil.setHours(23, 59, 59, 999);
+      salesPeriodDays = Math.ceil((salesUntil - salesSince) / (1000 * 60 * 60 * 24)) + 1;
+    } else if (req.query.days) {
+      const days = Number(req.query.days) || 30;
+      salesSince = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+      salesPeriodDays = days;
+    }
+
+    // Count orders for the date range
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const ordersToday = await InventoryOrder.countDocuments({ createdAt: { $gte: today } });
+    const ordersToday = await InventoryOrder.countDocuments({ 
+      createdAt: { $gte: today },
+      orderDate: { $gte: salesSince, $lte: salesUntil }
+    });
     const pendingOrders = await InventoryOrder.countDocuments({ status: 'pending' });
     
-    // Movement summary (7 days)
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    // Movement summary (use same date range)
+    const sevenDaysAgo = req.query.dateFrom ? salesSince : new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
     const StockMovement = (await import('../models/StockMovement.js')).default;
     
     const movementByType = await StockMovement.aggregate([
@@ -855,7 +893,6 @@ router.get('/dashboard', authenticateToken, authorizeRoles('owner', 'stock'), as
     ]);
     
     // Alert counts
-    const now = new Date();
     const expiryBefore = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
     let nearExpiryCount = 0;
     

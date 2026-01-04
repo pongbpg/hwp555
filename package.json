@@ -28,5 +28,8 @@
     "monorepo"
   ],
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "dependencies": {
+    "moment-timezone": "^0.6.0"
+  }
 }
