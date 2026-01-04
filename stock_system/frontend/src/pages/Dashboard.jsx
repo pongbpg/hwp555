@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import api from '../api.js';
-import DateRangeFilter from '../components/DateRangeFilter.jsx';
 
 // Simple Pie Chart Component
 const PieChart = ({ data, title }) => {
@@ -221,9 +220,6 @@ export default function Dashboard() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
-  const [useDateRange, setUseDateRange] = useState(false);
 
   const fmtNumber = new Intl.NumberFormat('th-TH');
   const fmtCurrency = new Intl.NumberFormat('th-TH', { style: 'currency', currency: 'THB' });
@@ -232,12 +228,7 @@ export default function Dashboard() {
     setLoading(true);
     setError('');
     try {
-      const params = new URLSearchParams();
-      if (useDateRange) {
-        params.append('dateFrom', dateFrom);
-        params.append('dateTo', dateTo);
-      }
-      const res = await api.get(`/inventory/dashboard?${params.toString()}`);
+      const res = await api.get(`/inventory/dashboard`);
       setData(res.data);
     } catch (err) {
       const status = err.response?.status;
@@ -335,15 +326,7 @@ export default function Dashboard() {
       </div>
 
       {/* Date Range Filter */}
-      <DateRangeFilter 
-        dateFrom={dateFrom}
-        setDateFrom={setDateFrom}
-        dateTo={dateTo}
-        setDateTo={setDateTo}
-        useDateRange={useDateRange}
-        setUseDateRange={setUseDateRange}
-        onSearch={loadData}
-      />
+      {/* Removed - Dashboard shows overall metrics only. Use Insights page for date range analysis */}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
