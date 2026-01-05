@@ -3,14 +3,13 @@
  * รองรับการคำนวณต้นทุนสินค้าคงเหลือตาม costing methods ต่างๆ
  * - FIFO: First In, First Out
  * - LIFO: Last In, First Out
- * - WAC: Weighted Average Cost
  */
 
 /**
  * คำนวณมูลค่าสินค้าคงเหลือตามวิธี costing ที่เลือก
  * ✅ IMPORTANT: คำนวณจาก batches ทั้งหมด ไม่สนใจ variant.cost
  * @param {object} variant - Variant with batches
- * @param {string} costingMethod - 'FIFO' | 'LIFO' | 'WAC' (default: 'FIFO')
+ * @param {string} costingMethod - 'FIFO' | 'LIFO' (default: 'FIFO')
  * @returns {number} - มูลค่ารวมสินค้าคงเหลือ
  */
 export const calculateInventoryValue = (variant, costingMethod = 'FIFO') => {
@@ -27,15 +26,13 @@ export const calculateInventoryValue = (variant, costingMethod = 'FIFO') => {
 
   // ✅ Sanitize costingMethod - handle undefined/null/invalid values
   const sanitizedMethod = (costingMethod || 'FIFO').toString().toUpperCase();
-  const validMethods = ['FIFO', 'LIFO', 'WAC'];
+  const validMethods = ['FIFO', 'LIFO'];
   const method = validMethods.includes(sanitizedMethod) ? sanitizedMethod : 'FIFO';
 
   // ✅ คำนวณจาก batches เท่านั้น
   switch (method) {
     case 'LIFO':
       return calculateLIFO(variant.batches, stockOnHand);
-    case 'WAC':
-      return calculateWAC(variant.batches, stockOnHand);
     case 'FIFO':
     default:
       return calculateFIFO(variant.batches, stockOnHand);
@@ -128,35 +125,11 @@ const calculateLIFO = (batches, stockOnHand = 0) => {
   return totalValue;
 };
 
-/**
- * WAC: Weighted Average Cost
- * ใช้ราคา average ของทั้งหมด
- * ต้นทุนต่อหน่วย = (รวมต้นทุนทั้งหมด) / (รวมจำนวนทั้งหมด)
- */
-const calculateWAC = (batches, stockOnHand = 0) => {
-  if (batches.length === 0 || stockOnHand <= 0) return 0;
-
-  let totalCost = 0;
-  let totalBatchQty = 0;
-
-  batches.forEach((batch) => {
-    const qty = batch.quantity || 0;
-    const cost = batch.cost || 0;
-    totalCost += qty * cost;
-    totalBatchQty += qty;
-  });
-
-  // Weighted average cost per unit
-  const averageCost = totalBatchQty > 0 ? totalCost / totalBatchQty : 0;
-  
-  // ค่าสต็อกที่เหลือ = stockOnHand × average cost
-  return stockOnHand * averageCost;
-};
 
 /**
  * หา batches ที่จะใช้ consume ตามลำดับของ costing method
  * @param {Array} batches - Array of batches
- * @param {string} costingMethod - 'FIFO' | 'LIFO' | 'WAC'
+ * @param {string} costingMethod - 'FIFO' | 'LIFO'
  * @returns {Array} - sorted batches
  */
 export const getBatchConsumptionOrder = (batches, costingMethod = 'FIFO') => {
@@ -171,9 +144,6 @@ export const getBatchConsumptionOrder = (batches, costingMethod = 'FIFO') => {
       const bDate = b.receivedAt ? new Date(b.receivedAt) : new Date(0);
       return bDate - aDate;
     });
-  } else if (costingMethod === 'WAC') {
-    // WAC: ไม่ต้องจัดเรียง (treat as pool)
-    return batchesCopy;
   } else {
     // FIFO: เก่าสุดมาก่อน (default)
     return batchesCopy.sort((a, b) => {
@@ -189,7 +159,7 @@ export const getBatchConsumptionOrder = (batches, costingMethod = 'FIFO') => {
  * @param {object} variant - Variant document
  * @param {Array} sortedBatches - Batches ที่จัดเรียงแล้ว
  * @param {number} quantity - จำนวนที่ต้องหัก
- * @param {string} costingMethod - costing method (สำหรับ WAC special handling)
+ * @param {string} costingMethod - costing method ('FIFO' | 'LIFO')
  * @param {object} metadata - ข้อมูลเพิ่มเติม { orderId, orderReference }
  * @returns {number} - unconsumed quantity
  */
@@ -260,7 +230,6 @@ export default {
   calculateInventoryValue,
   calculateFIFO,
   calculateLIFO,
-  calculateWAC,
   getBatchConsumptionOrder,
   consumeBatchesByOrder,
 };

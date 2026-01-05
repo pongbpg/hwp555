@@ -47,6 +47,7 @@ export default function Products() {
   const [skuProduct, setSkuProduct] = useState('');
   const [defaultPrice, setDefaultPrice] = useState(0);
   const [costingMethod, setCostingMethod] = useState('FIFO');
+  const [isFormExpanded, setIsFormExpanded] = useState(false);
 
   const loadProducts = async () => {
     setLoading(true);
@@ -324,6 +325,11 @@ export default function Products() {
     setShowNewCategoryForm(false);
     setShowNewBrandForm(false);
     setSkuProduct('');
+    setIsFormExpanded(false);
+  };
+
+  const collapseForm = () => {
+    handleCancelEdit();
   };
 
   const applyDefaultsToAllVariants = () => {
@@ -448,6 +454,7 @@ export default function Products() {
       setShowNewBrandForm(false);
       setSkuProduct('');
       setCostingMethod('FIFO');
+      setIsFormExpanded(false);
       loadProducts();
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to create');
@@ -704,9 +711,27 @@ export default function Products() {
 
       {error && <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg">{error}</div>}
 
+      {/* Product Form Button (Collapsible Header) */}
+      <button
+        onClick={() => {
+          if (editMode) {
+            handleCancelEdit();
+          } else {
+            setIsFormExpanded(!isFormExpanded);
+          }
+        }}
+        className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white px-6 py-4 rounded-xl font-bold text-lg shadow-lg transition-all flex items-center justify-between"
+      >
+        <span>{editMode ? '✏️ แก้ไขสินค้า' : '➕ เพิ่มสินค้าใหม่'}</span>
+        <span className={`transform transition-transform ${isFormExpanded || editMode ? 'rotate-180' : ''}`}>
+          ▼
+        </span>
+      </button>
+
       {/* Product Form */}
-      <div className="bg-white rounded-xl shadow p-6">
-        <form onSubmit={editMode ? handleUpdate : handleCreate}>
+      {(isFormExpanded || editMode) && (
+        <div className="bg-white rounded-xl shadow p-6 animate-in fade-in duration-300">
+          <form onSubmit={editMode ? handleUpdate : handleCreate}>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* Brand */}
             <div>
@@ -1081,7 +1106,6 @@ export default function Products() {
                 >
                   <option value="FIFO">FIFO - สินค้าเก่าออกก่อน (อาหาร/ยา)</option>
                   <option value="LIFO">LIFO - สินค้าใหม่ออกก่อน (ราคาผันผวน)</option>
-                  <option value="WAC">WAC - ใช้ราคาเฉลี่ย (ทั่วไป)</option>
                 </select>
                 <p className="text-xs text-gray-500 mt-1">คำนวณมูลค่าสต็อก & ตัดสต็อกเมื่อขาย</p>
               </div>
@@ -1170,6 +1194,15 @@ export default function Products() {
                 ยกเลิก
               </button>
             )}
+            {!editMode && (
+              <button
+                type="button"
+                onClick={() => setIsFormExpanded(false)}
+                className="flex-1 bg-gray-400 hover:bg-gray-500 text-white px-6 py-3 rounded-lg font-semibold text-lg"
+              >
+                ยกเลิก
+              </button>
+            )}
             <button
               type="submit"
               disabled={saving}
@@ -1179,7 +1212,8 @@ export default function Products() {
             </button>
           </div>
         </form>
-      </div>
+        </div>
+      )}
 
       {/* Products List */}
       <div className="bg-white rounded-xl shadow p-6">
@@ -1188,9 +1222,9 @@ export default function Products() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-gray-200">
-                <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">Name</th>
-                <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">Category</th>
                 <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">Brand</th>
+                <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">Category</th>
+                <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">Name</th>
                 <th className="text-center py-2 px-3 text-sm font-semibold text-gray-600">Status</th>
                 <th className="text-center py-2 px-3 text-sm font-semibold text-gray-600">Variants</th>
                 <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">Details</th>
@@ -1200,9 +1234,9 @@ export default function Products() {
             <tbody>
               {products.map((p) => (
                 <tr key={p._id} className={`border-b border-gray-100 hover:bg-gray-50 ${p.status === 'archived' ? 'opacity-60' : ''}`}>
-                  <td className="py-2 px-3 text-sm font-medium">{p.name}</td>
-                  <td className="py-2 px-3 text-sm text-gray-600">{getCategoryName(p.category)}</td>
                   <td className="py-2 px-3 text-sm text-gray-600">{getBrandName(p.brand)}</td>
+                  <td className="py-2 px-3 text-sm text-gray-600">{getCategoryName(p.category)}</td>
+                  <td className="py-2 px-3 text-sm font-medium">{p.name}</td>
                   <td className="py-2 px-3 text-sm text-center">
                     <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${
                       p.status === 'active' 
