@@ -263,39 +263,62 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
 
     await order.save();
     
-    // ✅ Phase 3: Now apply stock changes with order metadata
+    // ✅ Phase 3: Group items by product and apply stock changes
+    // This prevents version conflicts when saving products with multiple variant changes
+    const productMap = new Map();
+    
     for (const { product, variant, rawItem, unitPrice, qty, previousStock } of itemsToProcess) {
-      if (type === 'purchase') {
-        // สำหรับใบสั่งซื้อ: เพิ่ม incoming ไว้ก่อน รอรับของจึงบวกสต็อกจริง
-        variant.incoming = (variant.incoming || 0) + qty;
-      } else {
-        // ✅ ส่ง order metadata (orderId, orderReference) ให้ applyStockChange
-        applyStockChange(
-          variant,
-          product,
-          { ...rawItem, quantity: qty },
-          type,
-          {
-            orderId: order._id,
-            orderReference: order.reference || order._id.toString(),
-          }
-        );
-        
-        // เก็บข้อมูลสำหรับ movement (ยกเว้น purchase เพราะยังไม่รับของ)
-        movementRecords.push({
-          movementType: type === 'sale' ? 'out' : 'adjust',
-          product,
-          variant,
-          quantity: type === 'sale' ? -qty : qty,
-          previousStock,
-          newStock: variant.stockOnHand,
-          reference,
-          batchRef: rawItem.batchRef,
-          expiryDate: rawItem.expiryDate,
-          unitCost: variant.cost || 0,
-        });
+      const productId = String(product._id);
+      
+      if (!productMap.has(productId)) {
+        productMap.set(productId, { product, items: [] });
       }
-
+      
+      productMap.get(productId).items.push({
+        variant,
+        rawItem,
+        unitPrice,
+        qty,
+        previousStock,
+      });
+    }
+    
+    // ✅ Phase 4: Process each product once with all its variants
+    for (const { product, items: productItems } of productMap.values()) {
+      for (const { variant, rawItem, qty, previousStock } of productItems) {
+        if (type === 'purchase') {
+          // สำหรับใบสั่งซื้อ: เพิ่ม incoming ไว้ก่อน รอรับของจึงบวกสต็อกจริง
+          variant.incoming = (variant.incoming || 0) + qty;
+        } else {
+          // ✅ ส่ง order metadata (orderId, orderReference) ให้ applyStockChange
+          applyStockChange(
+            variant,
+            product,
+            { ...rawItem, quantity: qty },
+            type,
+            {
+              orderId: order._id,
+              orderReference: order.reference || order._id.toString(),
+            }
+          );
+          
+          // เก็บข้อมูลสำหรับ movement (ยกเว้น purchase เพราะยังไม่รับของ)
+          movementRecords.push({
+            movementType: type === 'sale' ? 'out' : 'adjust',
+            product,
+            variant,
+            quantity: type === 'sale' ? -qty : qty,
+            previousStock,
+            newStock: variant.stockOnHand,
+            reference,
+            batchRef: rawItem.batchRef,
+            expiryDate: rawItem.expiryDate,
+            unitCost: variant.cost || 0,
+          });
+        }
+      }
+      
+      // Save product ONCE after all its variants are updated
       product.markModified('variants');
       await product.save();
     }
