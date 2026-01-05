@@ -296,6 +296,7 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
         });
       }
 
+      product.markModified('variants');
       await product.save();
     }
     
@@ -422,6 +423,7 @@ router.patch('/orders/:id/receive', authenticateToken, authorizeRoles('owner', '
 
     // Save all products
     for (const p of productCache.values()) {
+      p.markModified('variants');
       await p.save();
     }
 
@@ -564,6 +566,7 @@ router.patch('/orders/:id/cancel', authenticateToken, authorizeRoles('owner', 'a
 
     // Save all products
     for (const p of productCache.values()) {
+      p.markModified('variants');
       await p.save();
     }
 
