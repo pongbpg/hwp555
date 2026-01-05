@@ -101,7 +101,17 @@ export default function Orders() {
       if (filterStatus) url += `&status=${filterStatus}`;
       const res = await api.get(url);
       const { items: list, total, totalPages: tp } = res.data || {};
-      setOrders(list || []);
+      
+      // Sort orders: pending purchase orders come first
+      const sorted = (list || []).sort((a, b) => {
+        const aIsPendingPurchase = a.type === 'purchase' && a.status === 'pending' ? 0 : 1;
+        const bIsPendingPurchase = b.type === 'purchase' && b.status === 'pending' ? 0 : 1;
+        if (aIsPendingPurchase !== bIsPendingPurchase) return aIsPendingPurchase - bIsPendingPurchase;
+        // Then sort by date (newest first)
+        return new Date(b.orderDate || b.createdAt) - new Date(a.orderDate || a.createdAt);
+      });
+      
+      setOrders(sorted);
       setTotalCount(total || 0);
       setTotalPages(tp || 1);
     } catch (err) {
@@ -158,11 +168,60 @@ export default function Orders() {
 
   const submitReceive = async (order) => {
     if (!order?._id || order.type !== 'purchase') return;
+    
+    // Check if any items have decreased received quantity (not allowed)
+    const edits = receiveEdits[order._id] || [];
+    const decreasedItems = [];
+    
+    (order.items || []).forEach((it, idx) => {
+      const newReceived = Number(edits[idx] ?? it.receivedQuantity ?? 0) || 0;
+      const oldReceived = Number(it.receivedQuantity ?? 0) || 0;
+      if (newReceived < oldReceived) {
+        decreasedItems.push({
+          productName: it.productName,
+          sku: it.sku,
+          ordered: it.quantity,
+          oldQuantity: oldReceived,
+          newQuantity: newReceived,
+          difference: oldReceived - newReceived,
+        });
+      }
+    });
+    
+    // ❌ Prevent if any items have decreased quantity
+    if (decreasedItems.length > 0) {
+      let errorMsg = '❌ ไม่ได้ เพราะเคยบันทึกยอดรับแล้ว\n\nไม่สามารถลดจำนวนที่บันทึกไปแล้ว:\n';
+      decreasedItems.forEach((item) => {
+        errorMsg += `\n  • ${item.productName} (${item.sku})\n    สั่งซื้อ: ${item.ordered} ชิ้น\n    เคยรับ: ${item.oldQuantity} ชิ้น\n    ⚠️ พยายามปรับเป็น: ${item.newQuantity} ชิ้น (ลด ${item.difference} ชิ้น)\n`;
+      });
+      errorMsg += '\n💡 วิธีแก้: ลดจำนวนรับได้เฉพาะบนใบสั่งซื้อเท่านั้น หรือติดต่อผู้จัดการ';
+      window.alert(errorMsg);
+      return;
+    }
+    
+    // ✅ Show confirmation dialog for normal save
+    const editsDetails = (order.items || [])
+      .map((it, idx) => {
+        const newReceived = Number(edits[idx] ?? it.receivedQuantity ?? 0) || 0;
+        const oldReceived = Number(it.receivedQuantity ?? 0) || 0;
+        if (newReceived > oldReceived) {
+          return `  • ${it.productName} (${it.sku}): +${newReceived - oldReceived} ชิ้น`;
+        }
+        return null;
+      })
+      .filter(Boolean);
+    
+    let confirmMsg = 'ยืนยันการบันทึกรับของ?\n\n';
+    if (editsDetails.length > 0) {
+      confirmMsg += '📦 การเปลี่ยนแปลง:\n' + editsDetails.join('\n') + '\n\n';
+    }
+    
+    if (!window.confirm(confirmMsg + 'ดำเนินการต่อหรือไม่?')) return;
+    
     setReceiving(true);
     setError('');
     setMessage('');
     try {
-      const edits = receiveEdits[order._id] || [];
       const payloadItems = (order.items || []).map((it, idx) => ({
         variantId: it.variantId,
         receivedQuantity: Number(edits[idx] ?? it.receivedQuantity ?? 0) || 0,
@@ -221,6 +280,14 @@ export default function Orders() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (submitting) return; // ป้องกันกดซ้ำ
+    
+    // Confirm before submitting
+    const itemCount = items.length;
+    const totalQty = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+    const confirmMsg = `ยืนยันการบันทึก?\n\n📦 จำนวนรายการ: ${itemCount}\n📊 จำนวนสินค้า: ${totalQty} หน่วย\n⚠️ โปรดตรวจสอบข้อมูลให้ถูกต้องก่อน`;
+    
+    if (!window.confirm(confirmMsg)) return;
+    
     setSubmitting(true);
     setError('');
     setMessage('');
@@ -535,7 +602,7 @@ export default function Orders() {
                 })}
               </div>
 
-              <div className="flex gap-3">
+              <div className="flex gap-3 justify-between">
                 <button
                   type="button"
                   className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-4 py-2 rounded-lg"
@@ -976,16 +1043,22 @@ export default function Orders() {
                                     </td>
                                     <td className="py-2 px-2 text-right">{it.quantity ?? 0}</td>
                                     <td className="py-2 px-2 text-right">
-                                      {o.type === 'purchase' ? (
-                                        <input
-                                          type="number"
-                                          min="0"
-                                          max={it.quantity ?? 0}
-                                          className="w-20 px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-right"
-                                          value={receiveEdits[o._id]?.[idx] ?? it.receivedQuantity ?? 0}
-                                          onChange={(e) => handleReceiveChange(o._id, idx, e.target.value)}
-                                        />
-                                      ) : (
+                                      {o.type === 'purchase' ? (() => {
+                                        const received = receiveEdits[o._id]?.[idx] ?? it.receivedQuantity ?? 0;
+                                        const isCompleteFromDB = it.receivedQuantity >= (it.quantity ?? 0);
+                                        return isCompleteFromDB ? (
+                                          <span className="font-semibold text-green-700">{it.receivedQuantity}</span>
+                                        ) : (
+                                          <input
+                                            type="number"
+                                            min="0"
+                                            max={it.quantity ?? 0}
+                                            className="w-20 px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-right"
+                                            value={received}
+                                            onChange={(e) => handleReceiveChange(o._id, idx, e.target.value)}
+                                          />
+                                        );
+                                      })() : (
                                         it.quantity ?? 0
                                       )}
                                     </td>
@@ -1000,31 +1073,34 @@ export default function Orders() {
                                 ))}
                               </tbody>
                             </table>
-                            {o.type === 'purchase' && (
-                              <div className="mt-3 flex justify-end gap-3">
-                                <button
-                                  type="button"
-                                  className="bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded-lg font-medium"
-                                  onClick={() => {
-                                    // Set all receive quantities to match remaining quantities
-                                    const newEdits = {};
-                                    newEdits[o._id] = (o.items || []).map((it) => it.quantity ?? 0);
-                                    setReceiveEdits((prev) => ({ ...prev, ...newEdits }));
-                                  }}
-                                  disabled={receiving}
-                                >
-                                  ✓ รับทั้งหมด
-                                </button>
-                                <button
-                                  type="button"
-                                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium disabled:opacity-50"
-                                  onClick={() => submitReceive(o)}
-                                  disabled={receiving}
-                                >
-                                  {receiving ? 'กำลังบันทึก...' : 'บันทึกรับของ'}
-                                </button>
-                              </div>
-                            )}
+                            {o.type === 'purchase' && (() => {
+                              const allReceived = (o.items || []).every((it) => (it.receivedQuantity ?? 0) >= (it.quantity ?? 0));
+                              return !allReceived && (
+                                <div className="mt-3 flex justify-end gap-3">
+                                  <button
+                                    type="button"
+                                    className="bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded-lg font-medium"
+                                    onClick={() => {
+                                      // Set all receive quantities to match remaining quantities
+                                      const newEdits = {};
+                                      newEdits[o._id] = (o.items || []).map((it) => it.quantity ?? 0);
+                                      setReceiveEdits((prev) => ({ ...prev, ...newEdits }));
+                                    }}
+                                    disabled={receiving}
+                                  >
+                                    ✓ รับทั้งหมด
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium disabled:opacity-50"
+                                    onClick={() => submitReceive(o)}
+                                    disabled={receiving}
+                                  >
+                                    {receiving ? 'กำลังบันทึก...' : 'บันทึกรับของ'}
+                                  </button>
+                                </div>
+                              );
+                            })()}
                           </div>
                         </td>
                       </tr>
