@@ -1001,7 +1001,20 @@ export default function Orders() {
                               </tbody>
                             </table>
                             {o.type === 'purchase' && (
-                              <div className="mt-3 flex justify-end">
+                              <div className="mt-3 flex justify-end gap-3">
+                                <button
+                                  type="button"
+                                  className="bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded-lg font-medium"
+                                  onClick={() => {
+                                    // Set all receive quantities to match remaining quantities
+                                    const newEdits = {};
+                                    newEdits[o._id] = (o.items || []).map((it) => it.quantity ?? 0);
+                                    setReceiveEdits((prev) => ({ ...prev, ...newEdits }));
+                                  }}
+                                  disabled={receiving}
+                                >
+                                  ✓ รับทั้งหมด
+                                </button>
                                 <button
                                   type="button"
                                   className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium disabled:opacity-50"
