@@ -698,7 +698,8 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
     });
 
     // ดึงสินค้าทั้งหมดพร้อม variants
-    const products = await Product.find().lean();
+    // ⚠️ ไม่ใช้ .lean() เพื่อให้ virtual field (stockOnHand) ถูกคำนวณ
+    const products = await Product.find();
     const [categoriesAll, brandsAll] = await Promise.all([
       Category.find().lean(),
       Brand.find().lean(),
@@ -1329,7 +1330,8 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
     // ดึง cancelled order batches data
     const { cancelledOrderIds, cancelledBatchRefs } = await getCancelledBatchRefs();
     
-    const products = await Product.find({ status: 'active' }).lean();
+    // ⚠️ ไม่ใช้ .lean() เพื่อให้ virtual field (stockOnHand) ถูกคำนวณ
+    const products = await Product.find({ status: 'active' });
     
     const lowStockAlerts = [];
     const outOfStockAlerts = [];
@@ -1460,7 +1462,8 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
 // ============= Debug Endpoint: Cost Calculation Details =============
 router.get('/debug/cost-details', authenticateToken, authorizeRoles('owner', 'stock'), async (req, res) => {
   try {
-    const products = await Product.find({ status: 'active' }).lean();
+    // ⚠️ ไม่ใช้ .lean() เพื่อให้ virtual field (stockOnHand) ถูกคำนวณ
+    const products = await Product.find({ status: 'active' });
     
     const costDetails = [];
     
@@ -1514,7 +1517,8 @@ router.get('/debug/cost-details', authenticateToken, authorizeRoles('owner', 'st
 router.get('/debug/cost-details-public', async (req, res) => {
   try {
     // ✅ ดึงทุก product ไม่ว่า status เป็นไร
-    const products = await Product.find({}).lean();
+    // ⚠️ ไม่ใช้ .lean() เพื่อให้ virtual field (stockOnHand) ถูกคำนวณ
+    const products = await Product.find({});
     
     const costDetails = [];
     let totalActiveVariants = 0;
