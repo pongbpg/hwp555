@@ -344,6 +344,7 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
       }));
       
       // ตรวจสอบและส่งแจ้งเตือนแบบ async (ไม่ block response)
+      // ✅ ส่ง sendNotification: true เพื่อให้ checkAndAlertAfterSale ใช้ leadTime+bufferDays ในการคำนวณ
       checkAndAlertAfterSale(soldItems, { sendNotification: true })
         .then((result) => {
           if (result.alertCount > 0) {
@@ -1333,26 +1334,6 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
     const now = new Date();
     const expiryBefore = new Date(now.getTime() + Number(days) * 24 * 60 * 60 * 1000);
     
-    // ดึงยอดขาย 30 วันย้อนหลังจาก InventoryOrder (เหมือน Insights API)
-    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-    const salesData = await InventoryOrder.aggregate([
-      { $match: { type: 'sale', orderDate: { $gte: thirtyDaysAgo }, status: { $ne: 'cancelled' } } },
-      { $unwind: '$items' },
-      {
-        $group: {
-          _id: { variantId: '$items.variantId' },
-          quantitySold: { $sum: '$items.quantity' },
-        },
-      },
-    ]);
-    
-    // สร้าง map ของยอดขายต่อ variant
-    const salesByVariant = new Map();
-    salesData.forEach((s) => {
-      const key = String(s._id.variantId);
-      salesByVariant.set(key, s.quantitySold || 0);
-    });
-    
     // ดึง cancelled order batches data
     const { cancelledOrderIds, cancelledBatchRefs } = await getCancelledBatchRefs();
     
@@ -1374,10 +1355,29 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
         const leadTimeDays = product.leadTimeDays || 7; // Get from product level
         const bufferDays = product.reorderBufferDays ?? 7;
 
-        // คำนวณ daily sales rate
-        const variantKey = String(variant._id);
-        const quantitySold = salesByVariant.get(variantKey) || 0;
-        const dailySalesRate = quantitySold / 30;
+        // ✅ คำนวณยอดขาย ใช้ leadTimeDays + bufferDays (ตรงกับ stockAlertService)
+        const salesPeriodDays = leadTimeDays + bufferDays;
+        const salesSince = new Date(now.getTime() - salesPeriodDays * 24 * 60 * 60 * 1000);
+        
+        // ดึงยอดขายตามช่วงเวลา leadTime + bufferDays
+        const variantSalesData = await InventoryOrder.aggregate([
+          { $match: { type: 'sale', orderDate: { $gte: salesSince }, status: { $ne: 'cancelled' } } },
+          { $unwind: '$items' },
+          {
+            $match: {
+              'items.variantId': variant._id,
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              totalSold: { $sum: '$items.quantity' },
+            },
+          },
+        ]);
+        
+        const quantitySold = variantSalesData[0]?.totalSold || 0;
+        const dailySalesRate = quantitySold / salesPeriodDays;
 
         // ใช้ calculateReorderMetrics สำหรับความสอดคล้องกับ stockAlertService
         const reorderMetrics = calculateReorderMetrics(dailySalesRate, leadTimeDays, bufferDays);

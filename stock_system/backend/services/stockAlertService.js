@@ -73,8 +73,10 @@ export const checkVariantStockRisk = async (product, variant, avgDailySales = nu
   const bufferDays = product.reorderBufferDays ?? 7;
 
   // คำนวณ average daily sales ถ้าไม่ได้ระบุมา
+  // ✅ ใช้ leadTimeDays + bufferDays เพื่อให้คำนวณแม่นยำสำหรับช่วงเวลาที่สินค้าต้องการ
   if (avgDailySales === null) {
-    avgDailySales = await calculateAverageDailySalesFromOrders(variant._id, 30);
+    const salesPeriodDays = leadTimeDays + bufferDays;
+    avgDailySales = await calculateAverageDailySalesFromOrders(variant._id, salesPeriodDays);
   }
 
   // ถ้าไม่มียอดขาย ใช้ค่าประมาณจาก reorderPoint / leadTime
@@ -175,8 +177,11 @@ export const checkAndAlertAfterSale = async (soldItems, options = {}) => {
       const variant = product.variants.id(item.variantId);
       if (!variant) continue;
 
-      // ใช้ calculateAverageDailySalesFromOrders เพื่อให้ผลลัพธ์ตรงกับ /alerts และ /insights
-      const avgDailySales = await calculateAverageDailySalesFromOrders(variant._id, 30);
+      // ✅ ใช้ leadTimeDays + bufferDays เพื่อให้การแจ้งเตือนแม่นยำกับช่วงเวลาสินค้า
+      const leadTimeDays = product.leadTimeDays || 7;
+      const bufferDays = product.reorderBufferDays ?? 7;
+      const salesPeriodDays = leadTimeDays + bufferDays;
+      const avgDailySales = await calculateAverageDailySalesFromOrders(variant._id, salesPeriodDays);
 
       logDebug(`📊 [LINE Alert] Calculating for ${variant.sku}:`, {
         variantId: variant._id,
