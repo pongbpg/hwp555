@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import api from '../api.js';
 import SearchableSelect from '../components/SearchableSelect.jsx';
+import { parseFile, validateCSVRows, downloadTemplate } from '../utils/csvUtils.js';
 
 // Function to convert AD year to Buddhist year
 const getThaiYear = (date) => {
@@ -24,17 +25,17 @@ const generateReference = (type, orderDate, orders) => {
   };
   const prefix = prefixes[type] || type.toUpperCase();
   const thaiYear = getThaiYear(orderDate);
-  
+
   // Count existing orders of the same type and year
   const sameTypeOrders = (orders || []).filter((o) => {
     if (o.type !== type) return false;
     const oYear = getThaiYear(o.orderDate || o.createdAt);
     return oYear === thaiYear;
   });
-  
+
   const nextNumber = sameTypeOrders.length + 1;
   const paddedNumber = String(nextNumber).padStart(4, '0');
-  
+
   return `${prefix}${thaiYear}-${paddedNumber}`;
 };
 
@@ -61,6 +62,16 @@ export default function Orders() {
   const [submitting, setSubmitting] = useState(false);
   const [filterType, setFilterType] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+
+  // CSV Import states
+  const [showImportTab, setShowImportTab] = useState(false);
+  const [csvFile, setCsvFile] = useState(null);
+  const [csvPreview, setCsvPreview] = useState([]);
+  const [csvErrors, setCsvErrors] = useState([]);
+  const [csvImporting, setCsvImporting] = useState(false);
+  const [selectedProductsForTemplate, setSelectedProductsForTemplate] = useState([]);
+  const [productSearchQuery, setProductSearchQuery] = useState('');
+  const [showProductSearchResults, setShowProductSearchResults] = useState(false);
 
   const loadProducts = async () => {
     try {
@@ -244,6 +255,99 @@ export default function Orders() {
     }
   };
 
+  // CSV Import Handlers
+  const handleCSVFileSelect = (file) => {
+    if (!file) return;
+    if (!file.name.endsWith('.csv')) {
+      setError('❌ ต้องเป็นไฟล์ CSV');
+      return;
+    }
+    setCsvFile(file);
+    parseCSVFile(file);
+  };
+
+  const parseCSVFile = async (file) => {
+    try {
+      setCsvErrors([]);
+      setCsvPreview([]);
+      
+      // ใช้ parseFile() ที่รองรับทั้ง CSV และ XLSX
+      const rows = await parseFile(file);
+
+      // Validate rows
+      const validation = validateCSVRows(rows, products, type);
+
+      if (!validation.valid) {
+        setCsvErrors(validation.errors);
+        setCsvPreview([]);
+      } else {
+        setCsvPreview(validation.data);
+        setCsvErrors([]);
+      }
+    } catch (err) {
+      setCsvErrors([`❌ Parse error: ${err.message}`]);
+      setCsvPreview([]);
+    }
+  };
+
+  const submitCSVImport = async () => {
+    if (csvPreview.length === 0) {
+      setError('❌ ไม่มีข้อมูลที่ validate ได้');
+      return;
+    }
+
+    setCsvImporting(true);
+    setError('');
+    setMessage('');
+
+    try {
+      const payload = {
+        type,
+        reference: generateReference(type, orderDate, orders),
+        orderDate,
+        items: csvPreview.map((row) => ({
+          productId: row.productId,
+          variantId: row.variantId,
+          quantity: row.quantity,
+          unitPrice: row.unitPrice,
+          batchRef: row.batchRef || undefined,
+          expiryDate: row.expiryDate ? row.expiryDate : undefined,
+        })),
+      };
+
+      await api.post('/inventory/orders', payload);
+      setMessage(`✅ Import สำเร็จ! บันทึก ${csvPreview.length} รายการ`);
+
+      // Reset CSV import
+      setCsvFile(null);
+      setCsvPreview([]);
+      setCsvErrors([]);
+      setShowImportTab(false);
+      setPage(1);
+
+      // Reload data
+      await Promise.all([loadOrders(1), loadProducts()]);
+    } catch (err) {
+      setError(`❌ ${err.response?.data?.error || 'Failed to import'}`);
+    } finally {
+      setCsvImporting(false);
+    }
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      handleCSVFileSelect(files[0]);
+    }
+  };
+
   const getStatusBadge = (status) => {
     const classes = {
       completed: 'bg-green-100 text-green-700',
@@ -263,405 +367,709 @@ export default function Orders() {
       {message && <div className="bg-green-50 border border-green-200 text-green-700 p-4 rounded-lg">{message}</div>}
       {error && <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg">{error}</div>}
 
-      {/* Create Order Form */}
+      {/* Tabs: Manual Entry vs Import CSV */}
       <div className="bg-white rounded-xl shadow p-6">
-        <h2 className="text-lg font-semibold text-gray-800 mb-4">สร้าง Order ใหม่</h2>
-        <form onSubmit={handleSubmit}>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">วันที่</label>
-              <input
-                type="date"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                value={orderDate}
-                onChange={(e) => setOrderDate(e.target.value)}
-              />
+        <div className="flex gap-3 border-b border-gray-200 mb-4">
+          <button
+            type="button"
+            className={`px-6 py-3 font-medium border-b-2 transition ${!showImportTab
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-gray-600 hover:text-gray-800'
+              }`}
+            onClick={() => setShowImportTab(false)}
+          >
+            ✏️ ป้อนข้อมูลด้วยตนเอง
+          </button>
+          <button
+            type="button"
+            className={`px-6 py-3 font-medium border-b-2 transition ${showImportTab
+                ? 'border-blue-600 text-blue-600'
+                : 'border-transparent text-gray-600 hover:text-gray-800'
+              }`}
+            onClick={() => setShowImportTab(true)}
+          >
+            📤 Import จาก CSV
+          </button>
+        </div>
+
+        {/* Manual Entry Tab */}
+        {!showImportTab && (
+          <>
+            <h2 className="text-lg font-semibold text-gray-800 mb-4">สร้าง Order ใหม่</h2>
+            <form onSubmit={handleSubmit}>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">วันที่</label>
+                  <input
+                    type="date"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                    value={orderDate}
+                    onChange={(e) => setOrderDate(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">ประเภท</label>
+                  <select
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                    value={type}
+                    onChange={(e) => setType(e.target.value)}
+                  >
+                    <option value="sale">Sale (ขาย)</option>
+                    <option value="purchase">Purchase (ซื้อ)</option>
+                    <option value="adjustment">Adjustment (ปรับปรุง)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">เลขอ้างอิง (อัตโนมัติ)</label>
+                  <input
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-700 font-mono font-semibold focus:ring-2 focus:ring-blue-500 outline-none cursor-not-allowed"
+                    value={reference}
+                    readOnly
+                    placeholder="Auto-generated"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">✓ สร้างจากประเภท วันที่ และเลขลำดับ</p>
+                </div>
+              </div>
+
+              {/* Items */}
+              <div className="space-y-3 mb-4">
+                {items.map((item, idx) => {
+                  const product = products.find((p) => p._id === item.productId);
+                  const variants = product?.variants || [];
+                  const selectedVariantIds = items
+                    .filter((it, i) => i !== idx && it.productId === item.productId && it.variantId)
+                    .map((it) => it.variantId);
+                  const availableVariants = variants.filter((v) => !selectedVariantIds.includes(v._id));
+
+                  // Filter out archived products for selection
+                  const activeProducts = products.filter((p) => p.status !== 'archived');
+
+                  return (
+                    <div key={idx} className="border border-dashed border-gray-300 rounded-lg p-4 bg-gray-50">
+                      <div className="text-xs text-gray-500 mb-2">รายการที่ {idx + 1}</div>
+                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">สินค้า</label>
+                          <SearchableSelect
+                            options={activeProducts}
+                            value={item.productId}
+                            onChange={(val) => updateItem(idx, { productId: val, variantId: '' })}
+                            placeholder="ค้นหาสินค้า..."
+                            getLabel={(p) => p.name}
+                            getId={(p) => p._id}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">เวอร์ชัน</label>
+                          <SearchableSelect
+                            options={availableVariants.map((v) => ({
+                              ...v,
+                              displayName: `${v.sku || v.name || 'Variant'} (stock: ${v.stockOnHand})`,
+                            }))}
+                            value={item.variantId}
+                            onChange={(val) => updateItem(idx, { variantId: val })}
+                            placeholder="ค้นหา SKU..."
+                            getLabel={(v) => v.displayName}
+                            getId={(v) => v._id}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">จำนวน</label>
+                          <input
+                            type="number"
+                            min="0"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                            value={item.quantity}
+                            onChange={(e) => updateItem(idx, { quantity: e.target.value })}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-gray-500 mb-1">💰 ราคา/หน่วย</label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                            value={item.unitPrice}
+                            onChange={(e) => updateItem(idx, { unitPrice: e.target.value })}
+                            placeholder="0.00"
+                          />
+                        </div>
+                      </div>
+                      {/* Purchase Order: เพิ่มช่อง Batch และ วันหมดอายุ */}
+                      {type === 'purchase' && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">เลขล็อต (Batch Ref)</label>
+                            <input
+                              type="text"
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                              value={item.batchRef || ''}
+                              onChange={(e) => updateItem(idx, { batchRef: e.target.value })}
+                              placeholder="เช่น LOT-2025-001"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">📅 วันหมดอายุ (ไม่บังคับ)</label>
+                            <input
+                              type="date"
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                              value={item.expiryDate || ''}
+                              onChange={(e) => updateItem(idx, { expiryDate: e.target.value })}
+                            />
+                            <p className="text-xs text-gray-400 mt-1">สำหรับสินค้าที่มีอายุการใช้ (เช่น ยา อาหาร)</p>
+                          </div>
+                        </div>
+                      )}
+                      {items.length > 1 && (
+                        <button
+                          type="button"
+                          className="mt-3 text-red-600 hover:text-red-700 text-sm"
+                          onClick={() => removeItem(idx)}
+                        >
+                          🗑 ลบแถว
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-4 py-2 rounded-lg"
+                  onClick={addItem}
+                  disabled={submitting}
+                >
+                  + เพิ่มแถว
+                </button>
+                <button
+                  type="submit"
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={submitting}
+                >
+                  {submitting ? 'กำลังบันทึก...' : 'ส่ง'}
+                </button>
+              </div>
+            </form>
+          </>
+        )}
+        {/* CSV Import Tab */}
+        {showImportTab && (
+          <div className="bg-white rounded-xl shadow p-6">
+            <h2 className="text-lg font-semibold text-gray-800 mb-4">📤 Import Orders จาก CSV</h2>
+
+            {/* Step 1: Select CSV Type and Download Template */}
+            <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start mb-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">ประเภท Order</label>
+                  <select
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                    value={type}
+                    onChange={(e) => {
+                      setType(e.target.value);
+                      setCsvFile(null);
+                      setCsvPreview([]);
+                      setCsvErrors([]);
+                    }}
+                  >
+                    <option value="sale">Sale (ขาย)</option>
+                    <option value="purchase">Purchase (ซื้อ)</option>
+                    <option value="adjustment">Adjustment (ปรับปรุง)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">📥 Template</label>
+                  <button
+                    type="button"
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition"
+                    onClick={() => downloadTemplate(type, selectedProductsForTemplate.length > 0 ? selectedProductsForTemplate : null)}
+                  >
+                    ⬇️ ดาวโหลด Template CSV
+                  </button>
+                  <p className="text-xs text-gray-600 mt-2">
+                    📝 {selectedProductsForTemplate.length > 0 ? `Template มี ${selectedProductsForTemplate.length} สินค้า` : 'เลือกสินค้าหรือดาวโหลด template ว่าง'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Product Selector for Template - Search Based */}
+              <div className="mb-3">
+                <label className="block text-sm font-medium text-gray-700 mb-2">🔍 ค้นหาและเลือกสินค้า (Optional)</label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="พิมพ์ชื่อสินค้า..."
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                    value={productSearchQuery}
+                    onChange={(e) => {
+                      setProductSearchQuery(e.target.value);
+                      setShowProductSearchResults(e.target.value.length > 0);
+                    }}
+                    onFocus={() => productSearchQuery.length > 0 && setShowProductSearchResults(true)}
+                  />
+                  
+                  {/* Search Results Dropdown */}
+                  {showProductSearchResults && productSearchQuery.length > 0 && (
+                    <div className="absolute top-full left-0 right-0 bg-white border border-gray-300 rounded-lg mt-1 max-h-64 overflow-y-auto shadow-lg z-10">
+                      {products
+                        .filter((prod) =>
+                          prod.name.toLowerCase().includes(productSearchQuery.toLowerCase())
+                        )
+                        .length > 0 ? (
+                        products
+                          .filter((prod) =>
+                            prod.name.toLowerCase().includes(productSearchQuery.toLowerCase())
+                          )
+                          .map((prod) => {
+                            const isSelected = selectedProductsForTemplate.some((p) => p._id === prod._id);
+                            const activeVariantCount = prod.variants?.filter((v) => v.status === 'active').length || 0;
+                            return (
+                              <label
+                                key={prod._id}
+                                className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-blue-50 border-b border-gray-100 last:border-0"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedProductsForTemplate((prev) => [...prev, prod]);
+                                    } else {
+                                      setSelectedProductsForTemplate((prev) =>
+                                        prev.filter((p) => p._id !== prod._id)
+                                      );
+                                    }
+                                  }}
+                                  className="w-4 h-4 cursor-pointer"
+                                />
+                                <div className="flex-1">
+                                  <div className="text-sm text-gray-800 font-medium">{prod.name}</div>
+                                  <div className="text-xs text-gray-500">
+                                    {activeVariantCount} variant {activeVariantCount > 0 ? '✓' : ''}
+                                  </div>
+                                </div>
+                              </label>
+                            );
+                          })
+                      ) : (
+                        <div className="px-4 py-3 text-sm text-gray-500 text-center">ไม่พบสินค้า</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Selected Products - Show as Chips */}
+              {selectedProductsForTemplate.length > 0 && (
+                <div className="mb-3">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    ✅ สินค้าที่เลือก ({selectedProductsForTemplate.length})
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedProductsForTemplate.map((prod) => {
+                      const activeVariantCount = prod.variants?.filter((v) => v.status === 'active').length || 0;
+                      return (
+                        <div
+                          key={prod._id}
+                          className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm flex items-center gap-2"
+                        >
+                          <span>{prod.name}</span>
+                          <span className="text-xs bg-blue-200 px-2 py-0.5 rounded-full">{activeVariantCount}v</span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSelectedProductsForTemplate((prev) => prev.filter((p) => p._id !== prod._id))
+                            }
+                            className="text-blue-600 hover:text-blue-800 font-bold"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <button
+                    type="button"
+                    className="mt-2 text-sm text-red-600 hover:text-red-800 underline"
+                    onClick={() => setSelectedProductsForTemplate([])}
+                  >
+                    🗑️ ล้างทั้งหมด
+                  </button>
+                </div>
+              )}
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">ประเภท</label>
-              <select
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                value={type}
-                onChange={(e) => setType(e.target.value)}
+
+            {/* Step 2: Upload CSV/XLSX File */}
+            <div
+              className="mb-6 p-6 border-2 border-dashed border-gray-300 rounded-lg hover:border-blue-400 transition bg-gray-50 cursor-pointer"
+              onDragOver={handleDragOver}
+              onDrop={handleDrop}
+            >
+              <input
+                type="file"
+                accept=".csv,.xlsx,.xls"
+                className="hidden"
+                id="csvFileInput"
+                onChange={(e) => handleCSVFileSelect(e.target.files?.[0])}
+              />
+              <label htmlFor="csvFileInput" className="cursor-pointer">
+                <div className="text-center">
+                  <div className="text-3xl mb-2">📄</div>
+                  <p className="text-gray-700 font-medium">ลาก CSV/XLSX ลงที่นี่ หรือ คลิกเพื่อเลือกไฟล์</p>
+                  <p className="text-xs text-gray-500 mt-1">รองรับไฟล์ .csv และ .xlsx</p>
+                </div>
+              </label>
+            </div>
+
+            {csvFile && (
+              <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+                ✅ เลือกไฟล์: <strong>{csvFile.name}</strong>
+              </div>
+            )}
+
+            {/* Step 3: Show Errors */}
+            {csvErrors.length > 0 && (
+              <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+                <h3 className="font-medium text-red-700 mb-2">❌ ข้อผิดพลาด:</h3>
+                <ul className="text-sm text-red-600 space-y-1">
+                  {csvErrors.map((err, idx) => (
+                    <li key={idx}>• {err}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Step 4: Preview Data */}
+            {csvPreview.length > 0 && (
+              <div className="mb-6">
+                <h3 className="text-lg font-semibold text-gray-800 mb-3">👀 ตัวอย่างข้อมูล ({csvPreview.length} รายการ)</h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-300 bg-gray-100">
+                        <th className="text-left py-2 px-3">สินค้า</th>
+                        <th className="text-left py-2 px-3">SKU</th>
+                        <th className="text-right py-2 px-3">จำนวน</th>
+                        <th className="text-right py-2 px-3">ราคา/หน่วย</th>
+                        {type === 'purchase' && (
+                          <>
+                            <th className="text-left py-2 px-3">Batch Ref</th>
+                            <th className="text-left py-2 px-3">Expiry Date</th>
+                          </>
+                        )}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {csvPreview.map((row, idx) => (
+                        <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
+                          <td className="py-2 px-3">{row.productName}</td>
+                          <td className="py-2 px-3 font-mono text-xs text-gray-600">{row.sku}</td>
+                          <td className="py-2 px-3 text-right">{row.quantity}</td>
+                          <td className="py-2 px-3 text-right">{row.unitPrice.toFixed(2)}</td>
+                          {type === 'purchase' && (
+                            <>
+                              <td className="py-2 px-3 text-gray-600">{row.batchRef || '-'}</td>
+                              <td className="py-2 px-3 text-gray-600">
+                                {row.expiryDate ? new Date(row.expiryDate).toLocaleDateString('th-TH') : '-'}
+                              </td>
+                            </>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Summary */}
+                <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+                    <div>
+                      <div className="text-gray-600">รายการทั้งหมด</div>
+                      <div className="text-2xl font-bold text-blue-600">{csvPreview.length}</div>
+                    </div>
+                    <div>
+                      <div className="text-gray-600">จำนวนทั้งหมด</div>
+                      <div className="text-2xl font-bold text-blue-600">{csvPreview.reduce((sum, row) => sum + row.quantity, 0)}</div>
+                    </div>
+                    <div>
+                      <div className="text-gray-600">มูลค่าทั้งหมด</div>
+                      <div className="text-2xl font-bold text-blue-600">
+                        ฿{(csvPreview.reduce((sum, row) => sum + row.quantity * row.unitPrice, 0)).toLocaleString()}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="flex gap-3 justify-end">
+              <button
+                type="button"
+                className="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 font-medium"
+                onClick={() => {
+                  setShowImportTab(false);
+                  setCsvFile(null);
+                  setCsvPreview([]);
+                  setCsvErrors([]);
+                }}
+                disabled={csvImporting}
               >
+                ❌ ยกเลิก
+              </button>
+              <button
+                type="button"
+                className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed transition"
+                onClick={submitCSVImport}
+                disabled={csvPreview.length === 0 || csvImporting}
+              >
+                {csvImporting ? '⏳ กำลังบันทึก...' : '✅ ยืนยันและบันทึก'}
+              </button>
+            </div>
+          </div>
+        )}
+        {/* Orders List */}
+        <div className="bg-white rounded-xl shadow p-6">
+          <h2 className="text-lg font-semibold text-gray-800 mb-4">Order Records</h2>
+
+          {/* Filters */}
+          <div className="flex flex-wrap gap-4 mb-4">
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">ประเภท</label>
+              <select
+                className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                value={filterType}
+                onChange={(e) => handleFilterChange(e.target.value, filterStatus)}
+              >
+                <option value="">ทั้งหมด</option>
                 <option value="sale">Sale (ขาย)</option>
                 <option value="purchase">Purchase (ซื้อ)</option>
                 <option value="adjustment">Adjustment (ปรับปรุง)</option>
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">เลขอ้างอิง (อัตโนมัติ)</label>
-              <input
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-700 font-mono font-semibold focus:ring-2 focus:ring-blue-500 outline-none cursor-not-allowed"
-                value={reference}
-                readOnly
-                placeholder="Auto-generated"
-              />
-              <p className="text-xs text-gray-500 mt-1">✓ สร้างจากประเภท วันที่ และเลขลำดับ</p>
+              <label className="block text-xs text-gray-500 mb-1">สถานะ</label>
+              <select
+                className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                value={filterStatus}
+                onChange={(e) => handleFilterChange(filterType, e.target.value)}
+              >
+                <option value="">ทั้งหมด</option>
+                <option value="pending">Pending (รอดำเนินการ)</option>
+                <option value="completed">Completed (เสร็จสิ้น)</option>
+                <option value="cancelled">Cancelled (ยกเลิก)</option>
+              </select>
             </div>
           </div>
 
-          {/* Items */}
-          <div className="space-y-3 mb-4">
-            {items.map((item, idx) => {
-              const product = products.find((p) => p._id === item.productId);
-              const variants = product?.variants || [];
-              const selectedVariantIds = items
-                .filter((it, i) => i !== idx && it.productId === item.productId && it.variantId)
-                .map((it) => it.variantId);
-              const availableVariants = variants.filter((v) => !selectedVariantIds.includes(v._id));
-              
-              // Filter out archived products for selection
-              const activeProducts = products.filter((p) => p.status !== 'archived');
+          {ordersLoading && <p className="text-gray-600">Loading orders...</p>}
+          {ordersError && <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-lg mb-4">{ordersError}</div>}
 
-              return (
-                <div key={idx} className="border border-dashed border-gray-300 rounded-lg p-4 bg-gray-50">
-                  <div className="text-xs text-gray-500 mb-2">รายการที่ {idx + 1}</div>
-                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">สินค้า</label>
-                      <SearchableSelect
-                        options={activeProducts}
-                        value={item.productId}
-                        onChange={(val) => updateItem(idx, { productId: val, variantId: '' })}
-                        placeholder="ค้นหาสินค้า..."
-                        getLabel={(p) => p.name}
-                        getId={(p) => p._id}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">เวอร์ชัน</label>
-                      <SearchableSelect
-                        options={availableVariants.map((v) => ({
-                          ...v,
-                          displayName: `${v.sku || v.name || 'Variant'} (stock: ${v.stockOnHand})`,
-                        }))}
-                        value={item.variantId}
-                        onChange={(val) => updateItem(idx, { variantId: val })}
-                        placeholder="ค้นหา SKU..."
-                        getLabel={(v) => v.displayName}
-                        getId={(v) => v._id}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">จำนวน</label>
-                      <input
-                        type="number"
-                        min="0"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                        value={item.quantity}
-                        onChange={(e) => updateItem(idx, { quantity: e.target.value })}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">💰 ราคา/หน่วย</label>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                        value={item.unitPrice}
-                        onChange={(e) => updateItem(idx, { unitPrice: e.target.value })}
-                        placeholder="0.00"
-                      />
-                    </div>
-                  </div>
-                  {/* Purchase Order: เพิ่มช่อง Batch และ วันหมดอายุ */}
-                  {type === 'purchase' && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
-                      <div>
-                        <label className="block text-xs text-gray-500 mb-1">เลขล็อต (Batch Ref)</label>
-                        <input
-                          type="text"
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                          value={item.batchRef || ''}
-                          onChange={(e) => updateItem(idx, { batchRef: e.target.value })}
-                          placeholder="เช่น LOT-2025-001"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs text-gray-500 mb-1">📅 วันหมดอายุ (ไม่บังคับ)</label>
-                        <input
-                          type="date"
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                          value={item.expiryDate || ''}
-                          onChange={(e) => updateItem(idx, { expiryDate: e.target.value })}
-                        />
-                        <p className="text-xs text-gray-400 mt-1">สำหรับสินค้าที่มีอายุการใช้ (เช่น ยา อาหาร)</p>
-                      </div>
-                    </div>
-                  )}
-                  {items.length > 1 && (
-                    <button
-                      type="button"
-                      className="mt-3 text-red-600 hover:text-red-700 text-sm"
-                      onClick={() => removeItem(idx)}
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-gray-200">
+                  <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">วันที่</th>
+                  <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">ประเภท</th>
+                  <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">Reference</th>
+                  <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">สถานะ</th>
+                  <th className="text-center py-2 px-3 text-sm font-semibold text-gray-600">รายการ</th>
+                  <th className="text-center py-2 px-3 text-sm font-semibold text-gray-600">จำนวนสินค้า</th>
+                  <th className="text-right py-2 px-3 text-sm font-semibold text-gray-600">มูลค่ารวม</th>
+                  <th className="text-center py-2 px-3 text-sm font-semibold text-gray-600">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {orders.map((o) => (
+                  <React.Fragment key={o._id}>
+                    <tr
+                      key={o._id}
+                      className={`border-b border-gray-100 hover:bg-gray-50 ${o.status === 'cancelled' ? 'opacity-50 line-through' : ''}`}
                     >
-                      🗑 ลบแถว
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="flex gap-3">
-            <button
-              type="button"
-              className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-4 py-2 rounded-lg"
-              onClick={addItem}
-              disabled={submitting}
-            >
-              + เพิ่มแถว
-            </button>
-            <button 
-              type="submit" 
-              className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={submitting}
-            >
-              {submitting ? 'กำลังบันทึก...' : 'ส่ง'}
-            </button>
-          </div>
-        </form>
-      </div>
-
-      {/* Orders List */}
-      <div className="bg-white rounded-xl shadow p-6">
-        <h2 className="text-lg font-semibold text-gray-800 mb-4">Order Records</h2>
-
-        {/* Filters */}
-        <div className="flex flex-wrap gap-4 mb-4">
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">ประเภท</label>
-            <select
-              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-              value={filterType}
-              onChange={(e) => handleFilterChange(e.target.value, filterStatus)}
-            >
-              <option value="">ทั้งหมด</option>
-              <option value="sale">Sale (ขาย)</option>
-              <option value="purchase">Purchase (ซื้อ)</option>
-              <option value="adjustment">Adjustment (ปรับปรุง)</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">สถานะ</label>
-            <select
-              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-              value={filterStatus}
-              onChange={(e) => handleFilterChange(filterType, e.target.value)}
-            >
-              <option value="">ทั้งหมด</option>
-              <option value="pending">Pending (รอดำเนินการ)</option>
-              <option value="completed">Completed (เสร็จสิ้น)</option>
-              <option value="cancelled">Cancelled (ยกเลิก)</option>
-            </select>
-          </div>
-        </div>
-
-        {ordersLoading && <p className="text-gray-600">Loading orders...</p>}
-        {ordersError && <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-lg mb-4">{ordersError}</div>}
-
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-gray-200">
-                <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">วันที่</th>
-                <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">ประเภท</th>
-                <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">Reference</th>
-                <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">สถานะ</th>
-                <th className="text-center py-2 px-3 text-sm font-semibold text-gray-600">รายการ</th>
-                <th className="text-center py-2 px-3 text-sm font-semibold text-gray-600">จำนวนสินค้า</th>
-                <th className="text-right py-2 px-3 text-sm font-semibold text-gray-600">มูลค่ารวม</th>
-                <th className="text-center py-2 px-3 text-sm font-semibold text-gray-600">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {orders.map((o) => (
-                <React.Fragment key={o._id}>
-                  <tr
-                    key={o._id}
-                    className={`border-b border-gray-100 hover:bg-gray-50 ${o.status === 'cancelled' ? 'opacity-50 line-through' : ''}`}
-                  >
-                    <td className="py-2 px-3 text-sm">
-                      {o.orderDate
-                        ? new Date(o.orderDate).toLocaleDateString('th-TH')
-                        : o.createdAt
-                        ? new Date(o.createdAt).toLocaleDateString('th-TH')
-                        : '-'}
-                    </td>
-                    <td className="py-2 px-3 text-sm capitalize">{o.type}</td>
-                    <td className="py-2 px-3 text-sm">{o.reference || '-'}</td>
-                    <td className="py-2 px-3 text-sm">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadge(o.status)}`}>
-                        {o.status || '-'}
-                      </span>
-                    </td>
-                    <td className="py-2 px-3 text-sm text-center">{o.items?.length ?? 0}</td>
-                    <td className="py-2 px-3 text-sm text-center">{(o.items || []).reduce((sum, it) => sum + (Number(it.quantity) || 0), 0)}</td>
-                    <td className="py-2 px-3 text-sm text-right">{calcOrderTotal(o).toLocaleString()}</td>
-                    <td className="py-2 px-3 text-sm">
-                      <div className="flex gap-1 justify-center flex-wrap">
-                        <button
-                          type="button"
-                          className="px-2 py-1 text-xs bg-gray-200 hover:bg-gray-300 rounded"
-                          onClick={() => toggleExpand(o._id)}
-                        >
-                          {expandedOrders.has(o._id) ? 'ซ่อน' : 'ดู'}
-                        </button>
-                        {o.status !== 'cancelled' && (
-                          <>
-                            <button
-                              type="button"
-                              className="px-2 py-1 text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 rounded"
-                              onClick={() => editOrder(o)}
-                            >
-                              ✏️ แก้ไข
-                            </button>
-                            <button
-                              type="button"
-                              className="px-2 py-1 text-xs bg-red-100 hover:bg-red-200 text-red-700 rounded"
-                              onClick={() => cancelOrder(o)}
-                            >
-                              ❌ ยกเลิก
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                  {expandedOrders.has(o._id) && (
-                    <tr>
-                      <td colSpan={9}>
-                        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 m-2">
-                          <div className="flex gap-6 mb-3 text-sm text-gray-600">
-                            <div>
-                              <strong>Reference:</strong> {o.reference || '-'}
-                            </div>
-                            <div>
-                              <strong>Channel:</strong> {o.channel || '-'}
-                            </div>
-                            <div>
-                              <strong>Notes:</strong> {o.notes || '-'}
-                            </div>
-                          </div>
-                          <table className="w-full text-sm">
-                            <thead>
-                              <tr className="border-b border-gray-300">
-                                <th className="text-left py-2 px-2">สินค้า</th>
-                                <th className="text-left py-2 px-2">SKU</th>
-                                <th className="text-left py-2 px-2">ล็อต</th>
-                                <th className="text-left py-2 px-2">หมดอายุ</th>
-                                <th className="text-right py-2 px-2 w-20">จำนวน</th>
-                                <th className="text-right py-2 px-2 w-24">รับแล้ว</th>
-                                <th className="text-right py-2 px-2 w-20">ค้างรับ</th>
-                                <th className="text-right py-2 px-2 w-24">ราคา/หน่วย</th>
-                                <th className="text-right py-2 px-2 w-28">ราคารวม</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {(o.items || []).map((it, idx) => (
-                                <tr key={idx} className="border-b border-gray-100">
-                                  <td className="py-2 px-2">{it.productName || '-'}</td>
-                                  <td className="py-2 px-2 font-mono text-gray-600">{it.sku || '-'}</td>
-                                  <td className="py-2 px-2 text-gray-600">{it.batchRef || '-'}</td>
-                                  <td className="py-2 px-2 text-gray-600">
-                                    {it.expiryDate ? new Date(it.expiryDate).toLocaleDateString('th-TH') : '-'}
-                                  </td>
-                                  <td className="py-2 px-2 text-right">{it.quantity ?? 0}</td>
-                                  <td className="py-2 px-2 text-right">
-                                    {o.type === 'purchase' ? (
-                                      <input
-                                        type="number"
-                                        min="0"
-                                        max={it.quantity ?? 0}
-                                        className="w-20 px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-right"
-                                        value={receiveEdits[o._id]?.[idx] ?? it.receivedQuantity ?? 0}
-                                        onChange={(e) => handleReceiveChange(o._id, idx, e.target.value)}
-                                      />
-                                    ) : (
-                                      it.quantity ?? 0
-                                    )}
-                                  </td>
-                                  <td className="py-2 px-2 text-right">
-                                    {Math.max(0, (it.quantity ?? 0) - (receiveEdits[o._id]?.[idx] ?? it.receivedQuantity ?? 0))}
-                                  </td>
-                                  <td className="py-2 px-2 text-right">{it.unitPrice ?? 0}</td>
-                                  <td className="py-2 px-2 text-right">
-                                    {((Number(it.unitPrice) || 0) * (Number(it.quantity) || 0)).toFixed(2)}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                          {o.type === 'purchase' && (
-                            <div className="mt-3 flex justify-end">
+                      <td className="py-2 px-3 text-sm">
+                        {o.orderDate
+                          ? new Date(o.orderDate).toLocaleDateString('th-TH')
+                          : o.createdAt
+                            ? new Date(o.createdAt).toLocaleDateString('th-TH')
+                            : '-'}
+                      </td>
+                      <td className="py-2 px-3 text-sm capitalize">{o.type}</td>
+                      <td className="py-2 px-3 text-sm">{o.reference || '-'}</td>
+                      <td className="py-2 px-3 text-sm">
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadge(o.status)}`}>
+                          {o.status || '-'}
+                        </span>
+                      </td>
+                      <td className="py-2 px-3 text-sm text-center">{o.items?.length ?? 0}</td>
+                      <td className="py-2 px-3 text-sm text-center">{(o.items || []).reduce((sum, it) => sum + (Number(it.quantity) || 0), 0)}</td>
+                      <td className="py-2 px-3 text-sm text-right">{calcOrderTotal(o).toLocaleString()}</td>
+                      <td className="py-2 px-3 text-sm">
+                        <div className="flex gap-1 justify-center flex-wrap">
+                          <button
+                            type="button"
+                            className="px-2 py-1 text-xs bg-gray-200 hover:bg-gray-300 rounded"
+                            onClick={() => toggleExpand(o._id)}
+                          >
+                            {expandedOrders.has(o._id) ? 'ซ่อน' : 'ดู'}
+                          </button>
+                          {o.status !== 'cancelled' && (
+                            <>
                               <button
                                 type="button"
-                                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium disabled:opacity-50"
-                                onClick={() => submitReceive(o)}
-                                disabled={receiving}
+                                className="px-2 py-1 text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 rounded"
+                                onClick={() => editOrder(o)}
                               >
-                                {receiving ? 'กำลังบันทึก...' : 'บันทึกรับของ'}
+                                ✏️ แก้ไข
                               </button>
-                            </div>
+                              <button
+                                type="button"
+                                className="px-2 py-1 text-xs bg-red-100 hover:bg-red-200 text-red-700 rounded"
+                                onClick={() => cancelOrder(o)}
+                              >
+                                ❌ ยกเลิก
+                              </button>
+                            </>
                           )}
                         </div>
                       </td>
                     </tr>
-                  )}
-                </React.Fragment>
-              ))}
-              {orders.length === 0 && !ordersLoading && (
-                <tr>
-                  <td colSpan={7} className="py-8 text-center text-gray-500">
-                    No orders
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+                    {expandedOrders.has(o._id) && (
+                      <tr>
+                        <td colSpan={9}>
+                          <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 m-2">
+                            <div className="flex gap-6 mb-3 text-sm text-gray-600">
+                              <div>
+                                <strong>Reference:</strong> {o.reference || '-'}
+                              </div>
+                              <div>
+                                <strong>Channel:</strong> {o.channel || '-'}
+                              </div>
+                              <div>
+                                <strong>Notes:</strong> {o.notes || '-'}
+                              </div>
+                            </div>
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="border-b border-gray-300">
+                                  <th className="text-left py-2 px-2">สินค้า</th>
+                                  <th className="text-left py-2 px-2">SKU</th>
+                                  <th className="text-left py-2 px-2">ล็อต</th>
+                                  <th className="text-left py-2 px-2">หมดอายุ</th>
+                                  <th className="text-right py-2 px-2 w-20">จำนวน</th>
+                                  <th className="text-right py-2 px-2 w-24">รับแล้ว</th>
+                                  <th className="text-right py-2 px-2 w-20">ค้างรับ</th>
+                                  <th className="text-right py-2 px-2 w-24">ราคา/หน่วย</th>
+                                  <th className="text-right py-2 px-2 w-28">ราคารวม</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {(o.items || []).map((it, idx) => (
+                                  <tr key={idx} className="border-b border-gray-100">
+                                    <td className="py-2 px-2">{it.productName || '-'}</td>
+                                    <td className="py-2 px-2 font-mono text-gray-600">{it.sku || '-'}</td>
+                                    <td className="py-2 px-2 text-gray-600">{it.batchRef || '-'}</td>
+                                    <td className="py-2 px-2 text-gray-600">
+                                      {it.expiryDate ? new Date(it.expiryDate).toLocaleDateString('th-TH') : '-'}
+                                    </td>
+                                    <td className="py-2 px-2 text-right">{it.quantity ?? 0}</td>
+                                    <td className="py-2 px-2 text-right">
+                                      {o.type === 'purchase' ? (
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          max={it.quantity ?? 0}
+                                          className="w-20 px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-right"
+                                          value={receiveEdits[o._id]?.[idx] ?? it.receivedQuantity ?? 0}
+                                          onChange={(e) => handleReceiveChange(o._id, idx, e.target.value)}
+                                        />
+                                      ) : (
+                                        it.quantity ?? 0
+                                      )}
+                                    </td>
+                                    <td className="py-2 px-2 text-right">
+                                      {Math.max(0, (it.quantity ?? 0) - (receiveEdits[o._id]?.[idx] ?? it.receivedQuantity ?? 0))}
+                                    </td>
+                                    <td className="py-2 px-2 text-right">{it.unitPrice ?? 0}</td>
+                                    <td className="py-2 px-2 text-right">
+                                      {((Number(it.unitPrice) || 0) * (Number(it.quantity) || 0)).toFixed(2)}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                            {o.type === 'purchase' && (
+                              <div className="mt-3 flex justify-end">
+                                <button
+                                  type="button"
+                                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium disabled:opacity-50"
+                                  onClick={() => submitReceive(o)}
+                                  disabled={receiving}
+                                >
+                                  {receiving ? 'กำลังบันทึก...' : 'บันทึกรับของ'}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                ))}
+                {orders.length === 0 && !ordersLoading && (
+                  <tr>
+                    <td colSpan={7} className="py-8 text-center text-gray-500">
+                      No orders
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination */}
+          {totalCount > pageSize && (
+            <div className="flex gap-2 items-center mt-4">
+              <button
+                type="button"
+                className="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-sm disabled:opacity-50"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                ← Prev
+              </button>
+              <div className="flex gap-1 flex-wrap">
+                {Array.from({ length: totalPages }).map((_, i) => {
+                  const num = i + 1;
+                  const isActive = num === page;
+                  return (
+                    <button
+                      key={num}
+                      type="button"
+                      onClick={() => setPage(num)}
+                      className={`px-3 py-1 rounded text-sm ${isActive ? 'bg-blue-600 text-white' : 'bg-gray-200 hover:bg-gray-300'
+                        }`}
+                    >
+                      {num}
+                    </button>
+                  );
+                })}
+              </div>
+              <button
+                type="button"
+                className="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-sm disabled:opacity-50"
+                disabled={page >= totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              >
+                Next →
+              </button>
+            </div>
+          )}
         </div>
 
-        {/* Pagination */}
-        {totalCount > pageSize && (
-          <div className="flex gap-2 items-center mt-4">
-            <button
-              type="button"
-              className="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-sm disabled:opacity-50"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-            >
-              ← Prev
-            </button>
-            <div className="flex gap-1 flex-wrap">
-              {Array.from({ length: totalPages }).map((_, i) => {
-                const num = i + 1;
-                const isActive = num === page;
-                return (
-                  <button
-                    key={num}
-                    type="button"
-                    onClick={() => setPage(num)}
-                    className={`px-3 py-1 rounded text-sm ${
-                      isActive ? 'bg-blue-600 text-white' : 'bg-gray-200 hover:bg-gray-300'
-                    }`}
-                  >
-                    {num}
-                  </button>
-                );
-              })}
-            </div>
-            <button
-              type="button"
-              className="px-3 py-1 bg-gray-200 hover:bg-gray-300 rounded text-sm disabled:opacity-50"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            >
-              Next →
-            </button>
-          </div>
-        )}
+
       </div>
     </div>
   );

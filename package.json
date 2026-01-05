@@ -30,6 +30,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "moment-timezone": "^0.6.0"
+    "moment-timezone": "^0.6.0",
+    "xlsx": "^0.18.5"
   }
 }
