@@ -8,4 +8,12 @@ export default defineConfig({
   server: {
     port: 3001,
   },
+  optimizeDeps: {
+    entries: ['index.html'],
+    esbuildOptions: {
+      loader: {
+        '.js': 'jsx',
+      },
+    },
+  },
 });
