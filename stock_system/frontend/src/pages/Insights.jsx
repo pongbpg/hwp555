@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import moment from 'moment-timezone';
 import api from '../api.js';
 import DateRangeFilter from '../components/DateRangeFilter.jsx';
 
@@ -344,9 +345,21 @@ export default function Insights() {
   const [error, setError] = useState('');
   const [days, setDays] = useState(30);
   const [topN, setTopN] = useState(20);
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
-  const [useDateRange, setUseDateRange] = useState(false);
+  
+  // Initialize dateFrom/dateTo to 30 days ago - today
+  const getInitialDates = () => {
+    const now = moment.tz('Asia/Bangkok');
+    const thirtyDaysAgo = now.clone().subtract(30, 'days');
+    return {
+      dateFrom: thirtyDaysAgo.format('YYYY-MM-DD'),
+      dateTo: now.format('YYYY-MM-DD')
+    };
+  };
+  
+  const initialDates = getInitialDates();
+  const [dateFrom, setDateFrom] = useState(initialDates.dateFrom);
+  const [dateTo, setDateTo] = useState(initialDates.dateTo);
+  const [useDateRange, setUseDateRange] = useState(true); // Start with date range to match 30-day API default
   const [metricsView, setMetricsView] = useState('category'); // 'category', 'brand', 'product'
 
   const fmtNumber = new Intl.NumberFormat('th-TH');
@@ -517,43 +530,32 @@ export default function Insights() {
           <h1 className="text-3xl font-bold text-gray-800">📈 Insights & Analytics</h1>
           <p className="text-gray-500 text-sm mt-1">วิเคราะห์เชิงลึก{useDateRange ? ` (${dateFrom} ถึง ${dateTo})` : ` (${days} วันย้อนหลัง)`}</p>
         </div>
-        <button
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors font-medium whitespace-nowrap"
-          onClick={load}
-        >
-          🔄 วิเคราะห์ใหม่
-        </button>
+        <div className="flex items-center gap-2 whitespace-nowrap">
+          <label className="text-sm font-medium text-gray-700">แสดงสินค้า:</label>
+          <select
+            className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm font-medium bg-white"
+            value={topN}
+            onChange={(e) => setTopN(Number(e.target.value))}
+          >
+            <option value={10}>Top 10</option>
+            <option value={20}>Top 20</option>
+            <option value={30}>Top 30</option>
+            <option value={50}>Top 50</option>
+          </select>
+        </div>
       </div>
 
-      {/* Filter Section - Improved Layout */}
-      <div className="bg-white rounded-xl shadow p-4 space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
-          <div className="md:col-span-1">
-            <DateRangeFilter
-              dateFrom={dateFrom}
-              setDateFrom={setDateFrom}
-              dateTo={dateTo}
-              setDateTo={setDateTo}
-              useDateRange={useDateRange}
-              setUseDateRange={setUseDateRange}
-              onSearch={load}
-            />
-          </div>
-
-          <div className="flex items-center gap-2 justify-between md:justify-end">
-            <label className="text-sm font-medium text-gray-700 whitespace-nowrap">แสดงสินค้า:</label>
-            <select
-              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm font-medium"
-              value={topN}
-              onChange={(e) => setTopN(Number(e.target.value))}
-            >
-              <option value={10}>Top 10</option>
-              <option value={20}>Top 20</option>
-              <option value={30}>Top 30</option>
-              <option value={50}>Top 50</option>
-            </select>
-          </div>
-        </div>
+      {/* Filter Section - Full Width */}
+      <div className="bg-white rounded-xl shadow p-6">
+        <DateRangeFilter
+          dateFrom={dateFrom}
+          setDateFrom={setDateFrom}
+          dateTo={dateTo}
+          setDateTo={setDateTo}
+          useDateRange={useDateRange}
+          setUseDateRange={setUseDateRange}
+          onSearch={load}
+        />
       </div>
 
       {/* Summary Cards */}
