@@ -48,6 +48,14 @@ const employeeSchema = new mongoose.Schema(
       enum: ['owner', 'admin', 'hr', 'accountant', 'stock', 'employee'],
       default: 'employee',
     },
+    // Facebook OAuth (for sale system integration)
+    facebookUserId: String,
+    facebookAccessToken: String,
+    facebookPages: [{
+      pageId: String,
+      pageName: String,
+      pageAccessToken: String // Encrypted token for this page
+    }]
   },
   {
     timestamps: true,

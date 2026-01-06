@@ -14,8 +14,9 @@ import lineRoutes from './routes/line.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Load .env from root directory
+// Load shared .env from root first, then system-specific .env
 dotenv.config({ path: join(__dirname, '../../.env') });
+dotenv.config({ path: join(__dirname, '.env') });
 
 const app = express();
 
@@ -44,8 +45,8 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-const PORT = process.env.STOCK_PORT || 5001;
-const HOST = process.env.STOCK_HOST || '0.0.0.0';
+const PORT = process.env.PORT || 5001;
+const HOST = process.env.HOST || '0.0.0.0';
 app.listen(PORT, HOST, () => {
   console.log(`🚀 Stock System Backend running on http://${HOST}:${PORT}`);
 });

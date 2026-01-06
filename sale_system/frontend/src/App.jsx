@@ -8,6 +8,7 @@ import Orders from './pages/Orders'
 import OrderDetail from './pages/OrderDetail'
 import Customers from './pages/Customers'
 import Chat from './pages/Chat'
+import PageSettings from './pages/PageSettings'
 import Reports from './pages/Reports'
 import Login from './pages/Login'
 import { setAuthToken } from './api'
@@ -64,6 +65,7 @@ function App() {
                     <Route path="/orders/:orderId" element={<OrderDetail />} />
                     <Route path="/customers" element={<Customers />} />
                     <Route path="/chat" element={<Chat />} />
+                    <Route path="/pages" element={<PageSettings />} />
                     <Route path="/reports" element={<Reports />} />
                   </Routes>
                 </main>

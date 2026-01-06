@@ -14,8 +14,9 @@ import testRoutes from './routes/test.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Load .env from root directory
+// Load shared .env from root first, then system-specific .env
 dotenv.config({ path: join(__dirname, '../../.env') });
+dotenv.config({ path: join(__dirname, '.env') });
 
 const app = express();
 
@@ -48,8 +49,8 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Something went wrong!' });
 });
 
-const PORT = process.env.HR_PORT || 5000;
-const HOST = process.env.HR_HOST || '0.0.0.0';
+const PORT = process.env.PORT || 5000;
+const HOST = process.env.HOST || '0.0.0.0';
 app.listen(PORT, HOST, () => {
   console.log(`🚀 HR System Backend running on http://${HOST}:${PORT}`);
 });

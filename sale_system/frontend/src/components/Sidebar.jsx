@@ -18,6 +18,7 @@ export default function Sidebar({ isOpen, onLogout, user }) {
         <NavLink to="/orders" isActive={isActive('/orders')} isOpen={isOpen} label="Orders" icon="📦" />
         <NavLink to="/customers" isActive={isActive('/customers')} isOpen={isOpen} label="Customers" icon="👥" />
         <NavLink to="/chat" isActive={isActive('/chat')} isOpen={isOpen} label="Chat" icon="💬" />
+        <NavLink to="/pages" isActive={isActive('/pages')} isOpen={isOpen} label="Pages" icon="📱" />
         <NavLink to="/reports" isActive={isActive('/reports')} isOpen={isOpen} label="Reports" icon="📈" />
       </nav>
 

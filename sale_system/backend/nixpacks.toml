@@ -1,0 +1,11 @@
+[build]
+# Use nixpacks for Railway
+# Railway will auto-detect Node.js from package.json
+
+[build.env]
+# Set build environment
+NODE_ENV = "production"
+
+[start]
+# Start command - use npm start which runs node server.js
+cmd = "node server.js"
