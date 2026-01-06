@@ -172,23 +172,26 @@ router.post('/send-test', async (req, res) => {
 router.get('/auth-url', (req, res) => {
   const appId = process.env.FACEBOOK_APP_ID;
   const redirectUri = process.env.FACEBOOK_REDIRECT_URI;
-  
+
   if (!appId || !redirectUri) {
     return res.status(400).json({ error: 'Facebook app credentials not configured' });
   }
-  
+
   // State ใช้สำหรับ CSRF protection
   const state = crypto.randomBytes(32).toString('hex');
-  
+
   // Save state ลง session หรือ DB (simplified: ใช้ client cookie)
   res.cookie('fb_oauth_state', state, { httpOnly: true, maxAge: 600000 });
-  
+
   // ✅ Using minimal scopes that don't require app review
   // pages_manage_messaging and pages_read_engagement require Facebook app review
   // Using: pages_manage_metadata only (basic permission without review)
-  const url = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=pages_manage_metadata&state=${state}`;
-  
-  res.json({ url });
+  // const url = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=pages_manage_metadata&state=${state}`;
+
+  // res.json({ url });
+  const scope = 'pages_show_list pages_read_engagement pages_messaging pages_manage_posts';
+  const oauthUrl = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&response_type=code`;
+  res.redirect(oauthUrl);
 });
 
 /**
@@ -199,21 +202,21 @@ router.get('/auth-url', (req, res) => {
 router.get('/callback', authenticateToken, async (req, res) => {
   try {
     const { code, state } = req.query;
-    
+
     if (!code || !state) {
       return res.status(400).json({ error: 'Missing code or state parameter' });
     }
-    
+
     // Verify state from cookie
     const savedState = req.cookies.fb_oauth_state;
     if (state !== savedState) {
       return res.status(403).json({ error: 'Invalid state parameter' });
     }
-    
+
     const appId = process.env.FACEBOOK_APP_ID;
     const appSecret = process.env.FACEBOOK_APP_SECRET;
     const redirectUri = process.env.FACEBOOK_REDIRECT_URI;
-    
+
     // Exchange code for access token
     const tokenResponse = await axios.get('https://graph.facebook.com/v18.0/oauth/access_token', {
       params: {
@@ -223,10 +226,10 @@ router.get('/callback', authenticateToken, async (req, res) => {
         code
       }
     });
-    
+
     const accessToken = tokenResponse.data.access_token;
     const facebookUserId = tokenResponse.data.user_id;
-    
+
     // Get user info
     const userResponse = await axios.get('https://graph.facebook.com/me', {
       params: {
@@ -234,17 +237,17 @@ router.get('/callback', authenticateToken, async (req, res) => {
         access_token: accessToken
       }
     });
-    
+
     // Update user ด้วย Facebook info
     const employee = await Employee.findById(req.user._id);
     if (!employee) {
       return res.status(404).json({ error: 'User not found' });
     }
-    
+
     employee.facebookUserId = facebookUserId;
     employee.facebookAccessToken = accessToken;
     await employee.save();
-    
+
     res.json({
       success: true,
       message: 'Facebook connected successfully',
@@ -268,11 +271,11 @@ router.get('/callback', authenticateToken, async (req, res) => {
 router.get('/pages', authenticateToken, async (req, res) => {
   try {
     const employee = await Employee.findById(req.user._id);
-    
+
     if (!employee || !employee.facebookAccessToken) {
       return res.status(400).json({ error: 'Facebook not connected. Please login first.' });
     }
-    
+
     // Get pages from Facebook
     const pagesResponse = await axios.get('https://graph.facebook.com/me/accounts', {
       params: {
@@ -280,14 +283,14 @@ router.get('/pages', authenticateToken, async (req, res) => {
         access_token: employee.facebookAccessToken
       }
     });
-    
+
     const pages = pagesResponse.data.data.map(page => ({
       pageId: page.id,
       pageName: page.name,
       category: page.category,
       picture: page.picture?.data?.url
     }));
-    
+
     res.json({ pages });
   } catch (error) {
     console.error('Error fetching Facebook pages:', error.response?.data || error.message);
@@ -303,17 +306,17 @@ router.get('/pages', authenticateToken, async (req, res) => {
 router.post('/connect-page', authenticateToken, async (req, res) => {
   try {
     const { pageId } = req.body;
-    
+
     if (!pageId) {
       return res.status(400).json({ error: 'pageId is required' });
     }
-    
+
     const employee = await Employee.findById(req.user._id);
-    
+
     if (!employee || !employee.facebookAccessToken) {
       return res.status(400).json({ error: 'Facebook not connected' });
     }
-    
+
     // Get page access token
     const pageTokenResponse = await axios.get(`https://graph.facebook.com/${pageId}`, {
       params: {
@@ -321,17 +324,17 @@ router.post('/connect-page', authenticateToken, async (req, res) => {
         access_token: employee.facebookAccessToken
       }
     });
-    
+
     const pageAccessToken = pageTokenResponse.data.access_token;
     const pageName = pageTokenResponse.data.name;
-    
+
     if (!pageAccessToken) {
       return res.status(400).json({ error: 'Failed to get page access token' });
     }
-    
+
     // Generate webhook verify token
     const webhookVerifyToken = crypto.randomBytes(16).toString('hex');
-    
+
     // Create Page document
     const page = new Page({
       pageId,
@@ -340,9 +343,9 @@ router.post('/connect-page', authenticateToken, async (req, res) => {
       webhookVerifyToken,
       createdBy: req.user._id
     });
-    
+
     await page.save();
-    
+
     // Update employee's facebookPages array
     if (!employee.facebookPages) {
       employee.facebookPages = [];
@@ -353,7 +356,7 @@ router.post('/connect-page', authenticateToken, async (req, res) => {
       pageAccessToken // Will be encrypted
     });
     await employee.save();
-    
+
     res.status(201).json({
       message: 'Page connected successfully',
       page: {
@@ -376,17 +379,17 @@ router.post('/connect-page', authenticateToken, async (req, res) => {
 router.post('/disconnect', authenticateToken, async (req, res) => {
   try {
     const employee = await Employee.findById(req.user._id);
-    
+
     if (!employee) {
       return res.status(404).json({ error: 'User not found' });
     }
-    
+
     // Remove Facebook data
     employee.facebookUserId = null;
     employee.facebookAccessToken = null;
     employee.facebookPages = [];
     await employee.save();
-    
+
     res.json({ message: 'Facebook disconnected' });
   } catch (error) {
     res.status(500).json({ error: error.message });
