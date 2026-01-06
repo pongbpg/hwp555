@@ -4,7 +4,6 @@ import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import authRoutes from './routes/auth.js';
 import productRoutes from './routes/products.js';
 import inventoryRoutes from './routes/inventory.js';
 import categoryRoutes from './routes/categories.js';
@@ -29,7 +28,6 @@ mongoose
   .then(() => console.log('MongoDB connected for stock system'))
   .catch((err) => console.error('Mongo connection error:', err));
 
-app.use('/api/auth', authRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/inventory', inventoryRoutes);
 app.use('/api/categories', categoryRoutes);

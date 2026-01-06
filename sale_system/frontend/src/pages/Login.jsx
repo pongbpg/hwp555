@@ -21,9 +21,7 @@ export default function Login({ onLogin }) {
       localStorage.setItem('user', JSON.stringify(employee));
       setAuthToken(token);
       onLogin(token, employee);
-      // Navigate based on role
-      const defaultRoute = ['owner', 'stock'].includes(employee?.role) ? '/dashboard' : '/products';
-      navigate(defaultRoute);
+      navigate('/');
     } catch (err) {
       setError(err.response?.data?.error || 'Login failed');
     }
@@ -32,7 +30,7 @@ export default function Login({ onLogin }) {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-100">
       <div className="bg-white rounded-xl shadow-lg p-8 w-full max-w-sm">
-        <h2 className="text-2xl font-bold text-center mb-6 text-slate-800">📦 Stock System</h2>
+        <h2 className="text-2xl font-bold text-center mb-6 text-slate-800">🛍️ Sales System</h2>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
