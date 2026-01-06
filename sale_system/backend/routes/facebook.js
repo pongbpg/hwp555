@@ -1,7 +1,7 @@
 import express from 'express';
 import axios from 'axios';
 import Page from '../models/Page.js';
-import Employee from '../../../hr_system/backend/models/Employee.js';
+import Employee from '../models/Employee.js';
 import { handleIncomingMessage, sendMessage } from '../services/facebookService.js';
 import { authenticateToken } from '../middleware/auth.js';
 import crypto from 'crypto';
