@@ -183,9 +183,10 @@ router.get('/auth-url', (req, res) => {
   // Save state ลง session หรือ DB (simplified: ใช้ client cookie)
   res.cookie('fb_oauth_state', state, { httpOnly: true, maxAge: 600000 });
   
-  // ✅ Updated scopes: removed pages_read_user_content and pages_read_engagement (require app review)
-  // Using basic scopes that work for messaging
-  const url = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=pages_manage_messaging,pages_read_engagement,pages_manage_metadata&state=${state}`;
+  // ✅ Using minimal scopes that don't require app review
+  // pages_manage_messaging and pages_read_engagement require Facebook app review
+  // Using: pages_manage_metadata only (basic permission without review)
+  const url = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=pages_manage_metadata&state=${state}`;
   
   res.json({ url });
 });
