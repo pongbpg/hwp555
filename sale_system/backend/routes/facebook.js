@@ -186,12 +186,9 @@ router.get('/auth-url', (req, res) => {
   // ✅ Using minimal scopes that don't require app review
   // pages_manage_messaging and pages_read_engagement require Facebook app review
   // Using: pages_manage_metadata only (basic permission without review)
-  // const url = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=pages_manage_metadata&state=${state}`;
+  const url = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=pages_manage_metadata&state=${state}`;
 
-  // res.json({ url });
-  const scope = 'pages_show_list pages_read_engagement pages_messaging pages_manage_posts';
-  const oauthUrl = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&response_type=code`;
-  res.redirect(oauthUrl);
+  res.json({ url });
 });
 
 /**
