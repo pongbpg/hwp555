@@ -15,11 +15,11 @@ export default function Header({ onSidebarToggle, onLogout, user }) {
                 <span className="text-sm text-gray-600">
                     {user ? `${user.firstName} ${user.lastName}` : 'User'}
                 </span>
-                <img
+                {/* <img
                     src="https://via.placeholder.com/40"
                     alt="Profile"
                     className="w-10 h-10 rounded-full"
-                />
+                /> */}
                 {onLogout && (
                     <button
                         onClick={onLogout}

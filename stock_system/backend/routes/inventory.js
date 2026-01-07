@@ -832,10 +832,20 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
         const suggestedReorderPoint = reorderMetrics.suggestedReorderPoint;
         const suggestedOrderQty = reorderMetrics.suggestedReorderQty;
 
-        if (daysUntilStockOut < minimumDays) {
-          const recommendedOrderQty = Math.max(0, suggestedOrderQty - currentStock);
+        // ✅ รวมเงื่อนไข: 
+        // 1. สต็อกไม่พอช่วง lead time + buffer
+        // 2. สินค้าหมดสต็อก (currentStock <= 0) แม้ไม่มีประวัติการขาย
+        const isOutOfStock = currentStock <= 0;
+        const isLowStock = daysUntilStockOut < minimumDays;
+        
+        if (isOutOfStock || isLowStock) {
+          const recommendedOrderQty = Math.max(
+            suggestedOrderQty,  // ✅ ถ้า out-of-stock ไม่มีการขาย ให้ใช้ suggestedOrderQty (minOrderQty หรือ lead time * buffer)
+            Math.max(0, suggestedOrderQty - currentStock)
+          );
 
-          if (recommendedOrderQty > 0) {
+          // ✅ สั่งซื้อแม้ recommendedOrderQty = 0 ถ้าเป็น out-of-stock
+          if (recommendedOrderQty > 0 || isOutOfStock) {
             variantSuggestions.push({
               productId: product._id,
               productName: product.name,
@@ -845,7 +855,7 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
               incoming,
               quantitySold,
               dailySalesRate: Math.round(dailySalesRate * 100) / 100,
-              daysUntilStockOut: Math.round(daysUntilStockOut * 10) / 10,
+              daysUntilStockOut: isOutOfStock ? 0 : Math.round(daysUntilStockOut * 10) / 10,
               suggestedReorderPoint: Math.ceil(suggestedReorderPoint),
               suggestedOrderQty: Math.ceil(suggestedOrderQty),
               recommendedOrderQty: Math.ceil(recommendedOrderQty),
@@ -863,7 +873,7 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
               sku: variant.sku,
               stockOnHand: currentStock,
               leadTimeDays,
-              daysRemaining: Math.round(daysUntilStockOut * 10) / 10,
+              daysRemaining: isOutOfStock ? 0 : Math.round(daysUntilStockOut * 10) / 10,
             });
           }
         }
