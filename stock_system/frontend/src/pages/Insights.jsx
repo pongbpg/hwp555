@@ -368,9 +368,11 @@ export default function Insights() {
     setLoading(true);
     setError('');
     try {
+      // Load ALL products (no top limit) - filter topN on client side
       const url = useDateRange && dateFrom && dateTo
-        ? `/inventory/insights?dateFrom=${dateFrom}&dateTo=${dateTo}&top=${topN}`
-        : `/inventory/insights?days=${days}&top=${topN}`;
+        ? `/inventory/insights?dateFrom=${dateFrom}&dateTo=${dateTo}`
+        : `/inventory/insights?days=${days}`;
+      
       const res = await api.get(url);
       setData(res.data);
     } catch (err) {
@@ -378,7 +380,7 @@ export default function Insights() {
     } finally {
       setLoading(false);
     }
-  }, [days, useDateRange, dateFrom, dateTo, topN]);
+  }, [days, useDateRange, dateFrom, dateTo]);
 
   useEffect(() => {
     const isInitialMount = data === null;
@@ -409,7 +411,7 @@ export default function Insights() {
 
   const counts = data?.meta?.counts || {};
 
-  const fastMoversData = (data?.fastMovers || []).map(fm => ({
+  const fastMoversData = (data?.fastMovers || []).slice(0, topN).map(fm => ({
     label: `${fm.productName} (${fm.sku})`,
     productName: fm.productName,
     sku: fm.sku,
@@ -451,8 +453,11 @@ export default function Insights() {
 
   const deadStockData = (data?.deadStock || []).map(ds => ({
     label: `${ds.productName} (${ds.sku})`,
+    productId: ds.productId,
     productName: ds.productName,
     sku: ds.sku,
+    quantitySold: ds.quantitySold || 0,
+    dailySalesRate: ds.dailySalesRate || 0,
     currentStock: ds.currentStock,
     incoming: ds.incoming,
     categoryName: ds.categoryName,
@@ -470,19 +475,20 @@ export default function Insights() {
   }));
 
   // สร้าง product-level metrics (รวมทุก variants ของสินค้า)
+  // ✅ ใช้ข้อมูลทั้งหมดจาก API (ไม่ filter topN ตรงนี้)
   const productMetrics = (() => {
     const productMap = new Map(); // productId -> { productName, totalSold, totalStock, dailySalesRate, ... }
 
-    // รวบรวมข้อมูลจาก fastMovers
-    fastMoversData.forEach(fm => {
-      const key = String(fm.productId);
+    // Helper function: เพิ่มข้อมูลสินค้าเข้า productMap
+    const addProductToMap = (productId, productName, categoryName, brandName, quantitySold, currentStock, incoming, dailySalesRate) => {
+      const key = String(productId);
       if (!productMap.has(key)) {
         productMap.set(key, {
-          label: fm.productName,
-          productName: fm.productName,
-          productId: fm.productId,
-          categoryName: fm.categoryName,
-          brandName: fm.brandName,
+          label: productName,
+          productName: productName,
+          productId: productId,
+          categoryName: categoryName,
+          brandName: brandName,
           totalSold: 0,
           totalStock: 0,
           totalIncoming: 0,
@@ -491,11 +497,46 @@ export default function Insights() {
         });
       }
       const product = productMap.get(key);
-      product.totalSold += fm.quantitySold;
-      product.totalStock += fm.currentStock;
-      product.totalIncoming += fm.incoming || 0;
-      product.dailySalesRate += fm.dailySalesRate;
+      product.totalSold += quantitySold || 0;
+      product.totalStock += currentStock || 0;
+      product.totalIncoming += incoming || 0;
+      product.dailySalesRate += dailySalesRate || 0;
       product.variantCount++;
+    };
+
+    // ✅ รวบรวมข้อมูลจากทุกสินค้า (ไม่ filter topN)
+    const allFastMovers = data?.fastMovers || [];
+    const allLowStock = data?.lowStock || [];
+    const allDeadStock = data?.deadStock || [];
+    const allReorder = data?.reorderSuggestions || [];
+
+    // Process fast movers (ทั้งหมด)
+    allFastMovers.forEach(fm => {
+      addProductToMap(fm.productId, fm.productName, fm.categoryName, fm.brandName, fm.quantitySold, fm.currentStock, fm.incoming, fm.dailySalesRate);
+    });
+
+    // Process low stock (skip if already in map)
+    allLowStock.forEach(ls => {
+      const key = String(ls.productId);
+      if (!productMap.has(key)) {
+        addProductToMap(ls.productId, ls.productName, '', '', 0, ls.stockOnHand, 0, 0);
+      }
+    });
+
+    // Process dead stock (skip if already in map)
+    allDeadStock.forEach(ds => {
+      const key = String(ds.productId);
+      if (!productMap.has(key)) {
+        addProductToMap(ds.productId, ds.productName, ds.categoryName, ds.brandName, ds.quantitySold, ds.currentStock, ds.incoming, ds.dailySalesRate);
+      }
+    });
+
+    // Process reorder (skip if already in map)
+    allReorder.forEach(rd => {
+      const key = String(rd.productId);
+      if (!productMap.has(key)) {
+        addProductToMap(rd.productId, rd.productName, '', '', rd.quantitySold, rd.currentStock, rd.incoming, rd.dailySalesRate);
+      }
     });
 
     return Array.from(productMap.values())

@@ -691,7 +691,6 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
   try {
     const now = new Date();
     const expiryDays = Number(req.query.expiryDays) || 30;
-    const top = Math.min(50, Math.max(1, Number(req.query.top) || 10));
     const days = Number(req.query.days) || 30; // ✅ ประกาศ days ข้างนอก if/else
     
     // ✅ รองรับ dateFrom และ dateTo หรือ days
@@ -924,7 +923,7 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
       );
     });
 
-    const fastMovers = fastMoversDetailed.sort((a, b) => b.quantitySold - a.quantitySold).slice(0, top);
+    const fastMovers = fastMoversDetailed.sort((a, b) => b.quantitySold - a.quantitySold);
 
     // ✅ หาสินค้าขายไม่ออก (Dead Stock) - ไม่มีการขายเลยในช่วง
     const deadStockDetailed = [];
@@ -956,8 +955,8 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
       });
     }
     
-    // เรียงตามจำนวนสต็อก (มากสุดก่อน) แล้วตัด top N
-    const deadStock = deadStockDetailed.sort((a, b) => b.currentStock - a.currentStock).slice(0, top);
+    // เรียงตามจำนวนสต็อก (มากสุดก่อน)
+    const deadStock = deadStockDetailed.sort((a, b) => b.currentStock - a.currentStock);
 
     // จัดรูป grouped summaries
     const categorySummaries = Array.from(groupByCategory.values())
@@ -969,8 +968,7 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
         dailySalesRate: Math.round(c.dailySalesRate * 100) / 100,
         daysRemaining: c.dailySalesRate > 0 ? Math.round((c.totalStock / c.dailySalesRate) * 10) / 10 : 999999,
       }))
-      .sort((a, b) => b.totalSold - a.totalSold)
-      .slice(0, top);
+      .sort((a, b) => b.totalSold - a.totalSold);
     const brandSummaries = Array.from(groupByBrand.values())
       .map((c) => ({
         brandId: c.brandId,
@@ -980,8 +978,7 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
         dailySalesRate: Math.round(c.dailySalesRate * 100) / 100,
         daysRemaining: c.dailySalesRate > 0 ? Math.round((c.totalStock / c.dailySalesRate) * 10) / 10 : 999999,
       }))
-      .sort((a, b) => b.totalSold - a.totalSold)
-      .slice(0, top);
+      .sort((a, b) => b.totalSold - a.totalSold);
 
     res.json({
       lowStock,
@@ -993,7 +990,6 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
       brandSummaries,
       meta: {
         days,
-        top,
         counts: {
           lowStock: lowStock.length,
           nearExpiry: filteredNearExpiry.length,
