@@ -653,7 +653,30 @@ router.get('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr'),
     }
 
     const [items, total] = await Promise.all([
-      InventoryOrder.find(match).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+      InventoryOrder.aggregate([
+        { $match: match },
+        {
+          $addFields: {
+            // Priority: pending purchase orders (type=purchase && status=pending) come first
+            sortPriority: {
+              $cond: [
+                { $and: [{ $eq: ['$type', 'purchase'] }, { $eq: ['$status', 'pending'] }] },
+                0, // pending purchase = highest priority
+                1  // everything else
+              ]
+            }
+          }
+        },
+        {
+          $sort: {
+            sortPriority: 1,      // pending purchase first
+            orderDate: -1,        // then by date (newest first)
+            createdAt: -1         // fallback
+          }
+        },
+        { $skip: skip },
+        { $limit: limit }
+      ]),
       InventoryOrder.countDocuments(match),
     ]);
 

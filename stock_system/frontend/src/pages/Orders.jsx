@@ -102,16 +102,8 @@ export default function Orders() {
       const res = await api.get(url);
       const { items: list, total, totalPages: tp } = res.data || {};
       
-      // Sort orders: pending purchase orders come first
-      const sorted = (list || []).sort((a, b) => {
-        const aIsPendingPurchase = a.type === 'purchase' && a.status === 'pending' ? 0 : 1;
-        const bIsPendingPurchase = b.type === 'purchase' && b.status === 'pending' ? 0 : 1;
-        if (aIsPendingPurchase !== bIsPendingPurchase) return aIsPendingPurchase - bIsPendingPurchase;
-        // Then sort by date (newest first)
-        return new Date(b.orderDate || b.createdAt) - new Date(a.orderDate || a.createdAt);
-      });
-      
-      setOrders(sorted);
+      // Server already sorts: pending purchase orders first, then by date
+      setOrders(list || []);
       setTotalCount(total || 0);
       setTotalPages(tp || 1);
     } catch (err) {
