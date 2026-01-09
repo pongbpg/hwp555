@@ -771,7 +771,7 @@ export default function Products() {
                       className="w-20 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm uppercase"
                       placeholder="Prefix"
                       value={newBrandPrefix}
-                      onChange={(e) => setNewBrandPrefix(e.target.value.toUpperCase())}
+                      onChange={(e) => setNewBrandPrefix(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
                       maxLength={10}
                     />
                   </div>
@@ -838,7 +838,7 @@ export default function Products() {
                       className="w-20 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm uppercase"
                       placeholder="Prefix"
                       value={newCategoryPrefix}
-                      onChange={(e) => setNewCategoryPrefix(e.target.value.toUpperCase())}
+                      onChange={(e) => setNewCategoryPrefix(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
                       maxLength={10}
                     />
                   </div>
@@ -874,7 +874,7 @@ export default function Products() {
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                 placeholder="Name"
                 value={newProduct.name ?? ''}
-                onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value })}
+                onChange={(e) => setNewProduct({ ...newProduct, name: e.target.value.toUpperCase().replace(/[\/\\@#$%^&*()+=[{};:'"<>,.?]/g, '') })}
                 required
               />
             </div>
@@ -887,7 +887,7 @@ export default function Products() {
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono"
                   placeholder="เช่น IP (iPhone) หรือเว้นว่างให้ใช้ color-size-material"
                   value={skuProduct ?? ''}
-                  onChange={(e) => setSkuProduct(e.target.value.toUpperCase())}
+                  onChange={(e) => setSkuProduct(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
                 />
                 <p className="text-xs text-gray-500 mt-1">ชื่อลัดสินค้า ที่จะแสดงหลัง Brand-Category (เช่น APPL-MOBI-IP)</p>
               </div>
@@ -901,7 +901,7 @@ export default function Products() {
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono"
                   placeholder="SKU"
                   value={newProduct.sku ?? ''}
-                  onChange={(e) => setNewProduct({ ...newProduct, sku: e.target.value })}
+                  onChange={(e) => setNewProduct({ ...newProduct, sku: e.target.value.toUpperCase().replace(/[^A-Z0-9\-]/g, '') })}
                 />
               </div>
             )}
@@ -1024,18 +1024,18 @@ export default function Products() {
                       <label className="block text-xs text-gray-500 mb-1">รุ่น</label>
                       <input
                         className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                        placeholder="เช่น AirMax90"
+                        placeholder="เช่น AIRMAX90"
                         value={variant.model || ''}
-                        onChange={(e) => updateVariant(idx, 'model', e.target.value)}
+                        onChange={(e) => updateVariant(idx, 'model', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
                       />
                     </div>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">สี</label>
                       <input
                         className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                        placeholder="เช่น แดง, ฟ้า"
+                        placeholder="เช่น RED, BLUE"
                         value={variant.color || ''}
-                        onChange={(e) => updateVariant(idx, 'color', e.target.value)}
+                        onChange={(e) => updateVariant(idx, 'color', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
                       />
                     </div>
                     <div>
@@ -1044,16 +1044,16 @@ export default function Products() {
                         className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-sm"
                         placeholder="เช่น S, M, L"
                         value={variant.size || ''}
-                        onChange={(e) => updateVariant(idx, 'size', e.target.value)}
+                        onChange={(e) => updateVariant(idx, 'size', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
                       />
                     </div>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">วัสดุ</label>
                       <input
                         className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                        placeholder="เช่น Cotton"
+                        placeholder="เช่น COTTON"
                         value={variant.material || ''}
-                        onChange={(e) => updateVariant(idx, 'material', e.target.value)}
+                        onChange={(e) => updateVariant(idx, 'material', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
                       />
                     </div>
                     <div>
@@ -1064,7 +1064,7 @@ export default function Products() {
                         }`}
                         placeholder="เช่น SHIRT-RED-L"
                         value={variant.sku || ''}
-                        onChange={(e) => updateVariant(idx, 'sku', e.target.value)}
+                        onChange={(e) => updateVariant(idx, 'sku', e.target.value.toUpperCase().replace(/[^A-Z0-9\-]/g, ''))}
                         disabled={!!variant._id}
                         required
                       />
