@@ -62,6 +62,7 @@ export default function Orders() {
   const [submitting, setSubmitting] = useState(false);
   const [filterType, setFilterType] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+  const [referenceError, setReferenceError] = useState(''); // เก็บข้อผิดพลาด reference ซ้ำ
 
   // CSV Import states
   const [showImportTab, setShowImportTab] = useState(false);
@@ -114,9 +115,28 @@ export default function Orders() {
   };
 
   useEffect(() => {
-    const autoRef = generateReference(type, orderDate, orders);
-    setReference(autoRef);
-  }, [type, orderDate, orders]);
+    // ถ้า reference ว่าง ให้เสนอค่าอัตโนมัติ แต่ยังให้แก้ไขได้
+    if (!reference.trim()) {
+      const suggestedRef = generateReference(type, orderDate, orders);
+      setReference(suggestedRef);
+      setReferenceError('');
+    }
+  }, [type, orderDate]);
+
+  // ตรวจสอบว่า reference ซ้ำหรือไม่เมื่อผู้ใช้เปลี่ยนค่า
+  const checkReferenceExists = (ref) => {
+    if (!ref.trim()) {
+      setReferenceError('');
+      return false;
+    }
+    const exists = orders.some((o) => o.reference === ref.trim());
+    if (exists) {
+      setReferenceError(`⚠️ เลขอ้างอิง "${ref}" มีอยู่แล้ว กรุณาใช้เลขอ้างอิงอื่น`);
+    } else {
+      setReferenceError('');
+    }
+    return exists;
+  };
 
   const handleFilterChange = (newType, newStatus) => {
     setFilterType(newType);
@@ -272,6 +292,12 @@ export default function Orders() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (submitting) return; // ป้องกันกดซ้ำ
+
+    // ตรวจสอบว่า reference ซ้ำหรือไม่
+    if (checkReferenceExists(reference)) {
+      setError('โปรดแก้ไขเลขอ้างอิงให้ไม่ซ้ำก่อนบันทึก');
+      return;
+    }
     
     // Confirm before submitting
     const itemCount = items.length;
@@ -302,6 +328,7 @@ export default function Orders() {
       // Reset form
       setItems([{ ...defaultItem }]);
       setReference('');
+      setReferenceError('');
       setType('sale');
       setOrderDate(new Date().toISOString().split('T')[0]);
       setPage(1);
@@ -479,14 +506,24 @@ export default function Orders() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">เลขอ้างอิง (อัตโนมัติ)</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">เลขอ้างอิง (Reference) <span className="text-red-500">*</span></label>
                   <input
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-700 font-mono font-semibold focus:ring-2 focus:ring-blue-500 outline-none cursor-not-allowed"
+                    className={`w-full px-3 py-2 border rounded-lg text-gray-700 font-mono font-semibold focus:ring-2 focus:ring-blue-500 outline-none ${
+                      referenceError ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                    }`}
                     value={reference}
-                    readOnly
-                    placeholder="Auto-generated"
+                    onChange={(e) => {
+                      setReference(e.target.value);
+                      checkReferenceExists(e.target.value);
+                    }}
+                    placeholder="เช่น SO2569-0001"
+                    required
                   />
-                  <p className="text-xs text-gray-500 mt-1">✓ สร้างจากประเภท วันที่ และเลขลำดับ</p>
+                  {referenceError && <p className="text-xs text-red-600 mt-1">{referenceError}</p>}
+                  {!referenceError && reference && (
+                    <p className="text-xs text-green-600 mt-1">✓ เลขอ้างอิงถูกต้อง</p>
+                  )}
+                  <p className="text-xs text-gray-400 mt-1">💬 ตัวอย่าง: SO2569-0001, PO2569-0001, ADJ2569-0001</p>
                 </div>
               </div>
 
@@ -934,6 +971,7 @@ export default function Orders() {
                   <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">วันที่</th>
                   <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">ประเภท</th>
                   <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">Reference</th>
+                  <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">สินค้า</th>
                   <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">สถานะ</th>
                   <th className="text-center py-2 px-3 text-sm font-semibold text-gray-600">รายการ</th>
                   <th className="text-center py-2 px-3 text-sm font-semibold text-gray-600">จำนวนสินค้า</th>
@@ -957,6 +995,30 @@ export default function Orders() {
                       </td>
                       <td className="py-2 px-3 text-sm capitalize">{o.type}</td>
                       <td className="py-2 px-3 text-sm">{o.reference || '-'}</td>
+                      <td className="py-2 px-3 text-sm max-w-xs">
+                        <div className="text-gray-700 font-medium truncate">
+                          {o.items && o.items.length > 0 ? (
+                            <div className="flex flex-col gap-1">
+                              {(() => {
+                                // Group items by product name
+                                const grouped = {};
+                                (o.items || []).forEach((item) => {
+                                  const name = item.productName || item.sku || 'N/A';
+                                  grouped[name] = (grouped[name] || 0) + 1;
+                                });
+                                
+                                return Object.entries(grouped).map(([name, count], idx) => (
+                                  <div key={idx} className="truncate text-xs">
+                                    {name}{count > 1 ? ` (×${count})` : ''}
+                                  </div>
+                                ));
+                              })()}
+                            </div>
+                          ) : (
+                            '-'
+                          )}
+                        </div>
+                      </td>
                       <td className="py-2 px-3 text-sm">
                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadge(o.status)}`}>
                           {o.status || '-'}

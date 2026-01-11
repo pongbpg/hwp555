@@ -216,6 +216,13 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
 
     if (!type) return res.status(400).json({ error: 'Order type is required' });
     if (!items || items.length === 0) return res.status(400).json({ error: 'At least one item is required' });
+    if (!reference || !reference.trim()) return res.status(400).json({ error: 'Reference number is required' });
+
+    // ✅ ตรวจสอบว่า reference ซ้ำกับที่มีอยู่หรือไม่
+    const existingOrder = await InventoryOrder.findOne({ reference: reference.trim() });
+    if (existingOrder) {
+      return res.status(400).json({ error: `Reference "${reference}" already exists. Please use a different reference number.` });
+    }
 
     const orderItems = [];
     const movementRecords = []; // เก็บข้อมูลสำหรับบันทึก movement
