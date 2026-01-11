@@ -6,6 +6,8 @@ export default function ReplenishmentOrder() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [expandedProducts, setExpandedProducts] = useState(new Set());
+  const [showAddVariantModal, setShowAddVariantModal] = useState(null); // {productId, allVariants}
+  const [productVariantsMap, setProductVariantsMap] = useState(new Map()); // เก็บ variants ทั้งหมดของแต่ละ product
 
   const fmtNumber = new Intl.NumberFormat('th-TH');
 
@@ -26,8 +28,9 @@ export default function ReplenishmentOrder() {
     const sorted = allocations.sort((a, b) => b.remainder - a.remainder);
     const remainderUnits = newTotalOrder - allocations.reduce((sum, a) => sum + a.baseAllocation, 0);
     
-    for (let i = 0; i < remainderUnits && i < sorted.length; i++) {
-      sorted[i].baseAllocation += 1;
+    // ✅ แก้ไข: distribute remainder units แม้ว่ามี variants ไม่กี่ตัว
+    for (let i = 0; i < remainderUnits; i++) {
+      sorted[i % sorted.length].baseAllocation += 1;
     }
 
     return sorted.map(a => ({
@@ -56,6 +59,25 @@ export default function ReplenishmentOrder() {
     setLoading(true);
     try {
       const res = await api.get('/inventory/insights?days=30&top=50');
+      
+      // ดึงข้อมูล products ทั้งหมด (เพื่อเก็บ variants ทั้งหมด)
+      const productsRes = await api.get('/products?limit=1000');
+      const allProducts = productsRes.data.items || [];
+      
+      // สร้าง map เก็บ variants ทั้งหมดของแต่ละ product
+      const variantsMap = new Map();
+      allProducts.forEach(product => {
+        variantsMap.set(String(product._id), product.variants || []);
+      });
+      console.log('🔍 Debug: productVariantsMap loaded', {
+        totalProducts: allProducts.length,
+        variantsMap: Array.from(variantsMap.entries()).map(([pid, variants]) => ({
+          productId: pid,
+          variantCount: variants.length,
+          skus: variants.map(v => v.sku)
+        }))
+      });
+      setProductVariantsMap(variantsMap);
       
       // Group reorder suggestions by product
       const productMap = new Map();
@@ -103,8 +125,9 @@ export default function ReplenishmentOrder() {
           const sorted = allocations.sort((a, b) => b.remainder - a.remainder);
           const remainderUnits = product.minOrderQty - allocations.reduce((sum, a) => sum + a.baseAllocation, 0);
           
-          for (let i = 0; i < remainderUnits && i < sorted.length; i++) {
-            sorted[i].baseAllocation += 1;
+          // ✅ แก้ไข: distribute remainder units แม้ว่ามี variants ไม่กี่ตัว
+          for (let i = 0; i < remainderUnits; i++) {
+            sorted[i % sorted.length].baseAllocation += 1;
           }
 
           product.variants = sorted.map(a => ({
@@ -149,6 +172,42 @@ export default function ReplenishmentOrder() {
       newExpanded.add(productId);
     }
     setExpandedProducts(newExpanded);
+  };
+
+  // ฟังก์ชันเพิ่ม variant เพิ่มเติม
+  const addVariantToOrder = (productId, newVariant) => {
+    setOrders((prev) =>
+      prev.map((product) => {
+        if (product.productId !== productId) return product;
+        
+        // เช็คว่า variant นี้อยู่ในรายการแล้วหรือไม่
+        const exists = product.variants.some(v => v.variantId === newVariant._id);
+        if (exists) return product;
+        
+        // เพิ่ม variant ใหม่
+        const newVariantItem = {
+          ...newVariant,
+          productId,
+          productName: product.productName,
+          variantId: newVariant._id,
+          recommendedOrderQty: 0,
+          currentStock: newVariant.stockOnHand || 0,
+          dailySalesRate: 0,
+          _allocatedQty: 0,
+          _netOrder: 0
+        };
+        
+        const updatedVariants = [...product.variants, newVariantItem];
+        const newTotalRecommended = updatedVariants.reduce((sum, v) => sum + (v.recommendedOrderQty || 0), 0);
+        
+        return {
+          ...product,
+          variants: updatedVariants,
+          totalRecommended: newTotalRecommended
+        };
+      })
+    );
+    setShowAddVariantModal(null);
   };
 
   if (loading) {
@@ -322,12 +381,91 @@ export default function ReplenishmentOrder() {
                           </p>
                         </div>
                       )}
+                      
+                      {/* ปุ่มเพิ่ม variant */}
+                      <button
+                        onClick={() => setShowAddVariantModal({
+                          productId: product.productId,
+                          productName: product.productName,
+                          allVariants: productVariantsMap.get(String(product.productId)) || []
+                        })}
+                        className="mt-3 w-full py-2 px-3 bg-blue-50 hover:bg-blue-100 border border-blue-300 text-blue-700 rounded text-sm font-medium transition-colors"
+                      >
+                        ➕ เพิ่ม Variant อื่นๆ
+                      </button>
                     </div>
                   </div>
                 )}
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Modal เลือก Variant */}
+      {showAddVariantModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-lg max-w-2xl w-full max-h-96 overflow-y-auto">
+            <div className="sticky top-0 bg-white border-b p-4 flex justify-between items-center">
+              <div>
+                <h3 className="text-lg font-bold text-gray-800">{showAddVariantModal.productName}</h3>
+                <p className="text-sm text-gray-500">เลือก Variant ที่ต้องการเพิ่มลงในการสั่ง</p>
+              </div>
+              <button
+                onClick={() => setShowAddVariantModal(null)}
+                className="text-gray-500 hover:text-gray-700 text-2xl"
+              >
+                ✕
+              </button>
+            </div>
+            
+            <div className="p-4 space-y-2">
+              {(() => {
+                const allVariants = showAddVariantModal.allVariants || [];
+                const currentVariants = orders.find(p => p.productId === showAddVariantModal.productId)?.variants || [];
+                const filtered = allVariants.filter(v => !currentVariants.some(pv => pv.sku === v.sku));
+                
+                console.log('🔍 Debug Modal:', {
+                  allVariants: allVariants.length,
+                  currentVariants: currentVariants.length,
+                  currentSkus: currentVariants.map(v => v.sku),
+                  allSkus: allVariants.map(v => v.sku),
+                  filtered: filtered.length,
+                  filteredSkus: filtered.map(v => v.sku)
+                });
+                
+                return filtered.length > 0 ? (
+                  filtered.map((variant) => (
+                    <button
+                      key={variant._id}
+                      onClick={() => addVariantToOrder(showAddVariantModal.productId, variant)}
+                      className="w-full text-left p-3 border border-gray-300 rounded hover:bg-blue-50 hover:border-blue-400 transition-colors"
+                    >
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <p className="font-medium text-gray-800">{variant.sku}</p>
+                          <p className="text-sm text-gray-500">ราคา: {fmtNumber.format(variant.price || 0)} บาท</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-sm font-semibold text-gray-700">
+                            คงเหลือ: {fmtNumber.format(variant.stockOnHand || 0)} ชิ้น
+                          </p>
+                          <p className="text-xs text-green-600">+ เพิ่มไปยังการสั่ง</p>
+                        </div>
+                      </div>
+                    </button>
+                  ))
+                ) : (
+                  <div className="p-4 text-center text-gray-500">
+                    <p>❌ ไม่มี Variant ใหม่ที่สามารถเพิ่มได้</p>
+                    <p className="text-xs mt-2 text-gray-400">
+                      (ทั้งหมด: {allVariants.length}, ใช้แล้ว: {currentVariants.length})
+                    </p>
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
         </div>
       )}
 
