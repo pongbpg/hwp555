@@ -170,6 +170,9 @@ const applyStockChange = (variant, product, item, type, metadata = {}) => {
           throw new Error(`Insufficient total quantities for SKU ${variant.sku}: need ${qty}, available ${totalBatchQty + unbatchedQty}`);
         }
       }
+      
+      // ✅ อัพเดต stockOnHand โดยตรง เพื่อให้ virtual field ถูกต้อง
+      variant.stockOnHand = currentStock - qty;
     }
     // ✅ ถ้าไม่มี batches และเปิด allowBackorder ให้อนุญาต (สต็อกติดลบ)
     return;
@@ -178,6 +181,8 @@ const applyStockChange = (variant, product, item, type, metadata = {}) => {
   if (type === 'adjustment') {
     // ✅ สำหรับ adjustment เพิ่ม/ลด stock โดยสร้าง batch ใหม่
     // ถ้า qty > 0 เพิ่ม สต็อก, qty < 0 ลดสต็อก
+    const currentStock = variant.stockOnHand || 0;
+    
     if (qty > 0) {
       // เพิ่มสต็อก - สร้าง batch ใหม่
       variant.batches.push({
@@ -188,12 +193,16 @@ const applyStockChange = (variant, product, item, type, metadata = {}) => {
         expiryDate: item.expiryDate,
         receivedAt: new Date(),
       });
+      // ✅ อัพเดต stockOnHand โดยตรง
+      variant.stockOnHand = currentStock + qty;
     } else if (qty < 0) {
       // ลดสต็อก - consume จาก batch (พร้อมส่งข้อมูล metadata)
       const remaining = consumeBatches(variant, product, Math.abs(qty), metadata);
       if (remaining > 0 && !variant.allowBackorder) {
         throw new Error(`Insufficient stock for adjustment on SKU ${variant.sku}: need ${Math.abs(qty)}, available ${Math.abs(qty) - remaining}`);
       }
+      // ✅ อัพเดต stockOnHand โดยตรง
+      variant.stockOnHand = currentStock - Math.abs(qty);
     }
     return;
   }
@@ -302,14 +311,20 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
             }
           );
           
+          // ✅ คำนวณ newStock จากการเปลี่ยนแปลงที่ applyStockChange ทำ
+          // - type 'sale': previousStock - qty
+          // - type 'adjustment': previousStock + qty (qty อาจ positive/negative)
+          const adjustQty = type === 'sale' ? -qty : qty;
+          const calculatedNewStock = previousStock + adjustQty;
+          
           // เก็บข้อมูลสำหรับ movement (ยกเว้น purchase เพราะยังไม่รับของ)
           movementRecords.push({
             movementType: type === 'sale' ? 'out' : 'adjust',
             product,
             variant,
-            quantity: type === 'sale' ? -qty : qty,
+            quantity: adjustQty,
             previousStock,
-            newStock: variant.stockOnHand,
+            newStock: calculatedNewStock,
             reference,
             batchRef: rawItem.batchRef,
             expiryDate: rawItem.expiryDate,
