@@ -17,6 +17,7 @@ const getDefaultExpiryDate = () => {
 };
 
 // Generate reference number like SO2569-0001, PO2569-0001, etc.
+// ✅ ดึง max number จาก reference string แทนการนับ length (เพราะ orders มี pagination)
 const generateReference = (type, orderDate, orders) => {
   const prefixes = {
     sale: 'SO',
@@ -25,15 +26,21 @@ const generateReference = (type, orderDate, orders) => {
   };
   const prefix = prefixes[type] || type.toUpperCase();
   const thaiYear = getThaiYear(orderDate);
+  const expectedPrefix = `${prefix}${thaiYear}-`; // เช่น "SO2569-"
 
-  // Count existing orders of the same type and year
-  const sameTypeOrders = (orders || []).filter((o) => {
-    if (o.type !== type) return false;
-    const oYear = getThaiYear(o.orderDate || o.createdAt);
-    return oYear === thaiYear;
+  // หาตัวเลขสูงสุดจากทั้งหมดที่มีอยู่ (ไม่ว่าจะในหน้าไหน)
+  let maxNumber = 0;
+  (orders || []).forEach((o) => {
+    if (o.reference && o.reference.startsWith(expectedPrefix)) {
+      const numStr = o.reference.substring(expectedPrefix.length);
+      const num = parseInt(numStr, 10);
+      if (!isNaN(num) && num > maxNumber) {
+        maxNumber = num;
+      }
+    }
   });
 
-  const nextNumber = sameTypeOrders.length + 1;
+  const nextNumber = maxNumber + 1;
   const paddedNumber = String(nextNumber).padStart(4, '0');
 
   return `${prefix}${thaiYear}-${paddedNumber}`;
@@ -73,6 +80,7 @@ export default function Orders() {
   const [selectedProductsForTemplate, setSelectedProductsForTemplate] = useState([]);
   const [productSearchQuery, setProductSearchQuery] = useState('');
   const [showProductSearchResults, setShowProductSearchResults] = useState(false);
+  const [csvGeneratedReference, setCsvGeneratedReference] = useState(''); // ✅ เลข reference สำหรับ CSV import
 
   const loadProducts = async () => {
     try {
@@ -82,6 +90,17 @@ export default function Orders() {
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to load products');
       return false;
+    }
+  };
+
+  // ✅ ดึง orders ทั้งหมด (ไม่ pagination) สำหรับ generate reference
+  const loadAllOrdersForRef = async () => {
+    try {
+      const res = await api.get('/inventory/orders?limit=10000');
+      return res.data?.items || [];
+    } catch (err) {
+      console.error('Failed to load orders for reference:', err);
+      return [];
     }
   };
 
@@ -115,13 +134,34 @@ export default function Orders() {
   };
 
   useEffect(() => {
-    // ถ้า reference ว่าง ให้เสนอค่าอัตโนมัติ แต่ยังให้แก้ไขได้
-    if (!reference.trim()) {
-      const suggestedRef = generateReference(type, orderDate, orders);
-      setReference(suggestedRef);
-      setReferenceError('');
+    // ✅ Reset reference เมื่อ type ฟอร์มเปลี่ยน (เก็บ filter ของตารางแยกต่างหาก)
+    if (type) {
+      setReference(''); // ✅ Reset reference เพื่อให้ generate ใหม่ตามประเภท
     }
-  }, [type, orderDate]);
+  }, [type]);
+
+  useEffect(() => {
+    // ✅ Generate reference ด้วย orders ทั้งหมด (ไม่ pagination)
+    const generateRef = async () => {
+      if (!reference.trim()) {
+        const allOrders = await loadAllOrdersForRef();
+        const suggestedRef = generateReference(type, orderDate, allOrders);
+        setReference(suggestedRef);
+        setReferenceError('');
+      }
+    };
+    generateRef();
+  }, [type, orderDate, reference]);
+
+  useEffect(() => {
+    // ✅ Generate reference สำหรับ CSV import เมื่อ type, orderDate, หรือ reference เปลี่ยน
+    const generateCsvRef = async () => {
+      const allOrders = await loadAllOrdersForRef();
+      const csvRef = generateReference(type, orderDate, allOrders);
+      setCsvGeneratedReference(csvRef);
+    };
+    generateCsvRef();
+  }, [type, orderDate, reference]);
 
   // ตรวจสอบว่า reference ซ้ำหรือไม่เมื่อผู้ใช้เปลี่ยนค่า
   const checkReferenceExists = (ref) => {
@@ -292,12 +332,6 @@ export default function Orders() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (submitting) return; // ป้องกันกดซ้ำ
-
-    // ตรวจสอบว่า reference ซ้ำหรือไม่
-    if (checkReferenceExists(reference)) {
-      setError('โปรดแก้ไขเลขอ้างอิงให้ไม่ซ้ำก่อนบันทึก');
-      return;
-    }
     
     // Confirm before submitting
     const itemCount = items.length;
@@ -507,23 +541,10 @@ export default function Orders() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">เลขอ้างอิง (Reference) <span className="text-red-500">*</span></label>
-                  <input
-                    className={`w-full px-3 py-2 border rounded-lg text-gray-700 font-mono font-semibold focus:ring-2 focus:ring-blue-500 outline-none ${
-                      referenceError ? 'border-red-500 bg-red-50' : 'border-gray-300'
-                    }`}
-                    value={reference}
-                    onChange={(e) => {
-                      setReference(e.target.value);
-                      checkReferenceExists(e.target.value);
-                    }}
-                    placeholder="เช่น SO2569-0001"
-                    required
-                  />
-                  {referenceError && <p className="text-xs text-red-600 mt-1">{referenceError}</p>}
-                  {!referenceError && reference && (
-                    <p className="text-xs text-green-600 mt-1">✓ เลขอ้างอิงถูกต้อง</p>
-                  )}
-                  <p className="text-xs text-gray-400 mt-1">💬 ตัวอย่าง: SO2569-0001, PO2569-0001, ADJ2569-0001</p>
+                  <div className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-700 font-mono font-semibold cursor-not-allowed opacity-75">
+                    {reference || '-'}
+                  </div>
+                  <p className="text-xs text-gray-600 mt-1">🔒 อัตโนมัติ (ห้ามแก้ไข)</p>
                 </div>
               </div>
 
@@ -658,7 +679,7 @@ export default function Orders() {
 
             {/* Step 1: Select CSV Type and Download Template */}
             <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start mb-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-start mb-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">ประเภท Order</label>
                   <select
@@ -675,6 +696,13 @@ export default function Orders() {
                     <option value="purchase">Purchase (ซื้อ)</option>
                     <option value="adjustment">Adjustment (ปรับปรุง)</option>
                   </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">📊 เลข Reference</label>
+                  <div className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-700 font-mono font-semibold cursor-not-allowed opacity-75">
+                    {csvGeneratedReference || '-'}
+                  </div>
+                  <p className="text-xs text-gray-600 mt-1">🔒 อัตโนมัติ (ห้ามแก้ไข)</p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">📥 Template</label>
