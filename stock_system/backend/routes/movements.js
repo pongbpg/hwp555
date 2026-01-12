@@ -223,12 +223,59 @@ router.post('/', authenticateToken, authorizeRoles('owner', 'admin', 'hr'), asyn
     }
     // 'adjust' can be positive or negative as provided
 
-    const newStock = previousStock + adjustQty;
+    // ✅ จัดการ batches เพื่อให้ stockOnHand (virtual field) คำนวณถูกต้อง
+    if (adjustQty > 0) {
+      // เพิ่มสต็อก - สร้าง batch ใหม่
+      const newBatch = {
+        batchRef: batchRef || `MANUAL-${Date.now()}`,
+        supplier: `Manual ${movementType}`,
+        cost: unitCost || variant.cost || 0,
+        quantity: adjustQty,
+        expiryDate: expiryDate || null,
+        receivedAt: new Date(),
+      };
+      variant.batches.push(newBatch);
+    } else if (adjustQty < 0) {
+      // ลดสต็อก - consume จาก batches (FIFO)
+      let remainingToConsume = Math.abs(adjustQty);
+      const costingMethod = product.costingMethod || 'FIFO';
+      
+      // เรียง batches ตาม costing method
+      const sortedBatches = [...(variant.batches || [])].sort((a, b) => {
+        if (costingMethod === 'LIFO') {
+          return new Date(b.receivedAt) - new Date(a.receivedAt); // ใหม่ก่อน
+        }
+        return new Date(a.receivedAt) - new Date(b.receivedAt); // เก่าก่อน (FIFO/WAC)
+      });
 
-    // Update variant stock via batches
-    // stockOnHand เป็น virtual field - จะคำนวณจาก batches อัตโนมัติ
-    // ตรงนี้ควรจัดการผ่าน InventoryOrder API แทน เพื่อให้ batch tracking ถูกต้อง
+      // Consume batches
+      for (const batch of sortedBatches) {
+        if (remainingToConsume <= 0) break;
+        
+        const batchQty = batch.quantity || 0;
+        if (batchQty <= 0) continue;
+
+        const consumeFromThisBatch = Math.min(batchQty, remainingToConsume);
+        batch.quantity -= consumeFromThisBatch;
+        remainingToConsume -= consumeFromThisBatch;
+      }
+
+      // ลบ batches ที่เหลือ 0
+      variant.batches = variant.batches.filter(b => (b.quantity || 0) > 0);
+
+      // ถ้ายังขาดอยู่และไม่อนุญาต backorder
+      if (remainingToConsume > 0 && !variant.allowBackorder) {
+        return res.status(400).json({
+          error: `Insufficient stock. Need ${Math.abs(adjustQty)} but only ${Math.abs(adjustQty) - remainingToConsume} available in batches.`
+        });
+      }
+    }
+
+    // คำนวณ newStock จาก virtual field หลัง update batches
+    product.markModified('variants');
     await product.save();
+    
+    const newStock = variant.stockOnHand || 0;
 
     // Create movement record
     const movement = new StockMovement({

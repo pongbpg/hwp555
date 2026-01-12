@@ -1,0 +1,673 @@
+{
+  "timestamp": "2026-01-12T14:09:06.194Z",
+  "mode": "LIVE_RUN",
+  "totalVariants": 42,
+  "variantsWithIssues": 35,
+  "issues": [
+    {
+      "productId": "695b95b3e1ef0b9f71d5662d",
+      "productName": "เวสเทรนเนอร์",
+      "variantId": "695b95b3e1ef0b9f71d5662e",
+      "sku": "XSR-SW-WT-B-2XS",
+      "batchCount": 1,
+      "batchTotal": 67,
+      "latestMovement": {
+        "type": "out",
+        "newStock": 62,
+        "date": "2026-01-10T15:26:17.837Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 67,
+      "targetStock": 62,
+      "difference": -5,
+      "reason": "Batch total (67) != Latest movement (62)"
+    },
+    {
+      "productId": "695b95b3e1ef0b9f71d5662d",
+      "productName": "เวสเทรนเนอร์",
+      "variantId": "695b95b3e1ef0b9f71d5662f",
+      "sku": "XSR-SW-WT-B-XS",
+      "batchCount": 2,
+      "batchTotal": 164,
+      "latestMovement": {
+        "type": "out",
+        "newStock": 162,
+        "date": "2026-01-12T08:56:47.065Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 164,
+      "targetStock": 162,
+      "difference": -2,
+      "reason": "Batch total (164) != Latest movement (162)"
+    },
+    {
+      "productId": "695b95b3e1ef0b9f71d5662d",
+      "productName": "เวสเทรนเนอร์",
+      "variantId": "695b95b3e1ef0b9f71d56630",
+      "sku": "XSR-SW-WT-B-S",
+      "batchCount": 2,
+      "batchTotal": 243,
+      "latestMovement": {
+        "type": "out",
+        "newStock": 198,
+        "date": "2026-01-12T08:56:47.068Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 243,
+      "targetStock": 198,
+      "difference": -45,
+      "reason": "Batch total (243) != Latest movement (198)"
+    },
+    {
+      "productId": "695b95b3e1ef0b9f71d5662d",
+      "productName": "เวสเทรนเนอร์",
+      "variantId": "695b95b3e1ef0b9f71d56631",
+      "sku": "XSR-SW-WT-B-M",
+      "batchCount": 2,
+      "batchTotal": 214,
+      "latestMovement": {
+        "type": "out",
+        "newStock": 181,
+        "date": "2026-01-12T08:56:47.072Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 214,
+      "targetStock": 181,
+      "difference": -33,
+      "reason": "Batch total (214) != Latest movement (181)"
+    },
+    {
+      "productId": "695b95b3e1ef0b9f71d5662d",
+      "productName": "เวสเทรนเนอร์",
+      "variantId": "695b95b3e1ef0b9f71d56632",
+      "sku": "XSR-SW-WT-B-L",
+      "batchCount": 2,
+      "batchTotal": 119,
+      "latestMovement": {
+        "type": "out",
+        "newStock": 107,
+        "date": "2026-01-12T08:56:47.075Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 119,
+      "targetStock": 107,
+      "difference": -12,
+      "reason": "Batch total (119) != Latest movement (107)"
+    },
+    {
+      "productId": "695b95b3e1ef0b9f71d5662d",
+      "productName": "เวสเทรนเนอร์",
+      "variantId": "695b95b3e1ef0b9f71d56633",
+      "sku": "XSR-SW-WT-B-XL",
+      "batchCount": 2,
+      "batchTotal": 61,
+      "latestMovement": {
+        "type": "out",
+        "newStock": 46,
+        "date": "2026-01-12T08:56:47.079Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 61,
+      "targetStock": 46,
+      "difference": -15,
+      "reason": "Batch total (61) != Latest movement (46)"
+    },
+    {
+      "productId": "695b95b3e1ef0b9f71d5662d",
+      "productName": "เวสเทรนเนอร์",
+      "variantId": "695b95b3e1ef0b9f71d56634",
+      "sku": "XSR-SW-WT-B-2XL",
+      "batchCount": 2,
+      "batchTotal": 75,
+      "latestMovement": {
+        "type": "out",
+        "newStock": 69,
+        "date": "2026-01-12T08:56:47.082Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 75,
+      "targetStock": 69,
+      "difference": -6,
+      "reason": "Batch total (75) != Latest movement (69)"
+    },
+    {
+      "productId": "695b95b3e1ef0b9f71d5662d",
+      "productName": "เวสเทรนเนอร์",
+      "variantId": "695b95b3e1ef0b9f71d56635",
+      "sku": "XSR-SW-WT-N-2XS",
+      "batchCount": 2,
+      "batchTotal": 22,
+      "latestMovement": {
+        "type": "out",
+        "newStock": 19,
+        "date": "2026-01-12T08:56:47.085Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 22,
+      "targetStock": 19,
+      "difference": -3,
+      "reason": "Batch total (22) != Latest movement (19)"
+    },
+    {
+      "productId": "695b95b3e1ef0b9f71d5662d",
+      "productName": "เวสเทรนเนอร์",
+      "variantId": "695b95b3e1ef0b9f71d56636",
+      "sku": "XSR-SW-WT-N-XS",
+      "batchCount": 1,
+      "batchTotal": 71,
+      "latestMovement": {
+        "type": "out",
+        "newStock": 68,
+        "date": "2026-01-10T15:26:17.853Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 71,
+      "targetStock": 68,
+      "difference": -3,
+      "reason": "Batch total (71) != Latest movement (68)"
+    },
+    {
+      "productId": "695b95b3e1ef0b9f71d5662d",
+      "productName": "เวสเทรนเนอร์",
+      "variantId": "695b95b3e1ef0b9f71d56637",
+      "sku": "XSR-SW-WT-N-S",
+      "batchCount": 2,
+      "batchTotal": 86,
+      "latestMovement": {
+        "type": "out",
+        "newStock": 71,
+        "date": "2026-01-12T08:56:47.088Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 86,
+      "targetStock": 71,
+      "difference": -15,
+      "reason": "Batch total (86) != Latest movement (71)"
+    },
+    {
+      "productId": "695b95b3e1ef0b9f71d5662d",
+      "productName": "เวสเทรนเนอร์",
+      "variantId": "695b95b3e1ef0b9f71d56638",
+      "sku": "XSR-SW-WT-N-M",
+      "batchCount": 2,
+      "batchTotal": 107,
+      "latestMovement": {
+        "type": "out",
+        "newStock": 92,
+        "date": "2026-01-12T08:56:47.091Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 107,
+      "targetStock": 92,
+      "difference": -15,
+      "reason": "Batch total (107) != Latest movement (92)"
+    },
+    {
+      "productId": "695b95b3e1ef0b9f71d5662d",
+      "productName": "เวสเทรนเนอร์",
+      "variantId": "695b95b3e1ef0b9f71d56639",
+      "sku": "XSR-SW-WT-N-L",
+      "batchCount": 2,
+      "batchTotal": 63,
+      "latestMovement": {
+        "type": "out",
+        "newStock": 54,
+        "date": "2026-01-12T08:56:47.095Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 63,
+      "targetStock": 54,
+      "difference": -9,
+      "reason": "Batch total (63) != Latest movement (54)"
+    },
+    {
+      "productId": "695b95b3e1ef0b9f71d5662d",
+      "productName": "เวสเทรนเนอร์",
+      "variantId": "695b95b3e1ef0b9f71d5663a",
+      "sku": "XSR-SW-WT-N-XL",
+      "batchCount": 2,
+      "batchTotal": 34,
+      "latestMovement": {
+        "type": "out",
+        "newStock": 31,
+        "date": "2026-01-12T08:56:47.098Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 34,
+      "targetStock": 31,
+      "difference": -3,
+      "reason": "Batch total (34) != Latest movement (31)"
+    },
+    {
+      "productId": "695b95b3e1ef0b9f71d5662d",
+      "productName": "เวสเทรนเนอร์",
+      "variantId": "695b95b3e1ef0b9f71d5663b",
+      "sku": "XSR-SW-WT-N-2XL",
+      "batchCount": 2,
+      "batchTotal": 23,
+      "latestMovement": {
+        "type": "out",
+        "newStock": 20,
+        "date": "2026-01-12T08:56:47.103Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 23,
+      "targetStock": 20,
+      "difference": -3,
+      "reason": "Batch total (23) != Latest movement (20)"
+    },
+    {
+      "productId": "695bb96516cec280f72e6849",
+      "productName": "สายรัดหลังคลอด",
+      "variantId": "695bb96516cec280f72e684a",
+      "sku": "XSR-MOM-PG-N-L",
+      "batchCount": 3,
+      "batchTotal": 749,
+      "latestMovement": {
+        "type": "out",
+        "newStock": 433,
+        "date": "2026-01-12T08:40:04.411Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 749,
+      "targetStock": 433,
+      "difference": -316,
+      "reason": "Batch total (749) != Latest movement (433)"
+    },
+    {
+      "productId": "695bb96516cec280f72e6849",
+      "productName": "สายรัดหลังคลอด",
+      "variantId": "695bb96516cec280f72e684b",
+      "sku": "XSR-MOM-PG-N-2XL",
+      "batchCount": 3,
+      "batchTotal": 903,
+      "latestMovement": {
+        "type": "adjust",
+        "newStock": 627,
+        "date": "2026-01-12T13:37:36.133Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 903,
+      "targetStock": 627,
+      "difference": -276,
+      "reason": "Batch total (903) != Latest movement (627)"
+    },
+    {
+      "productId": "695bba8c16cec280f72e686e",
+      "productName": "กางเกงขาเบียด",
+      "variantId": "695bba8c16cec280f72e686f",
+      "sku": "XSR-SW-SKP-B-M",
+      "batchCount": 2,
+      "batchTotal": 195,
+      "latestMovement": {
+        "type": "out",
+        "newStock": 189,
+        "date": "2026-01-12T09:12:50.368Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 195,
+      "targetStock": 189,
+      "difference": -6,
+      "reason": "Batch total (195) != Latest movement (189)"
+    },
+    {
+      "productId": "695bba8c16cec280f72e686e",
+      "productName": "กางเกงขาเบียด",
+      "variantId": "695bba8c16cec280f72e6870",
+      "sku": "XSR-SW-SKP-B-L",
+      "batchCount": 2,
+      "batchTotal": 218,
+      "latestMovement": {
+        "type": "out",
+        "newStock": 203,
+        "date": "2026-01-12T09:12:50.371Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 218,
+      "targetStock": 203,
+      "difference": -15,
+      "reason": "Batch total (218) != Latest movement (203)"
+    },
+    {
+      "productId": "695bba8c16cec280f72e686e",
+      "productName": "กางเกงขาเบียด",
+      "variantId": "695bba8c16cec280f72e6871",
+      "sku": "XSR-SW-SKP-B-XL",
+      "batchCount": 2,
+      "batchTotal": 310,
+      "latestMovement": {
+        "type": "out",
+        "newStock": 288,
+        "date": "2026-01-12T09:12:50.378Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 310,
+      "targetStock": 288,
+      "difference": -22,
+      "reason": "Batch total (310) != Latest movement (288)"
+    },
+    {
+      "productId": "695bba8c16cec280f72e686e",
+      "productName": "กางเกงขาเบียด",
+      "variantId": "695bba8c16cec280f72e6872",
+      "sku": "XSR-SW-SKP-B-2XL",
+      "batchCount": 2,
+      "batchTotal": 166,
+      "latestMovement": {
+        "type": "out",
+        "newStock": 143,
+        "date": "2026-01-12T09:12:50.381Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 166,
+      "targetStock": 143,
+      "difference": -23,
+      "reason": "Batch total (166) != Latest movement (143)"
+    },
+    {
+      "productId": "695bba8c16cec280f72e686e",
+      "productName": "กางเกงขาเบียด",
+      "variantId": "695bba8c16cec280f72e6873",
+      "sku": "XSR-SW-SKP-B-3XL",
+      "batchCount": 2,
+      "batchTotal": 224,
+      "latestMovement": {
+        "type": "out",
+        "newStock": 201,
+        "date": "2026-01-12T09:12:50.384Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 224,
+      "targetStock": 201,
+      "difference": -23,
+      "reason": "Batch total (224) != Latest movement (201)"
+    },
+    {
+      "productId": "695bba8c16cec280f72e686e",
+      "productName": "กางเกงขาเบียด",
+      "variantId": "695bba8c16cec280f72e6874",
+      "sku": "XSR-SW-SKP-B-4XL",
+      "batchCount": 2,
+      "batchTotal": 60,
+      "latestMovement": {
+        "type": "out",
+        "newStock": 54,
+        "date": "2026-01-08T09:30:20.613Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 60,
+      "targetStock": 54,
+      "difference": -6,
+      "reason": "Batch total (60) != Latest movement (54)"
+    },
+    {
+      "productId": "695bba8c16cec280f72e686e",
+      "productName": "กางเกงขาเบียด",
+      "variantId": "695bba8c16cec280f72e6875",
+      "sku": "XSR-SW-SKP-N-M",
+      "batchCount": 2,
+      "batchTotal": 44,
+      "latestMovement": {
+        "type": "out",
+        "newStock": 35,
+        "date": "2026-01-12T09:12:50.387Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 44,
+      "targetStock": 35,
+      "difference": -9,
+      "reason": "Batch total (44) != Latest movement (35)"
+    },
+    {
+      "productId": "695bba8c16cec280f72e686e",
+      "productName": "กางเกงขาเบียด",
+      "variantId": "695bba8c16cec280f72e6876",
+      "sku": "XSR-SW-SKP-N-L",
+      "batchCount": 2,
+      "batchTotal": 77,
+      "latestMovement": {
+        "type": "out",
+        "newStock": 67,
+        "date": "2026-01-12T09:12:50.390Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 77,
+      "targetStock": 67,
+      "difference": -10,
+      "reason": "Batch total (77) != Latest movement (67)"
+    },
+    {
+      "productId": "695bba8c16cec280f72e686e",
+      "productName": "กางเกงขาเบียด",
+      "variantId": "695bba8c16cec280f72e6877",
+      "sku": "XSR-SW-SKP-N-XL",
+      "batchCount": 2,
+      "batchTotal": 112,
+      "latestMovement": {
+        "type": "out",
+        "newStock": 101,
+        "date": "2026-01-12T09:12:50.393Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 112,
+      "targetStock": 101,
+      "difference": -11,
+      "reason": "Batch total (112) != Latest movement (101)"
+    },
+    {
+      "productId": "695bba8c16cec280f72e686e",
+      "productName": "กางเกงขาเบียด",
+      "variantId": "695bba8c16cec280f72e6878",
+      "sku": "XSR-SW-SKP-N-2XL",
+      "batchCount": 2,
+      "batchTotal": 119,
+      "latestMovement": {
+        "type": "out",
+        "newStock": 109,
+        "date": "2026-01-12T09:12:50.397Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 119,
+      "targetStock": 109,
+      "difference": -10,
+      "reason": "Batch total (119) != Latest movement (109)"
+    },
+    {
+      "productId": "695bba8c16cec280f72e686e",
+      "productName": "กางเกงขาเบียด",
+      "variantId": "695bba8c16cec280f72e6879",
+      "sku": "XSR-SW-SKP-N-3XL",
+      "batchCount": 2,
+      "batchTotal": 81,
+      "latestMovement": {
+        "type": "out",
+        "newStock": 73,
+        "date": "2026-01-12T09:12:50.400Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 81,
+      "targetStock": 73,
+      "difference": -8,
+      "reason": "Batch total (81) != Latest movement (73)"
+    },
+    {
+      "productId": "695d122879deada5f38af702",
+      "productName": "กางเกงเก็บพุงเบสิค",
+      "variantId": "695d122879deada5f38af703",
+      "sku": "XSR-SW-BASIC-B-S",
+      "batchCount": 1,
+      "batchTotal": 38,
+      "latestMovement": {
+        "type": "out",
+        "newStock": 36,
+        "date": "2026-01-06T14:35:15.800Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 38,
+      "targetStock": 36,
+      "difference": -2,
+      "reason": "Batch total (38) != Latest movement (36)"
+    },
+    {
+      "productId": "695d122879deada5f38af702",
+      "productName": "กางเกงเก็บพุงเบสิค",
+      "variantId": "695d122879deada5f38af704",
+      "sku": "XSR-SW-BASIC-B-M",
+      "batchCount": 1,
+      "batchTotal": 12,
+      "latestMovement": {
+        "type": "out",
+        "newStock": 11,
+        "date": "2026-01-06T14:35:15.804Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 12,
+      "targetStock": 11,
+      "difference": -1,
+      "reason": "Batch total (12) != Latest movement (11)"
+    },
+    {
+      "productId": "695d122879deada5f38af702",
+      "productName": "กางเกงเก็บพุงเบสิค",
+      "variantId": "695d122879deada5f38af705",
+      "sku": "XSR-SW-BASIC-B-L",
+      "batchCount": 2,
+      "batchTotal": 45,
+      "latestMovement": {
+        "type": "in",
+        "newStock": 43,
+        "date": "2026-01-12T09:00:41.097Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 45,
+      "targetStock": 43,
+      "difference": -2,
+      "reason": "Batch total (45) != Latest movement (43)"
+    },
+    {
+      "productId": "695d122879deada5f38af702",
+      "productName": "กางเกงเก็บพุงเบสิค",
+      "variantId": "695d122879deada5f38af707",
+      "sku": "XSR-SW-BASIC-N-S",
+      "batchCount": 1,
+      "batchTotal": 2,
+      "latestMovement": {
+        "type": "out",
+        "newStock": 1,
+        "date": "2026-01-06T14:35:15.812Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 2,
+      "targetStock": 1,
+      "difference": -1,
+      "reason": "Batch total (2) != Latest movement (1)"
+    },
+    {
+      "productId": "695d122879deada5f38af702",
+      "productName": "กางเกงเก็บพุงเบสิค",
+      "variantId": "695d122879deada5f38af708",
+      "sku": "XSR-SW-BASIC-N-M",
+      "batchCount": 1,
+      "batchTotal": 13,
+      "latestMovement": {
+        "type": "out",
+        "newStock": 12,
+        "date": "2026-01-12T08:48:06.274Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 13,
+      "targetStock": 12,
+      "difference": -1,
+      "reason": "Batch total (13) != Latest movement (12)"
+    },
+    {
+      "productId": "695d122879deada5f38af702",
+      "productName": "กางเกงเก็บพุงเบสิค",
+      "variantId": "695d122879deada5f38af70a",
+      "sku": "XSR-SW-BASIC-N-XL",
+      "batchCount": 1,
+      "batchTotal": 2,
+      "latestMovement": {
+        "type": "out",
+        "newStock": 0,
+        "date": "2026-01-12T08:48:06.276Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 2,
+      "targetStock": 0,
+      "difference": -2,
+      "reason": "Batch total (2) != Latest movement (0)"
+    },
+    {
+      "productId": "69610c15f43ff831dc559775",
+      "productName": "น้ำชง INSTANT DRINK",
+      "variantId": "69610ce6f43ff831dc5598b6",
+      "sku": "MT-FSP-INST-CF",
+      "batchCount": 1,
+      "batchTotal": 409,
+      "latestMovement": {
+        "type": "out",
+        "newStock": 394,
+        "date": "2026-01-12T09:59:51.817Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 409,
+      "targetStock": 394,
+      "difference": -15,
+      "reason": "Batch total (409) != Latest movement (394)"
+    },
+    {
+      "productId": "69610c15f43ff831dc559775",
+      "productName": "น้ำชง INSTANT DRINK",
+      "variantId": "69610d9af43ff831dc5599f9",
+      "sku": "MT-FSP-INST-CC",
+      "batchCount": 1,
+      "batchTotal": 261,
+      "latestMovement": {
+        "type": "out",
+        "newStock": 247,
+        "date": "2026-01-12T09:59:51.820Z"
+      },
+      "action": "ADJUST_BATCH",
+      "fixed": true,
+      "currentStock": 261,
+      "targetStock": 247,
+      "difference": -14,
+      "reason": "Batch total (261) != Latest movement (247)"
+    }
+  ]
+}
