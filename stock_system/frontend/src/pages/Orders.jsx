@@ -348,14 +348,29 @@ export default function Orders() {
         type,
         reference,
         orderDate,
-        items: items.map((it) => ({
-          productId: it.productId,
-          variantId: it.variantId,
-          quantity: Number(it.quantity) || 0,
-          unitPrice: Number(it.unitPrice) || 0,
-          batchRef: it.batchRef || undefined,
-          expiryDate: it.expiryDate ? it.expiryDate : undefined,
-        })),
+        items: items.map((it) => {
+          const product = products.find((p) => p._id === it.productId);
+          const variant = product?.variants?.find((v) => v._id === it.variantId);
+          
+          const item = {
+            productId: it.productId,
+            variantId: it.variantId,
+            quantity: Number(it.quantity) || 0,
+          };
+          
+          // ✅ Sale order: Backend จะคิด unitCost จาก batch อัตโนมัติ
+          // ผู้ใช้ส่งแค่ unitPrice (ราคาขาย)
+          if (type === 'sale') {
+            item.unitPrice = Number(it.unitPrice) || 0;
+          } else {
+            // ✅ Purchase/Adjustment: ส่งแค่ unitPrice (ต้นทุน/มูลค่า)
+            item.unitPrice = Number(it.unitPrice) || 0;
+          }
+          
+          if (it.batchRef) item.batchRef = it.batchRef;
+          if (it.expiryDate) item.expiryDate = it.expiryDate;
+          return item;
+        }),
       };
       await api.post('/inventory/orders', payload);
       setMessage('Order recorded');
@@ -425,14 +440,26 @@ export default function Orders() {
         type,
         reference: generateReference(type, orderDate, orders),
         orderDate,
-        items: csvPreview.map((row) => ({
-          productId: row.productId,
-          variantId: row.variantId,
-          quantity: row.quantity,
-          unitPrice: row.unitPrice,
-          batchRef: row.batchRef || undefined,
-          expiryDate: row.expiryDate ? row.expiryDate : undefined,
-        })),
+        items: csvPreview.map((row) => {
+          const item = {
+            productId: row.productId,
+            variantId: row.variantId,
+            quantity: row.quantity,
+          };
+          
+          // ✅ Sale order: เก็บทั้ง unitPrice + unitCost
+          if (type === 'sale') {
+            item.unitPrice = row.unitPrice;
+            item.unitCost = row.cost || row.unitCost || 0;
+          } else {
+            // ✅ Purchase/Adjustment: เก็บแค่ unitCost
+            item.unitCost = row.unitPrice || row.cost || row.unitCost || 0;
+          }
+          
+          if (row.batchRef) item.batchRef = row.batchRef;
+          if (row.expiryDate) item.expiryDate = row.expiryDate;
+          return item;
+        }),
       };
 
       await api.post('/inventory/orders', payload);
@@ -1057,6 +1084,7 @@ export default function Orders() {
                   <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">สถานะ</th>
                   <th className="text-center py-2 px-3 text-sm font-semibold text-gray-600">รายการ</th>
                   <th className="text-center py-2 px-3 text-sm font-semibold text-gray-600">จำนวนสินค้า</th>
+                  <th className="text-right py-2 px-3 text-sm font-semibold text-gray-600">ต้นทุนรวม</th>
                   <th className="text-right py-2 px-3 text-sm font-semibold text-gray-600">มูลค่ารวม</th>
                   <th className="text-center py-2 px-3 text-sm font-semibold text-gray-600">Actions</th>
                 </tr>
@@ -1108,7 +1136,15 @@ export default function Orders() {
                       </td>
                       <td className="py-2 px-3 text-sm text-center">{o.items?.length ?? 0}</td>
                       <td className="py-2 px-3 text-sm text-center">{(o.items || []).reduce((sum, it) => sum + (Number(it.quantity) || 0), 0)}</td>
-                      <td className="py-2 px-3 text-sm text-right">{calcOrderTotal(o).toLocaleString()}</td>
+                      <td className="py-2 px-3 text-sm text-right">
+                        {o.type === 'sale' || o.type === 'adjustment' 
+                          ? (o.items || []).reduce((sum, it) => sum + (Number(it.unitCost) || 0) * (Number(it.quantity) || 0), 0).toLocaleString()
+                          : (o.items || []).reduce((sum, it) => sum + (Number(it.unitCost) || 0) * (Number(it.quantity) || 0), 0).toLocaleString()
+                        }
+                      </td>
+                      <td className="py-2 px-3 text-sm text-right">
+                        {o.type === 'purchase' || o.type === 'adjustment' ? '-' : calcOrderTotal(o).toLocaleString()}
+                      </td>
                       <td className="py-2 px-3 text-sm">
                         <div className="flex gap-1 justify-center flex-wrap">
                           <button
@@ -1141,17 +1177,17 @@ export default function Orders() {
                     </tr>
                     {expandedOrders.has(o._id) && (
                       <tr>
-                        <td colSpan={9}>
+                        <td colSpan={10}>
                           <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 m-2">
-                            <div className="flex gap-6 mb-3 text-sm text-gray-600">
+                            <div className="grid grid-cols-3 gap-4 mb-4 text-sm text-gray-600 pb-3 border-b border-gray-300">
                               <div>
-                                <strong>Reference:</strong> {o.reference || '-'}
+                                <strong className="text-gray-700">Reference:</strong> {o.reference || '-'}
                               </div>
                               <div>
-                                <strong>Channel:</strong> {o.channel || '-'}
+                                <strong className="text-gray-700">Channel:</strong> {o.channel || '-'}
                               </div>
                               <div>
-                                <strong>Notes:</strong> {o.notes || '-'}
+                                <strong className="text-gray-700">Notes:</strong> {o.notes || '-'}
                               </div>
                             </div>
                             <table className="w-full text-sm">
@@ -1162,10 +1198,28 @@ export default function Orders() {
                                   <th className="text-left py-2 px-2">ล็อต</th>
                                   <th className="text-left py-2 px-2">หมดอายุ</th>
                                   <th className="text-right py-2 px-2 w-20">จำนวน</th>
-                                  <th className="text-right py-2 px-2 w-24">รับแล้ว</th>
-                                  <th className="text-right py-2 px-2 w-20">ค้างรับ</th>
-                                  <th className="text-right py-2 px-2 w-24">ราคา/หน่วย</th>
-                                  <th className="text-right py-2 px-2 w-28">ราคารวม</th>
+                                  {o.type === 'purchase' && (
+                                    <>
+                                      <th className="text-right py-2 px-2 w-20">รับแล้ว</th>
+                                      <th className="text-right py-2 px-2 w-20">ค้างรับ</th>
+                                      <th className="text-right py-2 px-2 w-20">ต้นทุน/หน่วย</th>
+                                      <th className="text-right py-2 px-2 w-24">ต้นทุนรวม</th>
+                                    </>
+                                  )}
+                                  {o.type === 'sale' && (
+                                    <>
+                                      <th className="text-right py-2 px-2 w-20">ต้นทุน/หน่วย</th>
+                                      <th className="text-right py-2 px-2 w-24">ต้นทุนรวม</th>
+                                      <th className="text-right py-2 px-2 w-20">ราคาขาย/หน่วย</th>
+                                      <th className="text-right py-2 px-2 w-24">ราคาขายรวม</th>
+                                    </>
+                                  )}
+                                  {o.type === 'adjustment' && (
+                                    <>
+                                      <th className="text-right py-2 px-2 w-20">ต้นทุน/หน่วย</th>
+                                      <th className="text-right py-2 px-2 w-24">ต้นทุนรวม</th>
+                                    </>
+                                  )}
                                 </tr>
                               </thead>
                               <tbody>
@@ -1178,33 +1232,55 @@ export default function Orders() {
                                       {it.expiryDate ? new Date(it.expiryDate).toLocaleDateString('th-TH') : '-'}
                                     </td>
                                     <td className="py-2 px-2 text-right">{it.quantity ?? 0}</td>
-                                    <td className="py-2 px-2 text-right">
-                                      {o.type === 'purchase' ? (() => {
-                                        const received = receiveEdits[o._id]?.[idx] ?? it.receivedQuantity ?? 0;
-                                        const isCompleteFromDB = it.receivedQuantity >= (it.quantity ?? 0);
-                                        return isCompleteFromDB ? (
-                                          <span className="font-semibold text-green-700">{it.receivedQuantity}</span>
-                                        ) : (
-                                          <input
-                                            type="number"
-                                            min="0"
-                                            max={it.quantity ?? 0}
-                                            className="w-20 px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-right"
-                                            value={received}
-                                            onChange={(e) => handleReceiveChange(o._id, idx, e.target.value)}
-                                          />
-                                        );
-                                      })() : (
-                                        it.quantity ?? 0
-                                      )}
-                                    </td>
-                                    <td className="py-2 px-2 text-right">
-                                      {Math.max(0, (it.quantity ?? 0) - (receiveEdits[o._id]?.[idx] ?? it.receivedQuantity ?? 0))}
-                                    </td>
-                                    <td className="py-2 px-2 text-right">{it.unitPrice ?? 0}</td>
-                                    <td className="py-2 px-2 text-right">
-                                      {((Number(it.unitPrice) || 0) * (Number(it.quantity) || 0)).toFixed(2)}
-                                    </td>
+                                    {o.type === 'purchase' && (
+                                      <>
+                                        <td className="py-2 px-2 text-right">
+                                          {(() => {
+                                            const received = receiveEdits[o._id]?.[idx] ?? it.receivedQuantity ?? 0;
+                                            const isCompleteFromDB = it.receivedQuantity >= (it.quantity ?? 0);
+                                            return isCompleteFromDB ? (
+                                              <span className="font-semibold text-green-700">{it.receivedQuantity}</span>
+                                            ) : (
+                                              <input
+                                                type="number"
+                                                min="0"
+                                                max={it.quantity ?? 0}
+                                                className="w-20 px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-right"
+                                                value={received}
+                                                onChange={(e) => handleReceiveChange(o._id, idx, e.target.value)}
+                                              />
+                                            );
+                                          })()}
+                                        </td>
+                                        <td className="py-2 px-2 text-right">
+                                          {Math.max(0, (it.quantity ?? 0) - (receiveEdits[o._id]?.[idx] ?? it.receivedQuantity ?? 0))}
+                                        </td>
+                                        <td className="py-2 px-2 text-right">{(Number(it.unitCost) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                        <td className="py-2 px-2 text-right text-orange-600 font-medium">
+                                          {((Number(it.unitCost) || 0) * (Number(it.quantity) || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </td>
+                                      </>
+                                    )}
+                                    {o.type === 'sale' && (
+                                      <>
+                                        <td className="py-2 px-2 text-right">{(Number(it.unitCost) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                        <td className="py-2 px-2 text-right text-orange-600 font-medium">
+                                          {((Number(it.unitCost) || 0) * (Number(it.quantity) || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </td>
+                                        <td className="py-2 px-2 text-right">{(Number(it.unitPrice) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                        <td className="py-2 px-2 text-right text-green-600 font-medium">
+                                          {((Number(it.unitPrice) || 0) * (Number(it.quantity) || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </td>
+                                      </>
+                                    )}
+                                    {o.type === 'adjustment' && (
+                                      <>
+                                        <td className="py-2 px-2 text-right">{(Number(it.unitCost) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                                        <td className="py-2 px-2 text-right text-orange-600 font-medium">
+                                          {((Number(it.unitCost) || 0) * (Number(it.quantity) || 0)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </td>
+                                      </>
+                                    )}
                                   </tr>
                                 ))}
                               </tbody>

@@ -1075,7 +1075,7 @@ export default function Products() {
                       <input
                         className="w-full px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-sm"
                         type="number"
-                        placeholder="Price"
+                        placeholder="ราคาขาย (Selling Price)"
                         value={variant.price ?? 0}
                         onChange={(e) => updateVariant(idx, 'price', e.target.value)}
                       />

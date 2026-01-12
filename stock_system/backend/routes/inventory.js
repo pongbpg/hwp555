@@ -14,6 +14,43 @@ const router = express.Router();
 // ============= Helper Functions =============
 
 /**
+ * ตรวจสอบ reference ซ้ำ ถ้าซ้ำให้ +1 อัตโนมัติจนกว่าจะเจออันที่ไม่ซ้ำ
+ */
+const ensureUniqueReference = async (baseReference) => {
+  let currentReference = baseReference.trim();
+  let counter = 0;
+  const maxAttempts = 100;
+
+  while (counter < maxAttempts) {
+    const existing = await InventoryOrder.findOne({ reference: currentReference });
+    if (!existing) {
+      return currentReference; // ✅ ไม่ซ้ำ ส่งกลับ
+    }
+
+    // ✅ ซ้ำแล้ว ดึงตัวเลข และ +1
+    // Reference format: SO2569-0001, PO2569-0005 เป็นต้น
+    const parts = currentReference.split('-');
+    if (parts.length === 2) {
+      const prefix = parts[0]; // SO2569
+      const num = parseInt(parts[1], 10); // 0001
+      if (!isNaN(num)) {
+        const nextNum = num + 1;
+        const paddedNum = String(nextNum).padStart(4, '0');
+        currentReference = `${prefix}-${paddedNum}`;
+        counter++;
+        continue;
+      }
+    }
+
+    // ถ้าไม่สามารถ parse ได้ ให้เพิ่มลงท้าย -2, -3 เป็นต้น
+    counter++;
+    currentReference = `${baseReference.trim()}-${counter}`;
+  }
+
+  throw new Error(`Could not generate unique reference after ${maxAttempts} attempts`);
+};
+
+/**
  * ดึง cancelled orders และสร้าง set ของ cancelled batchRefs
  * ใช้สำหรับ filter batches ที่เกี่ยวข้องกับ cancelled orders
  */
@@ -220,11 +257,8 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
     if (!items || items.length === 0) return res.status(400).json({ error: 'At least one item is required' });
     if (!reference || !reference.trim()) return res.status(400).json({ error: 'Reference number is required' });
 
-    // ✅ ตรวจสอบว่า reference ซ้ำกับที่มีอยู่หรือไม่
-    const existingOrder = await InventoryOrder.findOne({ reference: reference.trim() });
-    if (existingOrder) {
-      return res.status(400).json({ error: `Reference "${reference}" already exists. Please use a different reference number.` });
-    }
+    // ✅ ตรวจสอบ reference ซ้ำ ถ้าซ้ำให้ +1 อัตโนมัติ
+    const finalReference = await ensureUniqueReference(reference.trim());
 
     const orderItems = [];
     const movementRecords = []; // เก็บข้อมูลสำหรับบันทึก movement
@@ -245,28 +279,61 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
       const variant = selectVariant(product, rawItem.variantId, rawItem.sku);
       if (!variant) return res.status(404).json({ error: 'Variant not found on the product' });
 
-      const unitPrice = rawItem.unitPrice ?? variant.price ?? 0;
       const qty = Number(rawItem.quantity) || 0;
 
-      orderItems.push({
+      const itemData = {
         productId: product._id,
         productName: product.name,
         variantId: variant._id,
         sku: variant.sku,
         quantity: qty,
         receivedQuantity: type === 'purchase' ? 0 : qty,
-        unitPrice,
-        batchRef: rawItem.batchRef,
-        expiryDate: rawItem.expiryDate,
-        notes: rawItem.notes,
-      });
+      };
+
+      // ✅ Sale order: ดึงต้นทุนจาก batch ตาม costingMethod
+      if (type === 'sale') {
+        itemData.unitPrice = rawItem.unitPrice ?? variant.price ?? 0;
+        
+        // 🔹 คิดต้นทุนจาก batch ที่จะ consume
+        let unitCostFromBatch = 0;
+        if (variant.batches && variant.batches.length > 0) {
+          const costingMethod = product.costingMethod || 'FIFO';
+          
+          // หา batch ที่จะ consume ตาม costingMethod
+          let batchToConsume;
+          if (costingMethod === 'LIFO') {
+            // LIFO: ใหม่สุด (descending receivedAt)
+            batchToConsume = variant.batches.reduce((latest, b) => 
+              (new Date(b.receivedAt || 0) > new Date(latest.receivedAt || 0)) ? b : latest
+            );
+          } else {
+            // FIFO (default): เก่าสุด (ascending receivedAt)
+            batchToConsume = variant.batches.reduce((oldest, b) => 
+              (new Date(b.receivedAt || 0) < new Date(oldest.receivedAt || 0)) ? b : oldest
+            );
+          }
+          
+          unitCostFromBatch = batchToConsume?.cost || 0;
+        }
+        
+        itemData.unitCost = unitCostFromBatch || variant.cost || 0;
+      } else {
+        // ✅ Purchase/Adjustment: เก็บแค่ unitCost
+        itemData.unitCost = rawItem.unitCost ?? rawItem.unitPrice ?? variant.cost ?? 0;
+      }
+
+      if (rawItem.batchRef) itemData.batchRef = rawItem.batchRef;
+      if (rawItem.expiryDate) itemData.expiryDate = rawItem.expiryDate;
+      if (rawItem.notes) itemData.notes = rawItem.notes;
+
+      orderItems.push(itemData);
       
       // เก็บข้อมูลสำหรับใช้ใน Phase 2
       itemsToProcess.push({
         product,
         variant,
         rawItem,
-        unitPrice,
+        unitPrice: itemData.unitPrice || itemData.unitCost,
         qty,
         previousStock: variant.stockOnHand || 0,
       });
@@ -277,7 +344,7 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
       type,
       status: req.body.status || (type === 'purchase' ? 'pending' : 'completed'),
       orderDate: orderDate ? new Date(orderDate) : new Date(),
-      reference,
+      reference: finalReference,
       channel,
       notes,
       totals,
@@ -345,8 +412,7 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
             }
           );
           
-          // ✅ ใช้ค่าจริงจาก variant.stockOnHand หลังจาก applyStockChange
-          // แทนการคำนวณเองเพราะ applyStockChange อาจมีลอจิก batch consumption ที่ซับซ้อน
+          // ✅ ใช้ unitCost field มาจาก order item (ไม่ต้องอ่านจาก variant)
           const actualNewStock = variant.stockOnHand || 0;
           const adjustQty = type === 'sale' ? -qty : actualQty;
           movementRecords.push({
@@ -359,7 +425,7 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
             reference,
             batchRef: rawItem.batchRef,
             expiryDate: rawItem.expiryDate,
-            unitCost: variant.cost || 0,
+            unitCost: rawItem.unitCost || 0,
           });
         }
       }
@@ -463,10 +529,13 @@ router.patch('/orders/:id/receive', authenticateToken, authorizeRoles('owner', '
       // ✅ สร้าง batch ใหม่เสมอ พร้อม orderId เพื่อ link กับ order นี้
       // ดังนี้ batch จะไม่ถูกจับใหม่เมื่อ receive PO อื่น
       const createdBatchRef = item.batchRef || generateBatchRef();
+      // ✅ ใช้ unitPrice จาก InventoryOrder item (ราคาต้นทุนที่สั่งมา)
+      // หรือ unitCost ถ้ามี (สำหรับ consistency กับ manual batch creation)
+      const batchCost = item.unitCost || item.unitPrice || 0;
       variant.batches.push({
         batchRef: createdBatchRef,
         supplier: item.supplier || 'Direct',
-        cost: item.unitPrice || 0, // ✅ บันทึก cost จาก InventoryOrder.unitPrice
+        cost: batchCost,
         quantity: delta,
         expiryDate: item.expiryDate,
         receivedAt: new Date(),
@@ -487,7 +556,7 @@ router.patch('/orders/:id/receive', authenticateToken, authorizeRoles('owner', '
         reference: order.reference,
         batchRef: item.batchRef,
         expiryDate: item.expiryDate,
-        unitCost: item.unitPrice || 0,
+        unitCost: batchCost,
       });
     }
 
@@ -606,10 +675,12 @@ router.patch('/orders/:id/cancel', authenticateToken, authorizeRoles('owner', 'a
         // เพราะ batches ถูก consume ไปแล้ว ต้องคืนกลับ
         const batchRefToRestore = `RETURN-${order._id}-${Date.now()}`;
         const qty = Number(item.quantity) || 0;
+        // ✅ ดึงต้นทุนจาก item.unitCost (เก็บไว้ตอนสร้างออเดอร์)
+        const costToRestore = item.unitCost || 0;
         variant.batches.push({
           batchRef: batchRefToRestore,
           supplier: `Return from ${order.reference || 'cancelled sale'}`,
-          cost: 0,
+          cost: costToRestore,
           quantity: qty,
           receivedAt: new Date(),
         });

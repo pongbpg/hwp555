@@ -34,6 +34,7 @@ const variantSchema = new Schema(
     model: String,
     attributes: { type: Map, of: String, default: {} },
     price: { type: Number, default: 0 },
+    cost: { type: Number, default: 0 },  // ✅ ต้นทุน - ใช้สำหรับ sale cancellation
     // ⚠️ stockOnHand เลิกเก็บเป็น field - คำนวณจาก batch แทน (ดูด้านล่าง virtual)
     committed: { type: Number, default: 0 },
     incoming: { type: Number, default: 0 },

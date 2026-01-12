@@ -11,6 +11,8 @@ const orderItemSchema = new Schema(
     quantity: { type: Number, required: true },
     receivedQuantity: { type: Number, default: 0 },
     unitPrice: { type: Number, default: 0 },
+    // ✅ เก็บต้นทุนของแต่ละ item เพื่อใช้ตอนยกเลิก
+    unitCost: { type: Number, default: 0 },
     batchRef: String,
     expiryDate: Date,
     notes: String,
