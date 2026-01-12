@@ -1,9 +1,20 @@
 import express from 'express';
 import StockMovement from '../models/StockMovement.js';
 import Product from '../models/Product.js';
+import InventoryOrder from '../models/InventoryOrder.js';
 import { authenticateToken, authorizeRoles } from '../middleware/auth.js';
 
 const router = express.Router();
+
+// ============= Helper Functions =============
+
+/**
+ * Get IDs of cancelled orders
+ */
+const getCancelledOrderIds = async () => {
+  const cancelledOrders = await InventoryOrder.find({ status: 'cancelled' }, { _id: 1 }).lean();
+  return new Set(cancelledOrders.map(o => String(o._id)));
+};
 
 // ============= ดูประวัติการเคลื่อนไหว =============
 
@@ -26,6 +37,19 @@ router.get('/', authenticateToken, async (req, res) => {
         end.setDate(end.getDate() + 1);
         filters.createdAt.$lt = end;
       }
+    }
+
+    // ✅ ดึง ID ของ order ที่ยกเลิก
+    const cancelledOrderIds = await getCancelledOrderIds();
+
+    // ✅ เพิ่มเงื่อนไข: ข้าม movements ที่เกี่ยวข้องกับ cancelled orders
+    // movements ที่ไม่มี orderId ยังคงแสดง (เช่น manual adjustments)
+    if (cancelledOrderIds.size > 0) {
+      filters.$or = [
+        { orderId: { $exists: false } },                    // ไม่มี orderId
+        { orderId: null },                                  // orderId เป็น null
+        { orderId: { $nin: Array.from(cancelledOrderIds) } } // orderId ไม่อยู่ในรายการ cancelled
+      ];
     }
 
     const skip = (Number(page) - 1) * Number(limit);
@@ -53,7 +77,22 @@ router.get('/', authenticateToken, async (req, res) => {
 router.get('/product/:productId', authenticateToken, async (req, res) => {
   try {
     const { limit = 50 } = req.query;
-    const movements = await StockMovement.find({ productId: req.params.productId })
+    
+    // ✅ ดึง ID ของ order ที่ยกเลิก
+    const cancelledOrderIds = await getCancelledOrderIds();
+    
+    const filter = { productId: req.params.productId };
+    
+    // ✅ เพิ่มเงื่อนไข: ข้าม movements ที่เกี่ยวข้องกับ cancelled orders
+    if (cancelledOrderIds.size > 0) {
+      filter.$or = [
+        { orderId: { $exists: false } },
+        { orderId: null },
+        { orderId: { $nin: Array.from(cancelledOrderIds) } }
+      ];
+    }
+    
+    const movements = await StockMovement.find(filter)
       .sort({ createdAt: -1 })
       .limit(Number(limit))
       .lean();
@@ -77,9 +116,22 @@ router.get('/summary', authenticateToken, async (req, res) => {
       dateFilter = { createdAt: { $gte: fromDate } };
     }
 
+    // ✅ ดึง ID ของ order ที่ยกเลิก
+    const cancelledOrderIds = await getCancelledOrderIds();
+    
+    // ✅ เพิ่มเงื่อนไข: ข้าม movements ที่เกี่ยวข้องกับ cancelled orders
+    const matchFilter = { ...dateFilter };
+    if (cancelledOrderIds.size > 0) {
+      matchFilter.$or = [
+        { orderId: { $exists: false } },
+        { orderId: null },
+        { orderId: { $nin: Array.from(cancelledOrderIds) } }
+      ];
+    }
+
     // สรุปตามประเภท
     const byType = await StockMovement.aggregate([
-      { $match: dateFilter },
+      { $match: matchFilter },
       {
         $group: {
           _id: '$movementType',
@@ -92,7 +144,7 @@ router.get('/summary', authenticateToken, async (req, res) => {
 
     // สรุปรายวัน
     const byDay = await StockMovement.aggregate([
-      { $match: dateFilter },
+      { $match: matchFilter },
       {
         $group: {
           _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
@@ -111,9 +163,9 @@ router.get('/summary', authenticateToken, async (req, res) => {
     // นับรายการวันนี้
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const todayCount = await StockMovement.countDocuments({
-      createdAt: { $gte: today },
-    });
+    const todayFilter = { createdAt: { $gte: today }, ...matchFilter };
+    
+    const todayCount = await StockMovement.countDocuments(todayFilter);
 
     res.json({
       byType,

@@ -304,6 +304,10 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
           // สำหรับใบสั่งซื้อ: เพิ่ม incoming ไว้ก่อน รอรับของจึงบวกสต็อกจริง
           variant.incoming = (variant.incoming || 0) + qty;
         } else {
+          // ✅ ดึงค่า previousStock ก่อน applyStockChange เปลี่ยนแปลง variant
+          // (มีสามารถ applyStockChange จะเปลี่ยน variant.batches ซึ่งส่งผลให้ stockOnHand เปลี่ยน)
+          const stockBeforeChange = variant.stockOnHand || 0;
+          
           // ✅ ส่ง order metadata (orderId, orderReference) ให้ applyStockChange
           applyStockChange(
             variant,
@@ -327,7 +331,7 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
             product,
             variant,
             quantity: adjustQty,
-            previousStock,
+            previousStock: stockBeforeChange,
             newStock: actualNewStock,
             reference,
             batchRef: rawItem.batchRef,
