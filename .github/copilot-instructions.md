@@ -2,11 +2,12 @@
 
 ## Project Overview
 
-**HWP555** is a monorepo containing two separate but integrated management systems:
+**HWP555** is a monorepo containing three integrated management systems:
 - **HR System**: Employee management, attendance, KPI scoring, salary tracking (ports 5000/3000)
 - **Stock System**: Inventory management, product tracking, stock alerts (ports 5001/3001)
+- **Sale System**: Facebook Messenger integration, order management, shipping (ports 3002/5002)
 
-Both systems share the same MongoDB employee collection and JWT authentication, allowing cross-system token reuse.
+All systems share the same MongoDB employee collection and JWT authentication. Sale system uses stock_system API for inventory checks.
 
 **Key Files**: Start with [START_HERE.md](../START_HERE.md), [SKU_NAMING_FORMULA.md](../SKU_NAMING_FORMULA.md), and [STOCK_ALERT_FIX.md](../STOCK_ALERT_FIX.md) for critical patterns.
 
@@ -18,22 +19,27 @@ root package.json      # Orchestrates all npm scripts via concurrently
 ├── hr_system/
 │   ├── backend/       # Express.js + Mongoose (5000)
 │   └── frontend/      # React + Vite (3000)
-└── stock_system/
-    ├── backend/       # Express.js + Mongoose (5001)
-    └── frontend/      # React + Vite (3001)
+├── stock_system/
+│   ├── backend/       # Express.js + Mongoose (5001)
+│   └── frontend/      # React + Vite (3001)
+└── sale_system/
+    ├── backend/       # Express.js + Mongoose, Facebook Webhook (5002)
+    └── frontend/      # React + Vite (3002)
 ```
 
 **Key Script Pattern**: Use workspace-level scripts for development:
-- `npm run dev` - all systems
+- `npm run dev` - all systems (6 services)
 - `npm run dev:backend` / `npm run dev:frontend` - selective startup
-- `npm run hr:backend` / `npm run stock:backend` - isolated systems
+- `npm run {hr|stock|sale}:{backend|frontend}` - isolated systems
+- `npm run install:all` - install deps for all systems
 
 ### Authentication Flow
-- Both backends share same `JWT_SECRET` and `MONGODB_URI`
-- HR backend creates users (Employee model, shared collection)
-- Stock frontend/backend uses same Employee collection for auth
+- All backends share same `JWT_SECRET` and `MONGODB_URI`
+- HR backend creates users (Employee model, shared collection across all systems)
+- Stock & Sale frontends/backends use same Employee collection for auth
 - Token stored in localStorage, passed as `Authorization: Bearer <token>`
 - Middleware: `authenticateToken` validates JWT, loads Employee; `authorizeRoles(...roles)` gates endpoints
+- **Token Reuse**: Same JWT token works across all systems (HR, Stock, Sale)
 
 ### Stock System Complexity
 The stock system has sophisticated inventory modeling with multiple layers:
@@ -85,19 +91,50 @@ npm run dev                  # Start all systems with concurrently
 ### Backend Development
 - **HR Backend**: `cd hr_system/backend && npm run dev`
 - **Stock Backend**: `cd stock_system/backend && npm run dev`
-- Both use nodemon for auto-reload on file changes
+- **Sale Backend**: `cd sale_system/backend && npm run dev`
+- All use nodemon for auto-reload on file changes
 - Environment: copy `.env.example` to `.env`, set `MONGODB_URI` and `JWT_SECRET`
 
 ### Frontend Development
 - **HR Frontend**: `cd hr_system/frontend && npm run dev` (Vite, port 3000)
-- **Stock Frontend**: `cd stock_system/frontend && npm run dev` (Vite, port 5173)
-- Environment: set `VITE_API_BASE_URL` (default http://localhost:5001/api for stock, 5000 for HR)
+- **Stock Frontend**: `cd stock_system/frontend && npm run dev` (Vite, port 3001)
+- **Sale Frontend**: `cd sale_system/frontend && npm run dev` (Vite, port 3002)
+- Environment: set `VITE_API_BASE_URL` (default http://localhost:5001/api for stock, http://localhost:5000 for HR, http://localhost:5002 for sale)
 - Note: Frontend uses axios client initialized with baseURL; token set via `setAuthToken()` interceptor
 
 ### Building
 - `npm run build` - builds both frontends
 - `npm run build:hr` / `npm run build:stock` - selective builds
 - Stock frontend uses Tailwind CSS + PostCSS for styling
+
+## Sale System Architecture
+
+**Purpose**: Manage sales orders with Facebook Messenger integration and real-time stock synchronization.
+
+**Key Features**:
+- Facebook Webhook integration for customer messages
+- Order management (pending → confirmed → packed → shipped → delivered)
+- Real-time stock checking and deduction via stock_system HTTP API
+- Customer & payment tracking
+- Shipping slip & invoice generation
+
+**Stock Integration Pattern**:
+- Sale backend calls `http://localhost:5001/api/...` endpoints to check/deduct stock
+- Uses same JWT token (obtained from HR backend) for stock system auth
+- Before creating sale order: verify stock in stock_system
+- After creating sale order: call POST /orders (type: 'sale') in stock_system to deduct inventory
+- Critical: Handle stock API timeouts gracefully - queue orders if stock service unavailable
+
+**Models** (MongoDB):
+- `Customer`: name, phone, address, email, purchaseHistory
+- `Order`: customerId, items[], totalAmount, paymentMethod, status, shippingAddress
+- `Message`: customerId, facebookUserId, messageText, timestamp (webhook data)
+
+**Routes**:
+- `POST /facebook/webhook` - Facebook webhook receiver (verify token, handle messages)
+- `POST /orders` - Create sales order (integrates with stock_system)
+- `GET /orders/:id` - Fetch order details (populates customer data)
+- `PATCH /orders/:id/status` - Update order status (packed/shipped/delivered)
 
 ## Code Patterns & Conventions
 
@@ -214,21 +251,23 @@ PATCH /orders/:id/cancel
 ## Cross-System Communication
 
 - **No direct API calls**: Frontend systems communicate only with their own backend
-- **Shared Database**: Both backends read/write same Employee collection for auth
-- **Token Portability**: Same JWT issued by both backends allows switching systems without re-login
-- **Environment Separation**: Backends listen on different ports (5000 vs 5001) and configure baseURL distinctly in frontend .env
+- **Shared Database**: All backends read/write same Employee collection for auth
+- **Sale→Stock Integration**: Sale backend calls stock_system API to check/deduct inventory via HTTP requests
+- **Token Portability**: Same JWT issued by any backend works for all systems (allows seamless switching)
+- **Environment Separation**: Backends listen on different ports (5000/5001/5002) and configure baseURL distinctly in frontend .env
 
 ## Common Debugging Points
 
 1. **Auth not working**: Check JWT_SECRET consistency between backends; verify token in localStorage after login redirect
 2. **Reorder alerts wrong**: Review STOCK_ALERT_FIX.md; ensure all calculations use 30-day window + `product.reorderBufferDays ?? 7`; enable DEBUG_STOCK_ALERTS=true env var for detailed logs
-3. **Port conflicts**: Ensure hr_system/backend (5000), stock_system/backend (5001), hr_system/frontend (3000), stock_system/frontend (5173) are available
+3. **Port conflicts**: Ensure hr_system/backend (5000), stock_system/backend (5001), sale_system/backend (5002) and frontends (3000/3001/3002) are available
 4. **Variant not found**: Verify `selectVariant()` receives correct variantId/SKU; check if product.variants is populated
 5. **Batch consumption off**: Trace `consumeBatches()` sorting logic (costingMethod determines FIFO/LIFO/WAC order) and quantity math in inventory.js
 6. **Cancelled batches showing in alerts**: Ensure `getCancelledBatchRefs()` and `isBatchFromCancelledOrder()` are used in nearExpiry filtering (Insights/Alerts APIs)
 7. **Stock movement missing**: Verify `recordMovement()` is called after every applyStockChange() or batch operation
 8. **Purchase order not receiving**: Check two-phase flow - orderDate set? receivedQuantity < quantity? Batches created when receivedQuantity > 0?
 9. **Insights date range wrong**: Dashboard hardcodes 30 days; custom ranges must use dateFrom/dateTo params; salesPeriodDays calculated from both or defaults to 30
+10. **Sale system stock deduction failing**: Verify stock_system backend is running; check sale backend can reach http://localhost:5001; ensure same JWT_SECRET used; verify order items include productId, variantId, quantity
 
 ## Essential Patterns & Workflow
 

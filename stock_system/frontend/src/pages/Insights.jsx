@@ -417,6 +417,7 @@ export default function Insights() {
     sku: fm.sku,
     quantitySold: fm.quantitySold,
     dailySalesRate: fm.dailySalesRate,
+    stockOnHand: (fm.currentStock || 0) - (fm.incoming || 0),
     currentStock: fm.currentStock,
     incoming: fm.incoming,
     daysRemaining: fm.daysRemaining,
@@ -900,8 +901,9 @@ export default function Insights() {
             { key: 'brandName', label: 'แบรนด์' },
             { key: 'quantitySold', label: 'ขายแล้ว', format: 'number', align: 'right' },
             { key: 'dailySalesRate', label: '/วัน', format: 'number', align: 'right' },
-            { key: 'currentStock', label: 'มี', format: 'number', align: 'right' },
-            { key: 'incoming', label: 'ค้าง', format: 'number', align: 'right' },
+            { key: 'stockOnHand', label: 'มีอยู่', format: 'number', align: 'right' },
+            { key: 'incoming', label: 'ค้างรับ', format: 'number', align: 'right' },
+            { key: 'currentStock', label: 'รวม', format: 'number', align: 'right' },
             { key: 'daysRemaining', label: 'เหลือใช้', format: 'days', align: 'right', highlight: true, highlightThreshold: 14 },
           ]}
         />
