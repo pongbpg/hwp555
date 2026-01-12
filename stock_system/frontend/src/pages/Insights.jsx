@@ -447,6 +447,7 @@ export default function Insights() {
 
   const reorderData = (data?.reorderSuggestions || []).map(item => ({
     ...item,
+    stockOnHand: (item.currentStock || 0) - (item.incoming || 0),
     urgency: item.daysUntilStockOut <= 7 ? 'ด่วนมาก' : item.daysUntilStockOut <= 14 ? 'ด่วน' : 'ปกติ',
     urgencyColor: item.daysUntilStockOut <= 7 ? 'bg-red-100 text-red-700' : item.daysUntilStockOut <= 14 ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700',
   }))
@@ -731,29 +732,14 @@ export default function Insights() {
         )}
       </div>
 
-      {/* Low Stock & Near Expiry Alert Cards + Metrics Table */}
+      {/* Near Expiry Alert + Metrics Table */}
 
       {loading ? (
         <LoadingSection height="h-96" />
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Left: Alert Cards */}
+          {/* Left: Near Expiry Alert Card */}
           <div className="space-y-6">
-            {lowStockData.length > 0 && (
-              <AlertCard
-                severity="critical"
-                title="สต็อกต่ำ"
-                items={lowStockData}
-                columns={[
-                  { label: 'สินค้า', key: 'productName' },
-                  { label: 'SKU', key: 'sku' },
-                  { label: 'มี', key: 'stockOnHand', align: 'right', format: 'number' },
-                  { label: 'ค้าง', key: 'incoming', align: 'right', format: 'number' },
-                  { label: 'รวม', key: 'availableStock', align: 'right', format: 'number' },
-                  { label: 'เหลือใช้ (วัน)', key: 'daysRemaining', align: 'right' },
-                ]}
-              />
-            )}
             {nearExpiryData.length > 0 && (
               <AlertCard
                 severity="critical"
