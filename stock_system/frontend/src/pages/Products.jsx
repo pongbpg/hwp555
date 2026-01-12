@@ -48,6 +48,7 @@ export default function Products() {
   const [defaultPrice, setDefaultPrice] = useState(0);
   const [costingMethod, setCostingMethod] = useState('FIFO');
   const [isFormExpanded, setIsFormExpanded] = useState(false);
+  const [expandedProductId, setExpandedProductId] = useState(null);
 
   const loadProducts = async () => {
     setLoading(true);
@@ -1227,60 +1228,140 @@ export default function Products() {
                 <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">Name</th>
                 <th className="text-center py-2 px-3 text-sm font-semibold text-gray-600">Status</th>
                 <th className="text-center py-2 px-3 text-sm font-semibold text-gray-600">Variants</th>
-                <th className="text-left py-2 px-3 text-sm font-semibold text-gray-600">Details</th>
                 <th className="text-center py-2 px-3 text-sm font-semibold text-gray-600">Actions</th>
               </tr>
             </thead>
             <tbody>
               {products.map((p) => (
-                <tr key={p._id} className={`border-b border-gray-100 hover:bg-gray-50 ${p.status === 'archived' ? 'opacity-60' : ''}`}>
-                  <td className="py-2 px-3 text-sm text-gray-600">{getBrandName(p.brand)}</td>
-                  <td className="py-2 px-3 text-sm text-gray-600">{getCategoryName(p.category)}</td>
-                  <td className="py-2 px-3 text-sm font-medium">{p.name}</td>
-                  <td className="py-2 px-3 text-sm text-center">
-                    <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${
-                      p.status === 'active' 
-                        ? 'bg-green-100 text-green-700' 
-                        : 'bg-gray-100 text-gray-700'
-                    }`}>
-                      {p.status === 'active' ? '✅ ใช้งาน' : '📦 หยุดใช้'}
-                    </span>
-                  </td>
-                  <td className="py-2 px-3 text-sm text-center">{p.variants?.length || 0}</td>
-                  <td className="py-2 px-3">
-                    {p.variants?.map((v, idx) => (
-                      <div
-                        key={v._id || idx}
-                        className={`text-xs mb-1 pb-1 ${idx < p.variants.length - 1 ? 'border-b border-gray-100' : ''}`}
+                <>
+                  <tr key={p._id} className={`border-b border-gray-100 hover:bg-gray-50 ${p.status === 'archived' ? 'opacity-60' : ''}`}>
+                    <td className="py-2 px-3 text-sm text-gray-600">{getBrandName(p.brand)}</td>
+                    <td className="py-2 px-3 text-sm text-gray-600">{getCategoryName(p.category)}</td>
+                    <td className="py-2 px-3 text-sm font-medium">{p.name}</td>
+                    <td className="py-2 px-3 text-sm text-center">
+                      <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${
+                        p.status === 'active' 
+                          ? 'bg-green-100 text-green-700' 
+                          : 'bg-gray-100 text-gray-700'
+                      }`}>
+                        {p.status === 'active' ? '✅ ใช้งาน' : '📦 หยุดใช้'}
+                      </span>
+                    </td>
+                    <td className="py-2 px-3 text-sm text-center">{p.variants?.length || 0}</td>
+                    <td className="py-2 px-3 text-center space-x-2">
+                      <button
+                        onClick={() => setExpandedProductId(expandedProductId === p._id ? null : p._id)}
+                        className={`px-3 py-1 text-white text-sm rounded transition-colors ${
+                          expandedProductId === p._id
+                            ? 'bg-orange-600 hover:bg-orange-700'
+                            : 'bg-gray-600 hover:bg-gray-700'
+                        }`}
                       >
-                        <span className="font-medium">SKU:</span>{' '}
-                        <span className="font-mono text-gray-600">{v.sku}</span>
-                        {v.attributes?.color && ` | สี: ${v.attributes.color}`}
-                        {v.attributes?.size && ` | ไซส์: ${v.attributes.size}`}
-                        {v.attributes?.material && ` | วัสดุ: ${v.attributes.material}`}
-                        <br />
-                        <span className="text-gray-500">
-                          ราคา: {v.price} บาท | คงคลัง: {v.stockOnHand ?? 0} ชิ้น
-                        </span>
-                      </div>
-                    ))}
-                    {(p.reorderBufferDays || p.minOrderQty || !p.enableStockAlerts) && (
-                      <div className="text-xs mt-1 pt-1 border-t border-gray-100">
-                        {p.reorderBufferDays && <div className="text-blue-600">📌 Buffer: {p.reorderBufferDays} วัน</div>}
-                        {p.minOrderQty && <div className="text-blue-600">📦 MOQ: {p.minOrderQty} ชิ้น</div>}
-                        {!p.enableStockAlerts && <div className="text-orange-600">🔇 ปิดแจ้งเตือน</div>}
-                      </div>
-                    )}
-                  </td>
-                  <td className="py-2 px-3 text-center">
-                    <button
-                      onClick={() => handleEdit(p)}
-                      className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded"
-                    >
-                      แก้ไข
-                    </button>
-                  </td>
-                </tr>
+                        {expandedProductId === p._id ? '▼ ยุบ' : '▶ ดูรายละเอียด'}
+                      </button>
+                      <button
+                        onClick={() => handleEdit(p)}
+                        className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded"
+                      >
+                        แก้ไข
+                      </button>
+                    </td>
+                  </tr>
+                  
+                  {/* Expandable Details Row */}
+                  {expandedProductId === p._id && (
+                    <tr className="border-b border-gray-200 bg-gray-50">
+                      <td colSpan={6} className="py-4 px-3">
+                        <div className="space-y-3">
+                          {/* Variants Section */}
+                          <div>
+                            <h4 className="font-semibold text-gray-700 mb-2">📦 รายละเอียด Variants</h4>
+                            <div className="bg-white border border-gray-200 rounded overflow-hidden">
+                              <table className="w-full text-sm">
+                                <thead>
+                                  <tr className="bg-gray-100 border-b border-gray-200">
+                                    <th className="text-left px-3 py-2 font-semibold text-gray-700">SKU</th>
+                                    <th className="text-left px-3 py-2 font-semibold text-gray-700">Variant</th>
+                                    <th className="text-right px-3 py-2 font-semibold text-gray-700">ราคา</th>
+                                    <th className="text-right px-3 py-2 font-semibold text-gray-700">คงคลัง</th>
+                                    <th className="text-center px-3 py-2 font-semibold text-gray-700">Reorder</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {p.variants?.map((v, idx) => (
+                                    <tr key={v._id || idx} className={`border-b border-gray-100 ${v.stockOnHand <= 0 ? 'bg-red-50' : ''}`}>
+                                      <td className="px-3 py-2">
+                                        <span className="font-mono text-blue-700 font-semibold">{v.sku}</span>
+                                      </td>
+                                      <td className="px-3 py-2">
+                                        <div className="text-xs text-gray-600">
+                                          {v.model && <span>{v.model}</span>}
+                                          {v.attributes?.color && <span> | {v.attributes.color}</span>}
+                                          {v.attributes?.size && <span> | {v.attributes.size}</span>}
+                                          {v.attributes?.material && <span> | {v.attributes.material}</span>}
+                                        </div>
+                                        {v.batches && Array.isArray(v.batches) && v.batches.length > 0 && (
+                                          <div className="text-xs text-blue-600 mt-1">
+                                            📦 {v.batches.length} batch{v.batches.length > 1 ? 'es' : ''}
+                                          </div>
+                                        )}
+                                      </td>
+                                      <td className="px-3 py-2 text-right">{v.price} ฿</td>
+                                      <td className={`px-3 py-2 text-right ${v.stockOnHand <= 0 ? 'text-red-600 font-semibold' : ''}`}>
+                                        {v.stockOnHand ?? 0}
+                                      </td>
+                                      <td className="px-3 py-2 text-center text-xs text-gray-600">
+                                        {v.reorderPoint ?? '-'}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+
+                          {/* Product Settings Section */}
+                          {(p.reorderBufferDays || p.minOrderQty || p.leadTimeDays || !p.enableStockAlerts || p.costingMethod) && (
+                            <div>
+                              <h4 className="font-semibold text-gray-700 mb-2">⚙️ การตั้งค่า</h4>
+                              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 bg-white p-3 rounded border border-gray-200 text-sm">
+                                {p.leadTimeDays && (
+                                  <div>
+                                    <span className="font-medium text-gray-600">Lead Time:</span>
+                                    <div className="text-blue-700">{p.leadTimeDays} วัน</div>
+                                  </div>
+                                )}
+                                {p.reorderBufferDays && (
+                                  <div>
+                                    <span className="font-medium text-gray-600">Buffer Days:</span>
+                                    <div className="text-blue-700">{p.reorderBufferDays} วัน</div>
+                                  </div>
+                                )}
+                                {p.minOrderQty && (
+                                  <div>
+                                    <span className="font-medium text-gray-600">MOQ:</span>
+                                    <div className="text-blue-700">{p.minOrderQty} ชิ้น</div>
+                                  </div>
+                                )}
+                                {p.costingMethod && (
+                                  <div>
+                                    <span className="font-medium text-gray-600">Costing:</span>
+                                    <div className="text-blue-700">{p.costingMethod}</div>
+                                  </div>
+                                )}
+                                {p.enableStockAlerts === false && (
+                                  <div>
+                                    <span className="font-medium text-orange-600">🔇 ปิดแจ้งเตือน</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </>
               ))}
               {products.length === 0 && !loading && (
                 <tr>
