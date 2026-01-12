@@ -173,8 +173,9 @@ router.post('/', authenticateToken, authorizeRoles('owner', 'admin', 'hr'), asyn
 
     const newStock = previousStock + adjustQty;
 
-    // Update variant stock
-    variant.stockOnHand = newStock;
+    // Update variant stock via batches
+    // stockOnHand เป็น virtual field - จะคำนวณจาก batches อัตโนมัติ
+    // ตรงนี้ควรจัดการผ่าน InventoryOrder API แทน เพื่อให้ batch tracking ถูกต้อง
     await product.save();
 
     // Create movement record

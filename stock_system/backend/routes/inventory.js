@@ -171,8 +171,8 @@ const applyStockChange = (variant, product, item, type, metadata = {}) => {
         }
       }
       
-      // ✅ อัพเดต stockOnHand โดยตรง เพื่อให้ virtual field ถูกต้อง
-      variant.stockOnHand = currentStock - qty;
+      // ✅ stockOnHand เป็น virtual field - คำนวณจาก batches อัตโนมัติ
+      // ไม่ต้องเขียนค่า stockOnHand เอง
     }
     // ✅ ถ้าไม่มี batches และเปิด allowBackorder ให้อนุญาต (สต็อกติดลบ)
     return;
@@ -193,16 +193,14 @@ const applyStockChange = (variant, product, item, type, metadata = {}) => {
         expiryDate: item.expiryDate,
         receivedAt: new Date(),
       });
-      // ✅ อัพเดต stockOnHand โดยตรง
-      variant.stockOnHand = currentStock + qty;
+      // ✅ stockOnHand เป็น virtual field - คำนวณจาก batches อัตโนมัติ
     } else if (qty < 0) {
       // ลดสต็อก - consume จาก batch (พร้อมส่งข้อมูล metadata)
       const remaining = consumeBatches(variant, product, Math.abs(qty), metadata);
       if (remaining > 0 && !variant.allowBackorder) {
         throw new Error(`Insufficient stock for adjustment on SKU ${variant.sku}: need ${Math.abs(qty)}, available ${Math.abs(qty) - remaining}`);
       }
-      // ✅ อัพเดต stockOnHand โดยตรง
-      variant.stockOnHand = currentStock - Math.abs(qty);
+      // ✅ stockOnHand เป็น virtual field - คำนวณจาก batches อัตโนมัติ
     }
     return;
   }
@@ -318,11 +316,10 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
             }
           );
           
-          // ✅ คำนวณ newStock จากการเปลี่ยนแปลงที่ applyStockChange ทำ
-          // - type 'sale': previousStock - qty
-          // - type 'adjustment': previousStock + qty (qty อาจ positive/negative)
+          // ✅ ใช้ค่าจริงจาก variant.stockOnHand หลังจาก applyStockChange
+          // แทนการคำนวณเองเพราะ applyStockChange อาจมีลอจิก batch consumption ที่ซับซ้อน
+          const actualNewStock = variant.stockOnHand || 0;
           const adjustQty = type === 'sale' ? -qty : qty;
-          const calculatedNewStock = previousStock + adjustQty;
           
           // เก็บข้อมูลสำหรับ movement (ยกเว้น purchase เพราะยังไม่รับของ)
           movementRecords.push({
@@ -331,7 +328,7 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
             variant,
             quantity: adjustQty,
             previousStock,
-            newStock: calculatedNewStock,
+            newStock: actualNewStock,
             reference,
             batchRef: rawItem.batchRef,
             expiryDate: rawItem.expiryDate,
