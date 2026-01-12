@@ -746,7 +746,9 @@ export default function Insights() {
                 columns={[
                   { label: 'สินค้า', key: 'productName' },
                   { label: 'SKU', key: 'sku' },
-                  { label: 'คงเหลือ', key: 'stockOnHand', align: 'right', format: 'number' },
+                  { label: 'มี', key: 'stockOnHand', align: 'right', format: 'number' },
+                  { label: 'ค้าง', key: 'incoming', align: 'right', format: 'number' },
+                  { label: 'รวม', key: 'availableStock', align: 'right', format: 'number' },
                   { label: 'เหลือใช้ (วัน)', key: 'daysRemaining', align: 'right' },
                 ]}
               />
@@ -843,7 +845,9 @@ export default function Insights() {
                     <th className="py-3 px-3 text-left font-semibold text-gray-700">ความเร่งด่วน</th>
                     <th className="py-3 px-3 text-left font-semibold text-gray-700">สินค้า</th>
                     <th className="py-3 px-3 text-left font-semibold text-gray-700">SKU</th>
-                    <th className="py-3 px-3 text-right font-semibold text-gray-700">คงเหลือ</th>
+                    <th className="py-3 px-3 text-right font-semibold text-gray-700">มี</th>
+                    <th className="py-3 px-3 text-right font-semibold text-gray-700">ค้าง</th>
+                    <th className="py-3 px-3 text-right font-semibold text-gray-700">รวม</th>
                     <th className="py-3 px-3 text-right font-semibold text-gray-700">ขาย/วัน</th>
                     <th className="py-3 px-3 text-right font-semibold text-gray-700">เหลือใช้</th>
                     <th className="py-3 px-3 text-right font-semibold text-gray-700">Lead Time</th>
@@ -861,7 +865,9 @@ export default function Insights() {
                       </td>
                       <td className="py-3 px-3 text-gray-700 font-medium">{item.productName}</td>
                       <td className="py-3 px-3 font-mono text-gray-500 text-xs">{item.sku}</td>
-                      <td className="py-3 px-3 text-right text-gray-700 font-medium">{fmtNumber.format(item.currentStock)}</td>
+                      <td className="py-3 px-3 text-right text-gray-700">{fmtNumber.format(item.stockOnHand || 0)}</td>
+                      <td className="py-3 px-3 text-right text-gray-700">{fmtNumber.format(item.incoming || 0)}</td>
+                      <td className="py-3 px-3 text-right text-gray-700 font-medium" style={{color: (item.currentStock || item.availableStock) >= item.suggestedReorderPoint ? '#10B981' : '#EF4444'}}>{fmtNumber.format(item.currentStock || item.availableStock || 0)}</td>
                       <td className="py-3 px-3 text-right text-gray-700">{item.dailySalesRate.toFixed(1)}</td>
                       <td className={`py-3 px-3 text-right font-semibold ${item.daysUntilStockOut <= 7 ? 'text-red-600' : item.daysUntilStockOut <= 14 ? 'text-amber-600' : 'text-gray-600'}`}>
                         {Math.round(item.daysUntilStockOut)} วัน
@@ -894,7 +900,8 @@ export default function Insights() {
             { key: 'brandName', label: 'แบรนด์' },
             { key: 'quantitySold', label: 'ขายแล้ว', format: 'number', align: 'right' },
             { key: 'dailySalesRate', label: '/วัน', format: 'number', align: 'right' },
-            { key: 'currentStock', label: 'คงเหลือ', format: 'number', align: 'right' },
+            { key: 'currentStock', label: 'มี', format: 'number', align: 'right' },
+            { key: 'incoming', label: 'ค้าง', format: 'number', align: 'right' },
             { key: 'daysRemaining', label: 'เหลือใช้', format: 'days', align: 'right', highlight: true, highlightThreshold: 14 },
           ]}
         />

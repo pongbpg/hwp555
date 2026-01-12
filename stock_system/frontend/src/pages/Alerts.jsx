@@ -225,11 +225,17 @@ export default function Alerts() {
                                   {alert.type === 'near-expiry' && <span>⏰</span>}
                                 </div>
                                 <div className="flex-1">
-                                  {alert.type === 'out-of-stock' && <span className="text-red-600">สต็อกหมด</span>}
+                                  {alert.type === 'out-of-stock' && (
+                                    <span className="text-red-600">
+                                      สต็อกหมด (มี: <strong>{fmtNumber.format(alert.stockOnHand || 0)}</strong> + ค้าง: <strong>{fmtNumber.format(alert.incoming || 0)}</strong>)
+                                    </span>
+                                  )}
                                   {alert.type === 'low-stock' && (
                                     <span>
-                                      สต็อก: <strong>{fmtNumber.format(alert.stockOnHand)}</strong> / จุดสั่งซื้อ:{' '}
-                                      <strong>{fmtNumber.format(alert.reorderPoint)}</strong>
+                                      มี: <strong>{fmtNumber.format(alert.stockOnHand || 0)}</strong> | 
+                                      ค้าง: <strong>{fmtNumber.format(alert.incoming || 0)}</strong> | 
+                                      รวม: <strong className={alert.availableStock >= alert.reorderPoint ? 'text-green-600' : 'text-red-600'}>{fmtNumber.format(alert.availableStock || 0)}</strong> / 
+                                      จุดสั่งซื้อ: <strong>{fmtNumber.format(alert.reorderPoint)}</strong>
                                     </span>
                                   )}
                                   {alert.type === 'near-expiry' && (

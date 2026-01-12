@@ -796,20 +796,50 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
 
     // Process each product group for MOQ optimization
     for (const [productId, { product, variants }] of productVariantMap) {
+      // ⛔ ข้ามสินค้าที่ปิดการแจ้งเตือน (เหมือน Alerts endpoint)
+      if (!product.enableStockAlerts) continue;
+      
       const variantSuggestions = []; // Temporary holder for this product's variants
 
-      variants.forEach((variant) => {
+      for (const variant of variants) {
+        // ⛔ ข้าม variants ที่ inactive
+        if (variant.status !== 'active') continue;
+        
         const key = `${product._id}-${variant._id}`;
-        const quantitySold = salesMap.get(key) || 0;
-        const dailySalesRate = quantitySold / salesPeriodDays;
-        const incoming = variant.incoming || 0;
-        const currentStock = (variant.stockOnHand || 0) + incoming;
         const leadTimeDays = product.leadTimeDays || 7;
         const bufferDays = product.reorderBufferDays ?? 7;
+        
+        // ✅ ใช้ leadTimeDays + bufferDays สำหรับ sales period (เหมือน Alerts endpoint)
+        const alertSalesPeriodDays = leadTimeDays + bufferDays;
+        const alertSalesSince = new Date(now.getTime() - alertSalesPeriodDays * 24 * 60 * 60 * 1000);
+        
+        // ดึงยอดขายตามช่วงเวลา leadTime + bufferDays (เหมือน Alerts)
+        const alertSalesData = await InventoryOrder.aggregate([
+          { $match: { type: 'sale', orderDate: { $gte: alertSalesSince }, status: { $ne: 'cancelled' } } },
+          { $unwind: '$items' },
+          {
+            $match: {
+              'items.variantId': variant._id,
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              totalSold: { $sum: '$items.quantity' },
+            },
+          },
+        ]);
+        
+        const quantitySold = alertSalesData[0]?.totalSold || 0;
+        const dailySalesRate = quantitySold / alertSalesPeriodDays;
+        
+        const incoming = Number(variant.incoming) || 0;
+        // ✅ ใช้ stockOnHand + incoming (รวมสินค้าสั่งไปแล้ว) 
+        const availableStock = (variant.stockOnHand || 0) + incoming;
         const minimumDays = leadTimeDays + bufferDays;
 
         // คำนวณว่าสต็อกปัจจุบันพอใช้กี่วัน
-        const daysUntilStockOut = dailySalesRate > 0 ? currentStock / dailySalesRate : 999999;
+        const daysUntilStockOut = dailySalesRate > 0 ? availableStock / dailySalesRate : 999999;
 
         // บันทึก fast movers รายละเอียด
         if (dailySalesRate > 0) {
@@ -824,7 +854,7 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
             sku: variant.sku,
             quantitySold,
             dailySalesRate: Math.round(dailySalesRate * 100) / 100,
-            currentStock,
+            currentStock: availableStock,
             incoming,
             daysRemaining: Math.round(daysUntilStockOut * 10) / 10,
           });
@@ -840,10 +870,10 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
         const cat = groupByCategory.get(catKey) || { categoryId: catId, categoryName: catLabel, totalSold: 0, totalStock: 0, dailySalesRate: 0 };
         const br = groupByBrand.get(brandKey) || { brandId: brandId, brandName: brandLabel, totalSold: 0, totalStock: 0, dailySalesRate: 0 };
         cat.totalSold += quantitySold;
-        cat.totalStock += currentStock;
+        cat.totalStock += availableStock; // ✅ ใช้ availableStock (รวม incoming)
         cat.dailySalesRate += dailySalesRate;
         br.totalSold += quantitySold;
-        br.totalStock += currentStock;
+        br.totalStock += availableStock; // ✅ ใช้ availableStock (รวม incoming)
         br.dailySalesRate += dailySalesRate;
         groupByCategory.set(catKey, cat);
         groupByBrand.set(brandKey, br);
@@ -854,15 +884,15 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
         const suggestedOrderQty = reorderMetrics.suggestedReorderQty;
 
         // ✅ รวมเงื่อนไข: 
-        // 1. สต็อกไม่พอช่วง lead time + buffer
-        // 2. สินค้าหมดสต็อก (currentStock <= 0) แม้ไม่มีประวัติการขาย
-        const isOutOfStock = currentStock <= 0;
-        const isLowStock = daysUntilStockOut < minimumDays;
+        // 1. สต็อกต่ำกว่า reorder point (availableStock <= suggestedReorderPoint)
+        // 2. สินค้าหมดสต็อก (availableStock <= 0) แม้ไม่มีประวัติการขาย
+        const isOutOfStock = availableStock <= 0;
+        const isLowStock = availableStock <= suggestedReorderPoint;
         
         if (isOutOfStock || isLowStock) {
           const recommendedOrderQty = Math.max(
             suggestedOrderQty,  // ✅ ถ้า out-of-stock ไม่มีการขาย ให้ใช้ suggestedOrderQty (minOrderQty หรือ lead time * buffer)
-            Math.max(0, suggestedOrderQty - currentStock)
+            Math.max(0, suggestedOrderQty - availableStock)
           );
 
           // ✅ สั่งซื้อแม้ recommendedOrderQty = 0 ถ้าเป็น out-of-stock
@@ -872,7 +902,7 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
               productName: product.name,
               variantId: variant._id,
               sku: variant.sku,
-              currentStock,
+              currentStock: availableStock,
               incoming,
               quantitySold,
               dailySalesRate: Math.round(dailySalesRate * 100) / 100,
@@ -892,13 +922,15 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
               productName: product.name,
               variantId: variant._id,
               sku: variant.sku,
-              stockOnHand: currentStock,
+              stockOnHand: variant.stockOnHand || 0,
+              incoming,
+              availableStock,
               leadTimeDays,
               daysRemaining: isOutOfStock ? 0 : Math.round(daysUntilStockOut * 10) / 10,
             });
           }
         }
-      });
+      }
 
       // Apply MOQ optimization if this product has MOQ and has variants needing reorder
       if (variantSuggestions.length > 0 && product.minOrderQty > 0) {
@@ -950,7 +982,12 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
     // ✅ หาสินค้าขายไม่ออก (Dead Stock) - ไม่มีการขายเลยในช่วง
     const deadStockDetailed = [];
     for (const [productId, { product, variants }] of productVariantMap) {
-      variants.forEach((variant) => {
+      // ⛔ ข้ามสินค้าที่ปิดการแจ้งเตือน
+      if (!product.enableStockAlerts) continue;
+      
+      for (const variant of variants) {
+        if (variant.status !== 'active') continue;
+        
         const key = `${product._id}-${variant._id}`;
         const quantitySold = salesMap.get(key) || 0;
         
@@ -974,7 +1011,7 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
             });
           }
         }
-      });
+      }
     }
     
     // เรียงตามจำนวนสต็อก (มากสุดก่อน)
@@ -1189,7 +1226,9 @@ router.get('/dashboard', authenticateToken, authorizeRoles('owner', 'stock'), as
       if (!product.enableStockAlerts) return;
       (product.variants || []).forEach((variant) => {
         if (variant.status !== 'active') return;
-        const stock = variant.stockOnHand || 0;
+        const stockOnHand = variant.stockOnHand || 0;
+        const incoming = variant.incoming || 0;
+        const availableStock = stockOnHand + incoming; // ✅ รวม incoming
         const reorderPoint = variant.reorderPoint || 0;
         const leadTimeDays = product.leadTimeDays || 7;
         const bufferDays = product.reorderBufferDays ?? 7;
@@ -1203,10 +1242,10 @@ router.get('/dashboard', authenticateToken, authorizeRoles('owner', 'stock'), as
         const reorderMetrics = calculateReorderMetrics(dailySalesRate, leadTimeDays, bufferDays);
         const computedReorderPoint = Math.ceil(reorderMetrics.suggestedReorderPoint);
         const minimumDays = leadTimeDays + bufferDays;
-        const daysUntilStockOut = dailySalesRate > 0 ? stock / dailySalesRate : 999;
+        const daysUntilStockOut = dailySalesRate > 0 ? availableStock / dailySalesRate : 999;
         
         // รวมเงื่อนไข: หมดสต็อก หรือ สต็อกต่ำ หรือ วันคงเหลือน้อยกว่า lead time + buffer
-        const shouldAlert = stock <= 0 || stock <= reorderPoint || (dailySalesRate > 0 && daysUntilStockOut < minimumDays);
+        const shouldAlert = availableStock <= 0 || availableStock <= reorderPoint || (dailySalesRate > 0 && daysUntilStockOut < minimumDays);
         
         if (shouldAlert) {
           toReorderItems.push({
@@ -1214,7 +1253,7 @@ router.get('/dashboard', authenticateToken, authorizeRoles('owner', 'stock'), as
             productName: product.name,
             variantId: variant._id,
             sku: variant.sku,
-            currentStock: stock,
+            currentStock: availableStock,
             reorderPoint: reorderPoint || computedReorderPoint,
           });
         }
@@ -1401,7 +1440,9 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
       
       for (const variant of product.variants || []) {
         if (variant.status !== 'active') continue;
-        const stock = variant.stockOnHand || 0;
+        const stockOnHand = variant.stockOnHand || 0;
+        const incoming = variant.incoming || 0;
+        const availableStock = stockOnHand + incoming; // ✅ รวม incoming
         const rawReorderPoint = variant.reorderPoint || 0;
         const leadTimeDays = product.leadTimeDays || 7; // Get from product level
         const bufferDays = product.reorderBufferDays ?? 7;
@@ -1434,17 +1475,17 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
         const reorderMetrics = calculateReorderMetrics(dailySalesRate, leadTimeDays, bufferDays);
         const computedReorderPoint = Math.ceil(reorderMetrics.suggestedReorderPoint);
         const suggestedOrderQty = Math.ceil(reorderMetrics.suggestedReorderQty);
-        const suggestedOrder = Math.max(0, suggestedOrderQty - stock);
+        const suggestedOrder = Math.max(0, suggestedOrderQty - availableStock);
         
         // ใช้ค่าที่ user กำหนด หากไม่มี ให้ใช้ค่าที่คำนวณ
         const reorderPoint = rawReorderPoint || computedReorderPoint;
 
-        // คำนวณวันที่สต็อกจะหมด
-        const daysUntilStockOut = dailySalesRate > 0 ? stock / dailySalesRate : 999;
+        // คำนวณวันที่สต็อกจะหมด (ใช้ availableStock)
+        const daysUntilStockOut = dailySalesRate > 0 ? availableStock / dailySalesRate : 999;
         const minimumDays = leadTimeDays + bufferDays;
 
         // Out of stock
-        if (stock <= 0) {
+        if (availableStock <= 0) {
           outOfStockAlerts.push({
             type: 'out-of-stock',
             severity: 'critical',
@@ -1452,19 +1493,21 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
             productName: product.name,
             variantId: variant._id,
             sku: variant.sku,
-            stockOnHand: stock,
+            stockOnHand,
+            incoming,
+            availableStock,
             reorderPoint,
             suggestedReorderPoint: computedReorderPoint,
             suggestedOrder,
             avgDailySales: dailySalesRate,
-            daysOfStock: Math.floor(stock / (dailySalesRate || 0.1)),
+            daysOfStock: Math.floor(availableStock / (dailySalesRate || 0.1)),
             dailySalesRate: Math.round(dailySalesRate * 100) / 100,
             daysUntilStockOut: 0,
             message: `${product.name} (${variant.sku}) หมดสต็อก`,
           });
         }
         // Low stock - ใช้ทั้ง reorderPoint และ การคำนวณจาก daily sales
-        else if (stock <= reorderPoint || (dailySalesRate > 0 && daysUntilStockOut < minimumDays)) {
+        else if (availableStock <= reorderPoint || (dailySalesRate > 0 && daysUntilStockOut < minimumDays)) {
           const severity = daysUntilStockOut <= 7 ? 'critical' : 'warning';
           lowStockAlerts.push({
             type: 'low-stock',
@@ -1473,16 +1516,18 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
             productName: product.name,
             variantId: variant._id,
             sku: variant.sku,
-            stockOnHand: stock,
+            stockOnHand,
+            incoming,
+            availableStock,
             reorderPoint,
             suggestedReorderPoint: computedReorderPoint,
             suggestedOrder,
             avgDailySales: dailySalesRate,
-            daysOfStock: Math.floor(stock / (dailySalesRate || 0.1)),
+            daysOfStock: Math.floor(availableStock / (dailySalesRate || 0.1)),
             dailySalesRate: Math.round(dailySalesRate * 100) / 100,
             daysUntilStockOut: Math.round(daysUntilStockOut * 10) / 10,
             leadTimeDays,
-            message: `${product.name} (${variant.sku}) สต็อกต่ำ: ${stock} ชิ้น (เหลือ ${Math.round(daysUntilStockOut)} วัน)`,
+            message: `${product.name} (${variant.sku}) สต็อกต่ำ: ${availableStock} ชิ้น (มี ${stockOnHand} + ค้าง ${incoming}) (เหลือ ${Math.round(daysUntilStockOut)} วัน)`,
           });
         }
 
