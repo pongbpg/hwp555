@@ -528,16 +528,30 @@ export default function Orders() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">ประเภท</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    ประเภท
+                    <span className="ml-2 text-xs text-gray-500" title="เลือกประเภทการทำรายการ">
+                      ℹ️
+                    </span>
+                  </label>
                   <select
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                     value={type}
                     onChange={(e) => setType(e.target.value)}
                   >
-                    <option value="sale">Sale (ขาย)</option>
-                    <option value="purchase">Purchase (ซื้อ)</option>
-                    <option value="adjustment">Adjustment (ปรับปรุง)</option>
+                    <option value="sale">Sale (ขาย) - บันทึกการขายสินค้า</option>
+                    <option value="purchase">Purchase (ซื้อ) - บันทึกการสั่งซื้อสินค้า</option>
+                    <option value="adjustment">Adjustment (ปรับปรุง) - ปรับปรุงสต็อก</option>
                   </select>
+                  {type === 'sale' && (
+                    <p className="text-xs text-blue-600 mt-1">💰 ใช้ราคาขายที่จะขายให้ลูกค้า</p>
+                  )}
+                  {type === 'purchase' && (
+                    <p className="text-xs text-orange-600 mt-1">💵 ใช้ราคาต้นทุนที่ซื้อมา</p>
+                  )}
+                  {type === 'adjustment' && (
+                    <p className="text-xs text-purple-600 mt-1">✅ เหมาะกับนับสต็อก (หลาย SKU พร้อมกัน) | สำหรับ 1 SKU ใช้หน้า Movements</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">เลขอ้างอิง (Reference) <span className="text-red-500">*</span></label>
@@ -591,17 +605,51 @@ export default function Orders() {
                           />
                         </div>
                         <div>
-                          <label className="block text-xs text-gray-500 mb-1">จำนวน</label>
+                          <label className="block text-xs text-gray-500 mb-1">
+                            {type === 'adjustment' ? '📊 สต็อกใหม่ (ยอดที่นับได้)' : 'จำนวน'}
+                          </label>
                           <input
                             type="number"
                             min="0"
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                             value={item.quantity}
                             onChange={(e) => updateItem(idx, { quantity: e.target.value })}
+                            placeholder={type === 'adjustment' ? 'ใส่ยอดสต็อกที่นับได้' : 'จำนวน'}
                           />
+                          {type === 'adjustment' && item.variantId && (() => {
+                            const product = products.find((p) => p._id === item.productId);
+                            const variant = product?.variants?.find((v) => v._id === item.variantId);
+                            const currentStock = variant?.stockOnHand || 0;
+                            const targetStock = Number(item.quantity) || 0;
+                            const delta = targetStock - currentStock;
+                            return (
+                              <p className="text-xs mt-1">
+                                <span className="text-gray-600">ปัจจุบัน: {currentStock} ชิ้น</span>
+                                {delta !== 0 && (
+                                  <span className={delta > 0 ? 'text-green-600 ml-2' : 'text-red-600 ml-2'}>
+                                    → {delta > 0 ? `+${delta}` : delta} ชิ้น
+                                  </span>
+                                )}
+                              </p>
+                            );
+                          })()}
                         </div>
                         <div>
-                          <label className="block text-xs text-gray-500 mb-1">💰 ราคา/หน่วย</label>
+                          <label className="block text-xs text-gray-500 mb-1">
+                            {type === 'sale' ? '💰 ราคาขาย/หน่วย' : '💵 ต้นทุน/หน่วย'}
+                            <span 
+                              className="ml-1 text-gray-400 cursor-help" 
+                              title={
+                                type === 'sale' 
+                                  ? 'ราคาที่ขายให้ลูกค้า' 
+                                  : type === 'purchase' 
+                                    ? 'ราคาต้นทุนที่ซื้อมา (จะบันทึกใน batch.cost)' 
+                                    : 'ราคาต้นทุนสำหรับบันทึก batch'
+                              }
+                            >
+                              ℹ️
+                            </span>
+                          </label>
                           <input
                             type="number"
                             min="0"
@@ -609,8 +657,14 @@ export default function Orders() {
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                             value={item.unitPrice}
                             onChange={(e) => updateItem(idx, { unitPrice: e.target.value })}
-                            placeholder="0.00"
+                            placeholder={type === 'sale' ? 'ราคาขาย' : 'ราคาต้นทุน'}
                           />
+                          {type === 'sale' && (
+                            <p className="text-xs text-blue-500 mt-0.5">ราคาที่ขายให้ลูกค้า</p>
+                          )}
+                          {(type === 'purchase' || type === 'adjustment') && (
+                            <p className="text-xs text-orange-500 mt-0.5">ราคาต้นทุน (cost)</p>
+                          )}
                         </div>
                       </div>
                       {/* Purchase Order: เพิ่มช่อง Batch และ วันหมดอายุ */}

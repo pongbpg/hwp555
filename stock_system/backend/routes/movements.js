@@ -240,28 +240,44 @@ router.post('/', authenticateToken, authorizeRoles('owner', 'admin', 'hr'), asyn
       let remainingToConsume = Math.abs(adjustQty);
       const costingMethod = product.costingMethod || 'FIFO';
       
-      // เรียง batches ตาม costing method
-      const sortedBatches = [...(variant.batches || [])].sort((a, b) => {
-        if (costingMethod === 'LIFO') {
-          return new Date(b.receivedAt) - new Date(a.receivedAt); // ใหม่ก่อน
-        }
-        return new Date(a.receivedAt) - new Date(b.receivedAt); // เก่าก่อน (FIFO/WAC)
-      });
+      // สร้าง array ของ index + receivedAt เพื่อเรียงลำดับ
+      const batchIndices = (variant.batches || [])
+        .map((b, idx) => ({ 
+          index: idx, 
+          receivedAt: new Date(b.receivedAt || 0),
+          quantity: b.quantity || 0
+        }))
+        .filter(b => b.quantity > 0) // เอาแค่ที่มีสต็อก
+        .sort((a, b) => {
+          if (costingMethod === 'LIFO') {
+            return b.receivedAt - a.receivedAt; // ใหม่ก่อน
+          }
+          return a.receivedAt - b.receivedAt; // เก่าก่อน (FIFO/WAC)
+        });
 
-      // Consume batches
-      for (const batch of sortedBatches) {
+      // Consume batches โดยแก้ไขตรงๆ ผ่าน index
+      const indicesToRemove = [];
+      for (const { index } of batchIndices) {
         if (remainingToConsume <= 0) break;
         
+        const batch = variant.batches[index];
         const batchQty = batch.quantity || 0;
         if (batchQty <= 0) continue;
 
         const consumeFromThisBatch = Math.min(batchQty, remainingToConsume);
         batch.quantity -= consumeFromThisBatch;
         remainingToConsume -= consumeFromThisBatch;
+        
+        // ถ้าเหลือ 0 เก็บ index ไว้ลบ
+        if (batch.quantity <= 0) {
+          indicesToRemove.push(index);
+        }
       }
 
-      // ลบ batches ที่เหลือ 0
-      variant.batches = variant.batches.filter(b => (b.quantity || 0) > 0);
+      // ลบ batches ที่เหลือ 0 (เรียงจากท้ายไปหน้าเพื่อไม่ให้ index เปลี่ยน)
+      for (const idx of indicesToRemove.sort((a, b) => b - a)) {
+        variant.batches.splice(idx, 1);
+      }
 
       // ถ้ายังขาดอยู่และไม่อนุญาต backorder
       if (remainingToConsume > 0 && !variant.allowBackorder) {

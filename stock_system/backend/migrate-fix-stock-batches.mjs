@@ -72,11 +72,18 @@ const batchSchema = new Schema({
   quantity: { type: Number, required: true },
   quantityConsumed: { type: Number, default: 0 },
   lastConsumedAt: Date,
-  consumptionOrder: Array,
+  consumptionOrder: [
+    {
+      orderId: mongoose.Schema.Types.ObjectId,
+      orderReference: String,
+      quantityConsumedThisTime: Number,
+      consumedAt: { type: Date, default: Date.now }
+    }
+  ],
   expiryDate: Date,
   receivedAt: { type: Date, default: Date.now },
   orderId: { type: mongoose.Schema.Types.ObjectId, ref: 'InventoryOrder' },
-}, { _id: true });
+}, { _id: true, strict: false });
 
 const variantSchema = new Schema({
   name: String,
@@ -230,20 +237,32 @@ async function analyzeAndFixVariant(product, variant, dryRun = true) {
       } else if (diff < 0) {
         // ต้องลด → consume จาก batches
         let remainingToReduce = Math.abs(diff);
-        const sortedBatches = [...variant.batches].sort((a, b) => 
-          new Date(a.receivedAt) - new Date(b.receivedAt) // FIFO
-        );
         
-        for (const batch of sortedBatches) {
+        // เรียง batches ตาม index (FIFO - เก่าก่อน)
+        const batchIndices = variant.batches
+          .map((b, idx) => ({ batch: b, index: idx, receivedAt: new Date(b.receivedAt) }))
+          .sort((a, b) => a.receivedAt - b.receivedAt);
+        
+        // แก้ไข batch โดยตรงผ่าน index เพื่อรักษา reference
+        const indicesToRemove = [];
+        for (const { batch, index } of batchIndices) {
           if (remainingToReduce <= 0) break;
           
           const reduceFromThis = Math.min(batch.quantity, remainingToReduce);
           batch.quantity -= reduceFromThis;
           remainingToReduce -= reduceFromThis;
+          
+          // ถ้า quantity เหลือ 0 ให้เก็บ index ไว้ลบ
+          if (batch.quantity <= 0) {
+            indicesToRemove.push(index);
+          }
         }
         
-        // ลบ batches ที่เหลือ 0
-        variant.batches = variant.batches.filter(b => b.quantity > 0);
+        // ลบ batches ที่เหลือ 0 โดยเรียงจากท้ายไปหน้า (เพื่อไม่ให้ index เปลี่ยน)
+        for (const idx of indicesToRemove.sort((a, b) => b - a)) {
+          variant.batches.splice(idx, 1);
+        }
+        
         issue.fixed = true;
       }
     }

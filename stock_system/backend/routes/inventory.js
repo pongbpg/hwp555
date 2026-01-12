@@ -93,7 +93,11 @@ const consumeBatches = (variant, product, quantity, metadata = {}) => {
  */
 const applyStockChange = (variant, product, item, type, metadata = {}) => {
   const qty = Number(item.quantity) || 0;
-  if (qty <= 0) throw new Error('Quantity must be greater than zero');
+  
+  // ✅ สำหรับ adjustment อนุญาตให้ qty เป็น 0 หรือลบได้ (delta อาจลดสต็อก)
+  if (type !== 'adjustment' && qty <= 0) {
+    throw new Error('Quantity must be greater than zero');
+  }
 
   const debugStockAlerts = process.env.DEBUG_STOCK_ALERTS === '1' || process.env.DEBUG_STOCK_ALERTS === 'true';
 
@@ -227,10 +231,16 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
     
     // ✅ Phase 1: Prepare order items without applying stock changes yet
     const itemsToProcess = [];
+    const productCache = new Map(); // Cache products to avoid duplicate queries
     
     for (const rawItem of items) {
-      const product = await Product.findById(rawItem.productId);
-      if (!product) return res.status(404).json({ error: `Product ${rawItem.productId} not found` });
+      // Use cached product if already loaded
+      let product = productCache.get(String(rawItem.productId));
+      if (!product) {
+        product = await Product.findById(rawItem.productId);
+        if (!product) return res.status(404).json({ error: `Product ${rawItem.productId} not found` });
+        productCache.set(String(rawItem.productId), product);
+      }
 
       const variant = selectVariant(product, rawItem.variantId, rawItem.sku);
       if (!variant) return res.status(404).json({ error: 'Variant not found on the product' });
@@ -298,6 +308,8 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
     }
     
     // ✅ Phase 4: Process each product once with all its variants
+    const debugStockAlerts = process.env.DEBUG_STOCK_ALERTS === '1' || process.env.DEBUG_STOCK_ALERTS === 'true';
+    
     for (const { product, items: productItems } of productMap.values()) {
       for (const { variant, rawItem, qty, previousStock } of productItems) {
         if (type === 'purchase') {
@@ -308,11 +320,24 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
           // (มีสามารถ applyStockChange จะเปลี่ยน variant.batches ซึ่งส่งผลให้ stockOnHand เปลี่ยน)
           const stockBeforeChange = variant.stockOnHand || 0;
           
+          // ✅ สำหรับ adjustment: qty คือยอดสต็อกเป้าหมาย ไม่ใช่จำนวนที่เพิ่ม/ลด
+          // คำนวณ delta = targetStock - currentStock
+          let actualQty = qty;
+          if (type === 'adjustment') {
+            const currentStock = stockBeforeChange;
+            const targetStock = qty;
+            actualQty = targetStock - currentStock; // delta (อาจเป็นบวกหรือลบ)
+            
+            if (debugStockAlerts) {
+              console.log(`[Adjustment] SKU: ${variant.sku}, Current: ${currentStock}, Target: ${targetStock}, Delta: ${actualQty}`);
+            }
+          }
+          
           // ✅ ส่ง order metadata (orderId, orderReference) ให้ applyStockChange
           applyStockChange(
             variant,
             product,
-            { ...rawItem, quantity: qty },
+            { ...rawItem, quantity: actualQty },
             type,
             {
               orderId: order._id,
@@ -323,9 +348,7 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
           // ✅ ใช้ค่าจริงจาก variant.stockOnHand หลังจาก applyStockChange
           // แทนการคำนวณเองเพราะ applyStockChange อาจมีลอจิก batch consumption ที่ซับซ้อน
           const actualNewStock = variant.stockOnHand || 0;
-          const adjustQty = type === 'sale' ? -qty : qty;
-          
-          // เก็บข้อมูลสำหรับ movement (ยกเว้น purchase เพราะยังไม่รับของ)
+          const adjustQty = type === 'sale' ? -qty : actualQty;
           movementRecords.push({
             movementType: type === 'sale' ? 'out' : 'adjust',
             product,
