@@ -133,7 +133,13 @@ const LineChart = ({ data, title }) => {
             <title>{p.label}: {p.value.toLocaleString()}</title>
           </circle>
         ))}
-        {/* Labels */}
+        {/* Value Labels on each point */}
+        {points.map((p, idx) => (
+          <text key={`val-${idx}`} x={p.x} y={p.y - 10} textAnchor="middle" className="text-xs fill-blue-600 font-semibold">
+            {p.value.toLocaleString()}
+          </text>
+        ))}
+        {/* Date Labels */}
         {points.filter((_, i) => i % Math.ceil(points.length / 7) === 0 || i === points.length - 1).map((p, idx) => (
           <text key={idx} x={p.x} y="175" textAnchor="middle" className="text-xs fill-gray-500">{p.label}</text>
         ))}
@@ -228,6 +234,8 @@ export default function Dashboard() {
   const [sortBrand, setSortBrand] = useState('stock');
   const [sortOrderCategory, setSortOrderCategory] = useState('desc');
   const [sortOrderBrand, setSortOrderBrand] = useState('desc');
+  const [sortProduct, setSortProduct] = useState('value');
+  const [sortOrderProduct, setSortOrderProduct] = useState('desc');
 
   const fmtNumber = new Intl.NumberFormat('th-TH');
   const fmtCurrency = new Intl.NumberFormat('th-TH', { style: 'currency', currency: 'THB' });
@@ -326,25 +334,17 @@ export default function Dashboard() {
 
   const dailyVolume = (dailyOrderVolume || []).map(item => ({
     label: item.date,
-    value: item.orders
+    value: item.qty
   }));
 
-  // Group top sales by product name and sum quantities
-  const topSalesByProduct = {};
-  (topSalestoday || []).forEach(item => {
-    if (!topSalesByProduct[item.productName]) {
-      topSalesByProduct[item.productName] = 0;
-    }
-    topSalesByProduct[item.productName] += item.quantitySold;
-  });
-
-  const topSales = Object.entries(topSalesByProduct)
-    .map(([productName, totalQuantity]) => ({
-      label: productName,
-      value: totalQuantity
+  // Top 10 products by quantity sold (today)
+  const topSales = (topSalestoday || [])
+    .map(item => ({
+      label: item.productName,
+      value: item.quantitySold
     }))
     .sort((a, b) => b.value - a.value)
-    .slice(0, 5);
+    .slice(0, 10);
 
   // Sorting functions
   const sortTableData = (data, sortKey, sortOrder) => {
@@ -381,6 +381,15 @@ export default function Dashboard() {
     } else {
       setSortBrand(key);
       setSortOrderBrand('desc');
+    }
+  };
+
+  const handleProductSort = (key) => {
+    if (sortProduct === key) {
+      setSortOrderProduct(sortOrderProduct === 'desc' ? 'asc' : 'desc');
+    } else {
+      setSortProduct(key);
+      setSortOrderProduct('desc');
     }
   };
 
@@ -597,16 +606,47 @@ export default function Dashboard() {
                         >
                           มูลค่า (บาท) <SortIndicator isActive={sortCategory === 'value'} order={sortOrderCategory} />
                         </th>
+                        <th 
+                          className="text-right py-2 px-3 font-semibold text-gray-700 cursor-pointer hover:bg-gray-100"
+                          onClick={() => handleCategorySort('percentage')}
+                        >
+                          % มูลค่า <SortIndicator isActive={sortCategory === 'percentage'} order={sortOrderCategory} />
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
-                      {sortTableData(data?.byCategory || [], sortCategory, sortOrderCategory).map((cat, idx) => (
-                        <tr key={idx} className="border-b border-gray-100 hover:bg-blue-50">
-                          <td className="py-2.5 px-3 text-gray-800 font-medium">{cat.name}</td>
-                          <td className="py-2.5 px-3 text-gray-600 text-right font-semibold">{fmtNumber.format(cat.stock)}</td>
-                          <td className="py-2.5 px-3 text-gray-600 text-right">{fmtCurrency.format(cat.value)}</td>
-                        </tr>
-                      ))}
+                      {(() => {
+                        const totalCategoryValue = (data?.byCategory || []).reduce((sum, cat) => sum + (cat.value || 0), 0);
+                        let sorted = [...(data?.byCategory || [])].sort((a, b) => {
+                          let aVal = 0;
+                          let bVal = 0;
+                          
+                          if (sortCategory === 'stock') {
+                            aVal = a.stock || 0;
+                            bVal = b.stock || 0;
+                          } else if (sortCategory === 'value') {
+                            aVal = a.value || 0;
+                            bVal = b.value || 0;
+                          } else if (sortCategory === 'percentage') {
+                            aVal = (a.value || 0) / (totalCategoryValue || 1);
+                            bVal = (b.value || 0) / (totalCategoryValue || 1);
+                          }
+                          
+                          return sortOrderCategory === 'desc' ? bVal - aVal : aVal - bVal;
+                        });
+                        
+                        return sorted.slice(0, 10).map((cat, idx) => {
+                          const percentage = totalCategoryValue > 0 ? ((cat.value / totalCategoryValue) * 100).toFixed(1) : 0;
+                          return (
+                            <tr key={idx} className="border-b border-gray-100 hover:bg-blue-50">
+                              <td className="py-2.5 px-3 text-gray-800 font-medium">{cat.name}</td>
+                              <td className="py-2.5 px-3 text-gray-600 text-right font-semibold">{fmtNumber.format(cat.stock)}</td>
+                              <td className="py-2.5 px-3 text-gray-600 text-right">{fmtCurrency.format(cat.value)}</td>
+                              <td className="py-2.5 px-3 text-gray-600 text-right font-semibold">{percentage}%</td>
+                            </tr>
+                          );
+                        });
+                      })()}
                     </tbody>
                   </table>
                 </div>
@@ -634,16 +674,47 @@ export default function Dashboard() {
                         >
                           มูลค่า (บาท) <SortIndicator isActive={sortBrand === 'value'} order={sortOrderBrand} />
                         </th>
+                        <th 
+                          className="text-right py-2 px-3 font-semibold text-gray-700 cursor-pointer hover:bg-gray-100"
+                          onClick={() => handleBrandSort('percentage')}
+                        >
+                          % มูลค่า <SortIndicator isActive={sortBrand === 'percentage'} order={sortOrderBrand} />
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
-                      {sortTableData(data?.byBrand || [], sortBrand, sortOrderBrand).map((brand, idx) => (
-                        <tr key={idx} className="border-b border-gray-100 hover:bg-purple-50">
-                          <td className="py-2.5 px-3 text-gray-800 font-medium">{brand.name}</td>
-                          <td className="py-2.5 px-3 text-gray-600 text-right font-semibold">{fmtNumber.format(brand.stock)}</td>
-                          <td className="py-2.5 px-3 text-gray-600 text-right">{fmtCurrency.format(brand.value)}</td>
-                        </tr>
-                      ))}
+                      {(() => {
+                        const totalBrandValue = (data?.byBrand || []).reduce((sum, brand) => sum + (brand.value || 0), 0);
+                        let sorted = [...(data?.byBrand || [])].sort((a, b) => {
+                          let aVal = 0;
+                          let bVal = 0;
+                          
+                          if (sortBrand === 'stock') {
+                            aVal = a.stock || 0;
+                            bVal = b.stock || 0;
+                          } else if (sortBrand === 'value') {
+                            aVal = a.value || 0;
+                            bVal = b.value || 0;
+                          } else if (sortBrand === 'percentage') {
+                            aVal = (a.value || 0) / (totalBrandValue || 1);
+                            bVal = (b.value || 0) / (totalBrandValue || 1);
+                          }
+                          
+                          return sortOrderBrand === 'desc' ? bVal - aVal : aVal - bVal;
+                        });
+                        
+                        return sorted.slice(0, 10).map((brand, idx) => {
+                          const percentage = totalBrandValue > 0 ? ((brand.value / totalBrandValue) * 100).toFixed(1) : 0;
+                          return (
+                            <tr key={idx} className="border-b border-gray-100 hover:bg-purple-50">
+                              <td className="py-2.5 px-3 text-gray-800 font-medium">{brand.name}</td>
+                              <td className="py-2.5 px-3 text-gray-600 text-right font-semibold">{fmtNumber.format(brand.stock)}</td>
+                              <td className="py-2.5 px-3 text-gray-600 text-right">{fmtCurrency.format(brand.value)}</td>
+                              <td className="py-2.5 px-3 text-gray-600 text-right font-semibold">{percentage}%</td>
+                            </tr>
+                          );
+                        });
+                      })()}
                     </tbody>
                   </table>
                 </div>
@@ -653,23 +724,83 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Charts Row 2: Daily Volume & Top Sales */}
+      {/* Product Stock Value & Top Sales */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {loading ? (
           <>
-            <LoadingSection height="h-64" />
-            <LoadingSection height="h-64" />
+            <LoadingSection height="h-80" />
+            <LoadingSection height="h-80" />
           </>
         ) : (
           <>
-            <LineChart 
-              data={dailyVolume}
-              title="📈 ยอดออเดอร์ 7 วันย้อนหลัง"
-            />
+            <div className="bg-white rounded-xl shadow p-6">
+              <h2 className="text-lg font-semibold text-gray-800 mb-4">💰 มูลค่าสต็อกแต่ละสินค้า</h2>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b-2 border-gray-300 bg-gray-50">
+                      <th className="text-left py-2 px-3 font-semibold text-gray-700">ชื่อสินค้า</th>
+                      <th 
+                        className="text-right py-2 px-3 font-semibold text-gray-700 cursor-pointer hover:bg-gray-100"
+                        onClick={() => handleProductSort('stock')}
+                      >
+                        จำนวน (ชิ้น) <SortIndicator isActive={sortProduct === 'stock'} order={sortOrderProduct} />
+                      </th>
+                      <th 
+                        className="text-right py-2 px-3 font-semibold text-gray-700 cursor-pointer hover:bg-gray-100"
+                        onClick={() => handleProductSort('value')}
+                      >
+                        มูลค่า (บาท) <SortIndicator isActive={sortProduct === 'value'} order={sortOrderProduct} />
+                      </th>
+                      <th 
+                        className="text-right py-2 px-3 font-semibold text-gray-700 cursor-pointer hover:bg-gray-100"
+                        onClick={() => handleProductSort('percentage')}
+                      >
+                        % มูลค่า <SortIndicator isActive={sortProduct === 'percentage'} order={sortOrderProduct} />
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(() => {
+                      const totalProductValue = (data?.productStockValues || []).reduce((sum, product) => sum + (product.value || 0), 0);
+                      const sorted = [...(data?.productStockValues || [])].sort((a, b) => {
+                        let aVal = 0;
+                        let bVal = 0;
+                        
+                        if (sortProduct === 'stock') {
+                          aVal = a.stock || 0;
+                          bVal = b.stock || 0;
+                        } else if (sortProduct === 'value') {
+                          aVal = a.value || 0;
+                          bVal = b.value || 0;
+                        } else if (sortProduct === 'percentage') {
+                          aVal = (a.value || 0) / (totalProductValue || 1);
+                          bVal = (b.value || 0) / (totalProductValue || 1);
+                        }
+                        
+                        return sortOrderProduct === 'desc' ? bVal - aVal : aVal - bVal;
+                      });
+                      
+                      return sorted.slice(0, 20).map((item, idx) => {
+                        const percentage = totalProductValue > 0 ? ((item.value / totalProductValue) * 100).toFixed(1) : 0;
+                        return (
+                          <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
+                            <td className="py-2.5 px-3 text-gray-800 font-medium">{item.productName || 'ไม่ระบุ'}</td>
+                            <td className="py-2.5 px-3 text-gray-600 text-right font-semibold">{fmtNumber.format(item.stock || 0)}</td>
+                            <td className="py-2.5 px-3 text-gray-600 text-right font-semibold">{fmtCurrency.format(item.value || 0)}</td>
+                            <td className="py-2.5 px-3 text-gray-600 text-right font-semibold">{percentage}%</td>
+                          </tr>
+                        );
+                      });
+                    })()}
+                  </tbody>
+                </table>
+              </div>
+            </div>
             {topSales.length > 0 && (
               <BarChart 
                 data={topSales}
-                title="🔥 Top 5 สินค้าขายเยอะสุดวันนี้"
+                title="🔥 Top 10 สินค้าขายเยอะสุดวันนี้"
                 color="#10B981"
                 valueKey="value"
                 labelKey="label"
@@ -679,39 +810,46 @@ export default function Dashboard() {
         )}
       </div>
 
-
-
-      {/* Movement Summary */}
+      {/* Charts Row 2: Daily Volume & Movement Summary */}
       {loading ? (
-        <LoadingSection height="h-48" />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <LoadingSection height="h-64" />
+          <LoadingSection height="h-48" />
+        </div>
       ) : (
-        movements?.byType?.length > 0 && (
-          <div className="bg-white rounded-xl shadow p-6">
-            <h2 className="text-lg font-semibold text-gray-800 mb-4">📦 การเคลื่อนไหวสต็อก (7 วันล่าสุด)</h2>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-              {(movements.byType || []).map((item) => (
-                <div key={item._id} className={`rounded-xl p-4 ${
-                  item._id === 'in' ? 'bg-green-50 border border-green-200' :
-                  item._id === 'out' ? 'bg-blue-50 border border-blue-200' :
-                  item._id === 'damage' ? 'bg-red-50 border border-red-200' :
-                  item._id === 'expired' ? 'bg-orange-50 border border-orange-200' :
-                  'bg-gray-50 border border-gray-200'
-                }`}>
-                  <p className="text-sm text-gray-600 font-medium">
-                    {item._id === 'in' && '📥 รับเข้า'}
-                    {item._id === 'out' && '📤 จ่ายออก'}
-                    {item._id === 'adjust' && '🔄 ปรับปรุง'}
-                    {item._id === 'return' && '↩️ รับคืน'}
-                    {item._id === 'damage' && '💔 เสียหาย'}
-                    {item._id === 'expired' && '⏰ หมดอายุ'}
-                  </p>
-                  <p className="text-2xl font-bold text-gray-800 mt-1">{fmtNumber.format(item.count)}</p>
-                  <p className="text-xs text-gray-500">{fmtNumber.format(Math.abs(item.totalQuantity))} ชิ้น</p>
-                </div>
-              ))}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <LineChart 
+            data={dailyVolume}
+            title="📈 ยอดจำนวนชิ้นที่ขาย 7 วันย้อนหลัง"
+          />
+          {movements?.byType?.length > 0 && (
+            <div className="bg-white rounded-xl shadow p-6">
+              <h2 className="text-lg font-semibold text-gray-800 mb-4">📦 การเคลื่อนไหวสต็อก (7 วันล่าสุด)</h2>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {(movements.byType || []).map((item) => (
+                  <div key={item._id} className={`rounded-lg p-3 ${
+                    item._id === 'in' ? 'bg-green-50 border border-green-200' :
+                    item._id === 'out' ? 'bg-blue-50 border border-blue-200' :
+                    item._id === 'damage' ? 'bg-red-50 border border-red-200' :
+                    item._id === 'expired' ? 'bg-orange-50 border border-orange-200' :
+                    'bg-gray-50 border border-gray-200'
+                  }`}>
+                    <p className="text-xs text-gray-600 font-medium">
+                      {item._id === 'in' && '📥 รับเข้า'}
+                      {item._id === 'out' && '📤 จ่ายออก'}
+                      {item._id === 'adjust' && '🔄 ปรับปรุง'}
+                      {item._id === 'return' && '↩️ รับคืน'}
+                      {item._id === 'damage' && '💔 เสียหาย'}
+                      {item._id === 'expired' && '⏰ หมดอายุ'}
+                    </p>
+                    <p className="text-lg font-bold text-gray-800 mt-1">{fmtNumber.format(item.count)}</p>
+                    <p className="text-xs text-gray-500">{fmtNumber.format(Math.abs(item.totalQuantity))} ชิ้น</p>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
-        )
+          )}
+        </div>
       )}
     </div>
   );

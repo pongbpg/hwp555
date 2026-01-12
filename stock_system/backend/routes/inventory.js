@@ -1358,23 +1358,46 @@ router.get('/dashboard', authenticateToken, authorizeRoles('owner', 'stock'), as
       { $unwind: '$items' },
       {
         $group: {
-          _id: {
-            productId: '$items.productId',
-            productName: '$items.productName',
-            sku: '$items.sku',
-          },
-          quantitySold: { $sum: '$items.quantity' }
+          _id: '$items.productName',
+          totalQuantitySold: { $sum: '$items.quantity' }
         }
       },
-      { $sort: { quantitySold: -1 } },
+      { $sort: { totalQuantitySold: -1 } },
       { $limit: 5 }
     ]);
     
     const topSalestoday = todaySales.map(sale => ({
-      productName: sale._id.productName,
-      sku: sale._id.sku,
-      quantitySold: sale.quantitySold
+      productName: sale._id,
+      quantitySold: sale.totalQuantitySold
     }));
+    
+    // ✅ สร้างรายการมูลค่าสต็อกของแต่ละสินค้า (รวมทุก variant)
+    const productStockValues = [];
+    products.forEach((product) => {
+      let totalStock = 0;
+      let totalValue = 0;
+      
+      (product.variants || []).forEach((variant) => {
+        if (variant.status !== 'active') return;
+        const stock = variant.stockOnHand || 0;
+        const costingMethod = product.costingMethod || 'FIFO';
+        const variantValue = calculateInventoryValue(variant, costingMethod);
+        
+        totalStock += stock;
+        totalValue += variantValue;
+      });
+      
+      if (totalStock > 0 || totalValue > 0) {
+        productStockValues.push({
+          productName: product.name,
+          stock: totalStock,
+          value: totalValue
+        });
+      }
+    });
+    
+    // เรียงตามมูลค่ามากไปน้อย
+    productStockValues.sort((a, b) => b.value - a.value);
     
     res.json({
       summary: {
@@ -1412,6 +1435,7 @@ router.get('/dashboard', authenticateToken, authorizeRoles('owner', 'stock'), as
       recentActivities: activitiesData.slice(0, 15),
       dailyOrderVolume,
       topSalestoday,
+      productStockValues,
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
