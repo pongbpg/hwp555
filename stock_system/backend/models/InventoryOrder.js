@@ -22,7 +22,7 @@ const orderItemSchema = new Schema(
 
 const orderSchema = new Schema(
   {
-    type: { type: String, enum: ['sale', 'purchase', 'adjustment'], required: true },
+    type: { type: String, enum: ['sale', 'purchase', 'adjustment', 'damage', 'expired', 'return'], required: true },
     status: { type: String, enum: ['pending', 'completed', 'cancelled'], default: 'completed' },
     orderDate: { type: Date, default: Date.now },
     reference: String,

@@ -1,4 +1,5 @@
 import express from 'express';
+import moment from 'moment-timezone';
 import Product from '../models/Product.js';
 import InventoryOrder from '../models/InventoryOrder.js';
 import StockMovement from '../models/StockMovement.js';
@@ -131,8 +132,10 @@ const consumeBatches = (variant, product, quantity, metadata = {}) => {
 const applyStockChange = (variant, product, item, type, metadata = {}) => {
   const qty = Number(item.quantity) || 0;
   
-  // ✅ สำหรับ adjustment อนุญาตให้ qty เป็น 0 หรือลบได้ (delta อาจลดสต็อก)
-  if (type !== 'adjustment' && qty <= 0) {
+  // ✅ สำหรับ adjustment/damage/expired อนุญาตให้ qty เป็น 0 หรือลบได้ (delta อาจลดสต็อก)
+  // damage/expired: actualQty คำนวณเป็น -Math.abs(qty) สำหรับลดสต็อก
+  // return: actualQty คำนวณเป็น Math.abs(qty) สำหรับเพิ่มสต็อก
+  if (type !== 'adjustment' && type !== 'damage' && type !== 'expired' && qty <= 0) {
     throw new Error('Quantity must be greater than zero');
   }
 
@@ -226,10 +229,14 @@ const applyStockChange = (variant, product, item, type, metadata = {}) => {
     
     if (qty > 0) {
       // เพิ่มสต็อก - สร้าง batch ใหม่
+      // ✅ ใช้ unitCost/unitPrice จากเฟรนต์เอนด์ (item.unitCost หรือ item.unitPrice)
+      const batchCost = item.unitCost || item.unitPrice || variant.cost || 0;
+      const batchSupplier = item.supplier || `Adjustment`;
+      
       variant.batches.push({
         batchRef: item.batchRef || `ADJ-${Date.now()}`,
-        supplier: item.supplier || 'Adjustment',
-        cost: item.cost || 0,
+        supplier: batchSupplier,
+        cost: batchCost,
         quantity: qty,
         expiryDate: item.expiryDate,
         receivedAt: new Date(),
@@ -243,6 +250,56 @@ const applyStockChange = (variant, product, item, type, metadata = {}) => {
       }
       // ✅ stockOnHand เป็น virtual field - คำนวณจาก batches อัตโนมัติ
     }
+    return;
+  }
+
+  // ✅ Damage/Expired: ลดสต็อกแบบเดียวกับ Sale (consume batches ตาม costingMethod)
+  // แต่ไม่นับเข้ายอดขาย (ไม่ส่งไป checkAndAlertAfterSale)
+  if (type === 'damage' || type === 'expired') {
+    const currentStock = variant.stockOnHand || 0;
+    
+    if (debugStockAlerts) {
+      console.log(`[applyStockChange] SKU: ${variant.sku}, Type: ${type}, Requested qty: ${qty}, Current stock: ${currentStock}, Has batches: ${(variant.batches && variant.batches.length > 0) ? 'yes' : 'no'}`);
+    }
+
+    // ✅ ตรวจสอบ: ต้องมีสต็อกพอ (damage/expired ไม่อนุญาต backorder)
+    if (currentStock < qty) {
+      throw new Error(`Insufficient stock for ${type} on SKU ${variant.sku}: have ${currentStock}, need ${qty}`);
+    }
+
+    // ✅ Consume จาก batches ตาม costingMethod (เหมือน sale)
+    if (variant.batches && variant.batches.length > 0) {
+      const remaining = consumeBatches(variant, product, qty, metadata);
+      
+      if (remaining > 0) {
+        throw new Error(`Insufficient batch quantities for SKU ${variant.sku} during ${type}: need ${qty}, available ${qty - remaining}`);
+      }
+    }
+    // ✅ stockOnHand เป็น virtual field - คำนวณจาก batches อัตโนมัติ
+    return;
+  }
+
+  if (type === 'return') {
+    // ✅ Return: เพิ่มสต็อกโดยสร้าง batch ใหม่
+    const currentStock = variant.stockOnHand || 0;
+    
+    if (qty <= 0) {
+      throw new Error(`Return quantity must be greater than zero for SKU ${variant.sku}`);
+    }
+
+    // สร้าง batch ใหม่ (สินค้าที่รับคืน)
+    const batchCost = item.unitCost || item.unitPrice || variant.cost || 0;
+    const batchSupplier = item.supplier || 'Customer Return';
+    
+    variant.batches.push({
+      batchRef: item.batchRef || `RTN-${Date.now()}`,
+      supplier: batchSupplier,
+      cost: batchCost,
+      quantity: qty,
+      expiryDate: item.expiryDate,
+      receivedAt: new Date(),
+    });
+    // ✅ stockOnHand เป็น virtual field - คำนวณจาก batches อัตโนมัติ
     return;
   }
 
@@ -318,13 +375,15 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
         
         itemData.unitCost = unitCostFromBatch || variant.cost || 0;
       } else {
-        // ✅ Purchase/Adjustment: เก็บแค่ unitCost
+        // ✅ Purchase/Adjustment/Damage/Expired/Return: ใช้ unitPrice ส่งมา (จะ map เป็น cost ใน batch)
+        itemData.unitPrice = rawItem.unitPrice ?? variant.cost ?? 0;
         itemData.unitCost = rawItem.unitCost ?? rawItem.unitPrice ?? variant.cost ?? 0;
       }
 
       if (rawItem.batchRef) itemData.batchRef = rawItem.batchRef;
       if (rawItem.expiryDate) itemData.expiryDate = rawItem.expiryDate;
-      if (rawItem.notes) itemData.notes = rawItem.notes;
+      if (rawItem.supplier) itemData.supplier = rawItem.supplier;  // ✅ เพิ่ม supplier field
+      if (rawItem.notes) itemData.notes = rawItem.notes;  // ✅ เพิ่ม notes field
 
       orderItems.push(itemData);
       
@@ -384,28 +443,36 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
           variant.incoming = (variant.incoming || 0) + qty;
         } else {
           // ✅ ดึงค่า previousStock ก่อน applyStockChange เปลี่ยนแปลง variant
-          // (มีสามารถ applyStockChange จะเปลี่ยน variant.batches ซึ่งส่งผลให้ stockOnHand เปลี่ยน)
           const stockBeforeChange = variant.stockOnHand || 0;
           
-          // ✅ สำหรับ adjustment: qty คือยอดสต็อกเป้าหมาย ไม่ใช่จำนวนที่เพิ่ม/ลด
-          // คำนวณ delta = targetStock - currentStock
+          // ✅ เก็บ actualType สำหรับ movement record
+          let actualType = type;
           let actualQty = qty;
+          
           if (type === 'adjustment') {
+            // Adjustment: คำนวณ delta (targetStock - currentStock)
             const currentStock = stockBeforeChange;
             const targetStock = qty;
-            actualQty = targetStock - currentStock; // delta (อาจเป็นบวกหรือลบ)
+            actualQty = targetStock - currentStock;
             
             if (debugStockAlerts) {
               console.log(`[Adjustment] SKU: ${variant.sku}, Current: ${currentStock}, Target: ${targetStock}, Delta: ${actualQty}`);
             }
+          } else if (type === 'damage' || type === 'expired') {
+            // Damage/Expired: ลดสต็อก ส่ง type='sale' ให้ applyStockChange เพื่อใช้ batch consumption logic
+            actualQty = qty; // ปริมาณเดิมเพื่อส่งให้ applyStockChange
+            actualType = 'sale'; // ✅ ส่ง 'sale' ให้ applyStockChange เพื่อ consume batches
+          } else if (type === 'return') {
+            // Return: เพิ่มสต็อก สร้าง batch ใหม่
+            actualQty = qty;
           }
           
-          // ✅ ส่ง order metadata (orderId, orderReference) ให้ applyStockChange
+          // ✅ ส่ง actualType ให้ applyStockChange (damage/expired จะส่ง 'sale')
           applyStockChange(
             variant,
             product,
             { ...rawItem, quantity: actualQty },
-            type,
+            actualType,
             {
               orderId: order._id,
               orderReference: order.reference || order._id.toString(),
@@ -414,9 +481,22 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
           
           // ✅ ใช้ unitCost field มาจาก order item (ไม่ต้องอ่านจาก variant)
           const actualNewStock = variant.stockOnHand || 0;
-          const adjustQty = type === 'sale' ? -qty : actualQty;
+          
+          // ✅ กำหนด movementType ตามประเภท order เดิม (ไม่ใช่ actualType)
+          let movementType = 'adjust'; // default
+          if (type === 'sale') {
+            movementType = 'out';
+          } else if (type === 'damage') {
+            movementType = 'damage';
+          } else if (type === 'expired') {
+            movementType = 'expired';
+          } else if (type === 'return') {
+            movementType = 'return';
+          }
+          
+          const adjustQty = type === 'sale' ? -qty : (type === 'return' ? qty : -qty);
           movementRecords.push({
-            movementType: type === 'sale' ? 'out' : 'adjust',
+            movementType,
             product,
             variant,
             quantity: adjustQty,
@@ -446,9 +526,9 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
       });
     }
     
-    // ตรวจสอบและแจ้งเตือน LINE หากสินค้าใกล้หมด (สำหรับการขาย)
+    // ตรวจสอบและแจ้งเตือน LINE หากสินค้าใกล้หมด (สำหรับการขาย/damage/expired)
     let stockAlertResult = null;
-    if (type === 'sale') {
+    if (type === 'sale' || type === 'damage' || type === 'expired') {
       const soldItems = orderItems.map((item) => ({
         productId: item.productId,
         variantId: item.variantId,
@@ -684,19 +764,20 @@ router.patch('/orders/:id/cancel', authenticateToken, authorizeRoles('owner', 'a
           quantity: qty,
           receivedAt: new Date(),
         });
-      } else if (order.type === 'adjustment') {
-        // Rollback: ลบ adjustment batch ออก
+      } else if (order.type === 'adjustment' || order.type === 'damage' || order.type === 'expired' || order.type === 'return') {
+        // Rollback: ลบ adjustment/damage/expired/return batch ออก
         // ถ้า qty > 0 ลบ batch ที่สร้าง, ถ้า qty < 0 สร้าง batch ใหม่กลับ
         const qty = Number(item.quantity) || 0;
+        const typePrefix = order.type.toUpperCase();
         if (qty > 0) {
           // เดิมเพิ่มสต็อก → ต้องลบ batch ที่เพิ่มไป
-          // ลบ batch ที่ batchRef เริ่มด้วย ADJ
-          variant.batches = (variant.batches || []).filter((b) => !b.batchRef?.startsWith('ADJ'));
+          // ลบ batch ที่ batchRef เริ่มด้วย DMG, EXP, RTN, ADJ
+          variant.batches = (variant.batches || []).filter((b) => !b.batchRef?.startsWith(typePrefix));
         } else if (qty < 0) {
           // เดิมลดสต็อก → ต้องสร้าง batch ใหม่
           variant.batches.push({
-            batchRef: `ADJ-REVERSE-${Date.now()}`,
-            supplier: 'Adjustment Reverse',
+            batchRef: `${typePrefix}-REVERSE-${Date.now()}`,
+            supplier: `${order.type} Reverse`,
             cost: 0,
             quantity: Math.abs(qty),
             receivedAt: new Date(),
@@ -1271,11 +1352,13 @@ router.get('/dashboard', authenticateToken, authorizeRoles('owner', 'stock'), as
     }
 
     // Count orders for the date range
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // ✅ Use moment-timezone for Thailand timezone (Asia/Bangkok = UTC+7)
+    const thaiNow = moment.tz('Asia/Bangkok');
+    const todayThailand = thaiNow.clone().startOf('day').toDate();
+    const tomorrowThailand = thaiNow.clone().endOf('day').add(1, 'millisecond').toDate();
+    
     const ordersToday = await InventoryOrder.countDocuments({ 
-      createdAt: { $gte: today },
-      orderDate: { $gte: salesSince, $lte: salesUntil }
+      orderDate: { $gte: todayThailand, $lt: tomorrowThailand }
     });
     const pendingOrders = await InventoryOrder.countDocuments({ status: 'pending' });
     
@@ -1396,11 +1479,13 @@ router.get('/dashboard', authenticateToken, authorizeRoles('owner', 'stock'), as
       status: { $in: ['pending', 'completed'] },
     }).lean().limit(10);
     
-    const todayStart = new Date(now);
-    todayStart.setHours(0, 0, 0, 0);
+    // ✅ Use moment-timezone for Thailand timezone filtering
+    const thaiToday = moment.tz('Asia/Bangkok').clone().startOf('day').toDate();
+    const thaiTomorrow = moment.tz('Asia/Bangkok').clone().endOf('day').add(1, 'millisecond').toDate();
+    
     const inboundToday = inboundOrders.filter(order => {
       const orderDate = new Date(order.orderDate || order.createdAt);
-      return orderDate >= todayStart;
+      return orderDate >= thaiToday && orderDate < thaiTomorrow;
     }).slice(0, 5).map(order => ({
       id: order._id,
       reference: order.reference,
@@ -1481,7 +1566,7 @@ router.get('/dashboard', authenticateToken, authorizeRoles('owner', 'stock'), as
         $match: {
           type: 'sale',
           status: { $ne: 'cancelled' },
-          orderDate: { $gte: todayStart, $lte: now }
+          orderDate: { $gte: thaiToday, $lt: thaiTomorrow }
         }
       },
       { $unwind: '$items' },

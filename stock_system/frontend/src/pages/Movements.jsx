@@ -1,13 +1,5 @@
 import { useEffect, useState } from 'react';
 import api from '../api.js';
-import SearchableSelect from '../components/SearchableSelect.jsx';
-
-const MOVEMENT_TYPES = [
-  { value: 'adjust', label: '🔄 ปรับปรุงสต็อก' },
-  { value: 'damage', label: '💔 เสียหาย/ชำรุด' },
-  { value: 'expired', label: '⏰ หมดอายุ' },
-  { value: 'return', label: '↩️ รับคืนจากลูกค้า' },
-];
 
 const TYPE_LABELS = {
   in: '📥 รับเข้า',
@@ -33,18 +25,6 @@ export default function Movements() {
     return d.toISOString().split('T')[0];
   });
   const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
-
-  const [showForm, setShowForm] = useState(false);
-  const [products, setProducts] = useState([]);
-  const [selectedProduct, setSelectedProduct] = useState(null);
-  const [selectedVariant, setSelectedVariant] = useState(null);
-  const [formData, setFormData] = useState({
-    movementType: 'adjust',
-    quantity: '',
-    reason: '',
-    notes: '',
-  });
-  const [saving, setSaving] = useState(false);
 
   const fmtNumber = new Intl.NumberFormat('th-TH');
   const fmtDate = (date) => {
@@ -98,7 +78,6 @@ export default function Movements() {
 
   useEffect(() => {
     loadMovements();
-    loadProducts();
   }, []);
 
   const handleFilter = (e) => {
@@ -114,201 +93,15 @@ export default function Movements() {
     loadMovements(1);
   };
 
-  const handleProductChange = (productId) => {
-    const product = products.find((p) => p._id === productId);
-    setSelectedProduct(product || null);
-    setSelectedVariant(null);
-    if (product && product.variants?.length > 0) {
-      setSelectedVariant(product.variants[0]);
-    }
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!selectedProduct || !selectedVariant) {
-      setError('กรุณาเลือกสินค้า');
-      return;
-    }
-    if (!formData.quantity || formData.quantity === 0) {
-      setError('กรุณาระบุจำนวน');
-      return;
-    }
-
-    setSaving(true);
-    setError('');
-
-    try {
-      await api.post('/movements', {
-        productId: selectedProduct._id,
-        variantId: selectedVariant._id,
-        sku: selectedVariant.sku,
-        movementType: formData.movementType,
-        quantity: Number(formData.quantity),
-        reason: formData.reason,
-        notes: formData.notes,
-      });
-
-      setShowForm(false);
-      setSelectedProduct(null);
-      setSelectedVariant(null);
-      setFormData({ movementType: 'adjust', quantity: '', reason: '', notes: '' });
-      loadMovements(1);
-    } catch (err) {
-      setError(err.response?.data?.error || 'Failed to create movement');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const getNewStock = () => {
-    if (!selectedVariant || !formData.quantity) return null;
-    const current = selectedVariant.stockOnHand || 0;
-    const qty = Number(formData.quantity);
-    if (formData.movementType === 'adjust') return current + qty;
-    if (['damage', 'expired'].includes(formData.movementType)) return current - Math.abs(qty);
-    return current + Math.abs(qty);
-  };
-
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold text-gray-800">📦 การเคลื่อนไหวสต็อก</h1>
-        <button
-          className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-            showForm ? 'bg-gray-200 hover:bg-gray-300 text-gray-700' : 'bg-blue-600 hover:bg-blue-700 text-white'
-          }`}
-          onClick={() => setShowForm(!showForm)}
-        >
-          {showForm ? 'ยกเลิก' : '+ ปรับปรุงสต็อก'}
-        </button>
+        <div className="text-sm text-gray-600 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+          💡 ปรับปรุงสต็อก: ใช้หน้า <strong>Orders</strong> (ประเภท: Adjustment, Damage, Expired, Return)
+        </div>
       </div>
-
-      {error && (
-        <div className="bg-amber-50 border border-amber-200 text-amber-700 p-4 rounded-lg flex items-center gap-3">
-          <span className="text-2xl">⚠️</span>
-          <span>{error}</span>
-          <button onClick={() => loadMovements()} className="ml-auto bg-amber-600 hover:bg-amber-700 text-white px-3 py-1 rounded text-sm">
-            🔄 ลองใหม่
-          </button>
-        </div>
-      )}
-
-      {/* Form */}
-      {showForm && (
-        <div className="bg-gray-50 border border-gray-200 rounded-xl p-6">
-          <h3 className="text-lg font-semibold text-gray-800 mb-4">ปรับปรุงสต็อก</h3>
-          <form onSubmit={handleSubmit}>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">สินค้า *</label>
-                <SearchableSelect
-                  options={products.map((p) => ({ value: p._id, label: p.name }))}
-                  value={selectedProduct?._id || ''}
-                  onChange={handleProductChange}
-                  placeholder="เลือกสินค้า..."
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">รายการ *</label>
-                <select
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-gray-100"
-                  value={selectedVariant?._id || ''}
-                  onChange={(e) => {
-                    const variant = selectedProduct?.variants?.find((v) => v._id === e.target.value);
-                    setSelectedVariant(variant || null);
-                  }}
-                  disabled={!selectedProduct}
-                >
-                  <option value="">เลือกรายการ...</option>
-                  {(selectedProduct?.variants || []).map((v) => (
-                    <option key={v._id} value={v._id}>
-                      {v.sku} - สต็อก: {fmtNumber.format(v.stockOnHand || 0)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">ประเภท *</label>
-                <select
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  value={formData.movementType}
-                  onChange={(e) => setFormData({ ...formData, movementType: e.target.value })}
-                >
-                  {MOVEMENT_TYPES.map((t) => (
-                    <option key={t.value} value={t.value}>
-                      {t.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  จำนวน * {formData.movementType === 'adjust' && <span className="text-gray-500">(+ เพิ่ม / - ลด)</span>}
-                </label>
-                <input
-                  type="number"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  value={formData.quantity}
-                  onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
-                  placeholder={formData.movementType === 'adjust' ? 'เช่น 10 หรือ -5' : 'จำนวน'}
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">เหตุผล</label>
-                <input
-                  type="text"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  value={formData.reason}
-                  onChange={(e) => setFormData({ ...formData, reason: e.target.value })}
-                  placeholder="เหตุผลในการปรับปรุง"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">หมายเหตุ</label>
-                <input
-                  type="text"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                  value={formData.notes}
-                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                  placeholder="หมายเหตุเพิ่มเติม"
-                />
-              </div>
-            </div>
-
-            {selectedVariant && (
-              <p className="mt-4 text-gray-600">
-                สต็อกปัจจุบัน: <strong>{fmtNumber.format(selectedVariant.stockOnHand || 0)}</strong>
-                {formData.quantity && (
-                  <>
-                    {' → '}
-                    <strong className={getNewStock() < 0 ? 'text-red-600' : 'text-green-600'}>
-                      {fmtNumber.format(getNewStock())}
-                    </strong>
-                  </>
-                )}
-              </p>
-            )}
-
-            <div className="mt-4 flex gap-2">
-              <button
-                type="submit"
-                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium disabled:opacity-50"
-                disabled={saving}
-              >
-                {saving ? 'กำลังบันทึก...' : 'บันทึก'}
-              </button>
-              <button
-                type="button"
-                className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-4 py-2 rounded-lg"
-                onClick={() => setShowForm(false)}
-              >
-                ยกเลิก
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
 
       {/* Filters */}
       <form onSubmit={handleFilter} className="flex flex-wrap gap-3 items-end">

@@ -16,6 +16,13 @@ const getDefaultExpiryDate = () => {
   return d.toISOString().split('T')[0];
 };
 
+// ✅ Get today's date in Thailand timezone (UTC+7)
+const getTodayThailand = () => {
+  const now = new Date();
+  const thaiDate = new Date(now.getTime() + (7 * 60 * 60 * 1000)); // Add 7 hours for UTC+7
+  return thaiDate.toISOString().split('T')[0]; // Format as YYYY-MM-DD
+};
+
 // Generate reference number like SO2569-0001, PO2569-0001, etc.
 // ✅ ดึง max number จาก reference string แทนการนับ length (เพราะ orders มี pagination)
 const generateReference = (type, orderDate, orders) => {
@@ -23,6 +30,9 @@ const generateReference = (type, orderDate, orders) => {
     sale: 'SO',
     purchase: 'PO',
     adjustment: 'ADJ',
+    damage: 'DMG',
+    expired: 'EXP',
+    return: 'RTN',
   };
   const prefix = prefixes[type] || type.toUpperCase();
   const thaiYear = getThaiYear(orderDate);
@@ -46,14 +56,14 @@ const generateReference = (type, orderDate, orders) => {
   return `${prefix}${thaiYear}-${paddedNumber}`;
 };
 
-const defaultItem = { productId: '', variantId: '', quantity: 1, unitPrice: 0, type: 'sale', expiryDate: '', batchRef: '' };
+const defaultItem = { productId: '', variantId: '', quantity: 1, unitPrice: 0, type: 'sale', expiryDate: '', batchRef: '', supplier: '' };
 
 export default function Orders() {
   const [products, setProducts] = useState([]);
   const [items, setItems] = useState([defaultItem]);
   const [reference, setReference] = useState('');
   const [type, setType] = useState('sale');
-  const [orderDate, setOrderDate] = useState(new Date().toISOString().split('T')[0]);
+  const [orderDate, setOrderDate] = useState(getTodayThailand());
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [orders, setOrders] = useState([]);
@@ -344,31 +354,51 @@ export default function Orders() {
     setError('');
     setMessage('');
     try {
+      // ✅ Adjust orderDate for Thailand timezone (UTC+7)
+      // date input จะส่ง ISO string ที่ interpret เป็น UTC, ต้อง adjust ให้เป็น local midnight
+      const adjustedDate = new Date(orderDate);
+      adjustedDate.setHours(adjustedDate.getHours() + 7); // Add 7 hours for UTC+7
+      
       const payload = {
         type,
         reference,
-        orderDate,
+        orderDate: adjustedDate.toISOString(),
         items: items.map((it) => {
           const product = products.find((p) => p._id === it.productId);
           const variant = product?.variants?.find((v) => v._id === it.variantId);
           
+          // ✅ ต้องมี productId, variantId, quantity ทั้งหมด
+          if (!it.productId || !it.variantId) {
+            throw new Error('โปรดเลือกสินค้าและเวอร์ชันให้ครบ');
+          }
+          
+          const qty = Number(it.quantity);
+          if (isNaN(qty) || qty === 0) {
+            throw new Error('โปรดระบุจำนวนสินค้าให้ถูกต้อง (ต้องมากกว่า 0)');
+          }
+          
           const item = {
             productId: it.productId,
             variantId: it.variantId,
-            quantity: Number(it.quantity) || 0,
+            quantity: qty,
           };
           
-          // ✅ Sale order: Backend จะคิด unitCost จาก batch อัตโนมัติ
-          // ผู้ใช้ส่งแค่ unitPrice (ราคาขาย)
+          // ✅ Sale order: ส่ง unitPrice (ราคาขาย)
+          // Backend จะคิด unitCost จาก batch อัตโนมัติ
           if (type === 'sale') {
             item.unitPrice = Number(it.unitPrice) || 0;
           } else {
-            // ✅ Purchase/Adjustment: ส่งแค่ unitPrice (ต้นทุน/มูลค่า)
+            // ✅ Purchase/Adjustment/Damage/Expired/Return: ส่ง unitPrice → backend จะ map เป็น cost
             item.unitPrice = Number(it.unitPrice) || 0;
           }
           
+          // ✅ ส่ง unitCost สำหรับ batch tracking
+          item.unitCost = Number(it.unitPrice) || 0;
+          
           if (it.batchRef) item.batchRef = it.batchRef;
           if (it.expiryDate) item.expiryDate = it.expiryDate;
+          if (it.supplier) item.supplier = it.supplier;
+          if (it.notes) item.notes = it.notes;
           return item;
         }),
       };
@@ -569,6 +599,9 @@ export default function Orders() {
                     <option value="sale">Sale (ขาย) - บันทึกการขายสินค้า</option>
                     <option value="purchase">Purchase (ซื้อ) - บันทึกการสั่งซื้อสินค้า</option>
                     <option value="adjustment">Adjustment (ปรับปรุง) - ปรับปรุงสต็อก</option>
+                    <option value="damage">Damage (เสียหาย) - เสียหาย/ชำรุด</option>
+                    <option value="expired">Expired (หมดอายุ) - หมดอายุการใช้งาน</option>
+                    <option value="return">Return (รับคืน) - รับคืนจากลูกค้า</option>
                   </select>
                   {type === 'sale' && (
                     <p className="text-xs text-blue-600 mt-1">💰 ใช้ราคาขายที่จะขายให้ลูกค้า</p>
@@ -577,7 +610,16 @@ export default function Orders() {
                     <p className="text-xs text-orange-600 mt-1">💵 ใช้ราคาต้นทุนที่ซื้อมา</p>
                   )}
                   {type === 'adjustment' && (
-                    <p className="text-xs text-purple-600 mt-1">✅ เหมาะกับนับสต็อก (หลาย SKU พร้อมกัน) | สำหรับ 1 SKU ใช้หน้า Movements</p>
+                    <p className="text-xs text-purple-600 mt-1">✅ ปรับปรุงสต็อก (สินค้ามากชนิด)</p>
+                  )}
+                  {type === 'damage' && (
+                    <p className="text-xs text-red-600 mt-1">💔 บันทึกสินค้าเสียหาย/ชำรุด</p>
+                  )}
+                  {type === 'expired' && (
+                    <p className="text-xs text-red-600 mt-1">⏰ บันทึกสินค้าหมดอายุ</p>
+                  )}
+                  {type === 'return' && (
+                    <p className="text-xs text-green-600 mt-1">↩️ บันทึกสินค้ารับคืนจากลูกค้า</p>
                   )}
                 </div>
                 <div>
@@ -662,35 +704,45 @@ export default function Orders() {
                           })()}
                         </div>
                         <div>
-                          <label className="block text-xs text-gray-500 mb-1">
-                            {type === 'sale' ? '💰 ราคาขาย/หน่วย' : '💵 ต้นทุน/หน่วย'}
-                            <span 
-                              className="ml-1 text-gray-400 cursor-help" 
-                              title={
-                                type === 'sale' 
-                                  ? 'ราคาที่ขายให้ลูกค้า' 
-                                  : type === 'purchase' 
-                                    ? 'ราคาต้นทุนที่ซื้อมา (จะบันทึกใน batch.cost)' 
-                                    : 'ราคาต้นทุนสำหรับบันทึก batch'
-                              }
-                            >
-                              ℹ️
-                            </span>
-                          </label>
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                            value={item.unitPrice}
-                            onChange={(e) => updateItem(idx, { unitPrice: e.target.value })}
-                            placeholder={type === 'sale' ? 'ราคาขาย' : 'ราคาต้นทุน'}
-                          />
-                          {type === 'sale' && (
-                            <p className="text-xs text-blue-500 mt-0.5">ราคาที่ขายให้ลูกค้า</p>
+                          {/* ✅ ซ่อน cost field สำหรับ damage/expired (ลด batch ที่มี cost อยู่แล้ว) */}
+                          {!['damage', 'expired'].includes(type) && (
+                            <>
+                              <label className="block text-xs text-gray-500 mb-1">
+                                {type === 'sale' ? '💰 ราคาขาย/หน่วย' : '💵 ต้นทุน/หน่วย'}
+                                <span 
+                                  className="ml-1 text-gray-400 cursor-help" 
+                                  title={
+                                    type === 'sale' 
+                                      ? 'ราคาที่ขายให้ลูกค้า' 
+                                      : type === 'purchase' 
+                                        ? 'ราคาต้นทุนที่ซื้อมา (จะบันทึกใน batch.cost)' 
+                                        : 'ราคาต้นทุนสำหรับบันทึก batch'
+                                  }
+                                >
+                                  ℹ️
+                                </span>
+                              </label>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                value={item.unitPrice}
+                                onChange={(e) => updateItem(idx, { unitPrice: e.target.value })}
+                                placeholder={type === 'sale' ? 'ราคาขาย' : 'ราคาต้นทุน'}
+                              />
+                              {type === 'sale' && (
+                                <p className="text-xs text-blue-500 mt-0.5">ราคาที่ขายให้ลูกค้า</p>
+                              )}
+                              {(type === 'purchase' || type === 'adjustment') && (
+                                <p className="text-xs text-orange-500 mt-0.5">ราคาต้นทุน (cost)</p>
+                              )}
+                            </>
                           )}
-                          {(type === 'purchase' || type === 'adjustment') && (
-                            <p className="text-xs text-orange-500 mt-0.5">ราคาต้นทุน (cost)</p>
+                          {['damage', 'expired'].includes(type) && (
+                            <div className="px-3 py-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-600 text-xs">
+                              💡 ต้นทุนจาก batch ที่มีอยู่ (ไม่ต้องกำหนด)
+                            </div>
                           )}
                         </div>
                       </div>
@@ -716,6 +768,31 @@ export default function Orders() {
                               onChange={(e) => updateItem(idx, { expiryDate: e.target.value })}
                             />
                             <p className="text-xs text-gray-400 mt-1">สำหรับสินค้าที่มีอายุการใช้ (เช่น ยา อาหาร)</p>
+                          </div>
+                        </div>
+                      )}
+                      {/* Damage/Expired/Return: เพิ่มช่อง Supplier และ หมายเหตุ */}
+                      {['damage', 'expired', 'return'].includes(type) && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">ประเภท/แหล่งที่มา</label>
+                            <input
+                              type="text"
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                              value={item.supplier || ''}
+                              onChange={(e) => updateItem(idx, { supplier: e.target.value })}
+                              placeholder={type === 'damage' ? 'เช่น หมาดหน้า' : type === 'expired' ? 'วันหมดอายุ' : 'เช่น ลูกค้าร้องเรียน'}
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">หมายเหตุ (ไม่บังคับ)</label>
+                            <input
+                              type="text"
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                              value={item.notes || ''}
+                              onChange={(e) => updateItem(idx, { notes: e.target.value })}
+                              placeholder="หมายเหตุเพิ่มเติม"
+                            />
                           </div>
                         </div>
                       )}
@@ -776,6 +853,9 @@ export default function Orders() {
                     <option value="sale">Sale (ขาย)</option>
                     <option value="purchase">Purchase (ซื้อ)</option>
                     <option value="adjustment">Adjustment (ปรับปรุง)</option>
+                    <option value="damage">Damage (เสียหาย)</option>
+                    <option value="expired">Expired (หมดอายุ)</option>
+                    <option value="return">Return (รับคืน)</option>
                   </select>
                 </div>
                 <div>
