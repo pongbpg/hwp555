@@ -416,7 +416,13 @@ export default function Insights() {
 
   const counts = data?.meta?.counts || {};
 
-  const fastMoversData = (data?.fastMovers || []).slice(0, topN).map(fm => ({
+  // ✅ คำนวณ total จากทั้งหมดก่อน (ไม่ slice)
+  const allFastMovers = (data?.fastMovers || []);
+  const totalSold = allFastMovers.reduce((sum, f) => sum + (f.quantitySold || 0), 0);
+  const avgDailyRate = allFastMovers.reduce((sum, f) => sum + (f.dailySalesRate || 0), 0);
+
+  // จากนั้นค่อย slice สำหรับแสดงผล
+  const fastMoversData = allFastMovers.slice(0, topN).map(fm => ({
     label: `${fm.productName} (${fm.sku})`,
     productName: fm.productName,
     sku: fm.sku,
@@ -625,8 +631,6 @@ export default function Insights() {
       metricsView === 'brand' ? '🏷️ ตัวชี้วัด: แบรนด์' :
         '📁 ตัวชี้วัด: หมวดหมู่';
 
-  const totalSold = fastMoversData.reduce((sum, f) => sum + f.quantitySold, 0);
-  const avgDailyRate = fastMoversData.reduce((sum, f) => sum + f.dailySalesRate, 0);
   const criticalItems = reorderData.filter(r => r.daysUntilStockOut <= 7).length;
 
   return (
