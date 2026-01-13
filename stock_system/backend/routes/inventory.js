@@ -812,15 +812,17 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
     
     // ✅ รองรับ dateFrom และ dateTo หรือ days
     let salesSince;
+    let salesUntil; // ✅ เพิ่ม upper bound
     if (req.query.dateFrom && req.query.dateTo) {
       // ถ้าระบุช่วงวันที่ ให้ใช้ช่วงนั้น
       salesSince = new Date(req.query.dateFrom);
-      const dateToObj = new Date(req.query.dateTo);
-      // ตั้งให้จบวันสุดท้ายนี้
-      dateToObj.setHours(23, 59, 59, 999);
+      salesSince.setHours(0, 0, 0, 0); // เริ่มต้นวัน
+      salesUntil = new Date(req.query.dateTo);
+      salesUntil.setHours(23, 59, 59, 999); // สิ้นสุดวัน
     } else {
       // ถ้าไม่ระบุ ให้ใช้ days (default 30)
       salesSince = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+      salesUntil = now; // จนถึงตอนนี้
     }
     
     const expiryBefore = new Date(now.getTime() + expiryDays * 24 * 60 * 60 * 1000);
@@ -831,8 +833,9 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
       : (Number(req.query.days) || 30);
 
     // คำนวณยอดขาย (ใช้ orderDate แทน createdAt เพื่อความถูกต้อง)
+    // ✅ เพิ่ม $lte: salesUntil เพื่อกรองช่วงบน
     const salesData = await InventoryOrder.aggregate([
-      { $match: { type: 'sale', orderDate: { $gte: salesSince }, status: { $ne: 'cancelled' } } },
+      { $match: { type: 'sale', orderDate: { $gte: salesSince, $lte: salesUntil }, status: { $ne: 'cancelled' } } },
       { $unwind: '$items' },
       {
         $group: {
@@ -904,29 +907,9 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
         const leadTimeDays = product.leadTimeDays || 7;
         const bufferDays = product.reorderBufferDays ?? 7;
         
-        // ✅ ใช้ leadTimeDays + bufferDays สำหรับ sales period (เหมือน Alerts endpoint)
-        const alertSalesPeriodDays = leadTimeDays + bufferDays;
-        const alertSalesSince = new Date(now.getTime() - alertSalesPeriodDays * 24 * 60 * 60 * 1000);
-        
-        // ดึงยอดขายตามช่วงเวลา leadTime + bufferDays (เหมือน Alerts)
-        const alertSalesData = await InventoryOrder.aggregate([
-          { $match: { type: 'sale', orderDate: { $gte: alertSalesSince }, status: { $ne: 'cancelled' } } },
-          { $unwind: '$items' },
-          {
-            $match: {
-              'items.variantId': variant._id,
-            },
-          },
-          {
-            $group: {
-              _id: null,
-              totalSold: { $sum: '$items.quantity' },
-            },
-          },
-        ]);
-        
-        const quantitySold = alertSalesData[0]?.totalSold || 0;
-        const dailySalesRate = quantitySold / alertSalesPeriodDays;
+        // ✅ ใช้ quantitySold จาก salesMap (ตามช่วงวันที่ที่เลือก) แทนการ query ใหม่
+        const quantitySold = salesMap.get(key) || 0;
+        const dailySalesRate = quantitySold / salesPeriodDays; // ใช้ salesPeriodDays จากช่วงวันที่ที่เลือก
         
         const incoming = Number(variant.incoming) || 0;
         // ✅ ใช้ stockOnHand + incoming (รวมสินค้าสั่งไปแล้ว) 
@@ -965,10 +948,10 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
         const cat = groupByCategory.get(catKey) || { categoryId: catId, categoryName: catLabel, totalSold: 0, totalStock: 0, dailySalesRate: 0 };
         const br = groupByBrand.get(brandKey) || { brandId: brandId, brandName: brandLabel, totalSold: 0, totalStock: 0, dailySalesRate: 0 };
         cat.totalSold += quantitySold;
-        cat.totalStock += availableStock; // ✅ ใช้ availableStock (รวม incoming)
+        cat.totalStock += variant.stockOnHand || 0; // ✅ ใช้ stockOnHand แทน availableStock เพื่อให้ตรงกับ Dashboard
         cat.dailySalesRate += dailySalesRate;
         br.totalSold += quantitySold;
-        br.totalStock += availableStock; // ✅ ใช้ availableStock (รวม incoming)
+        br.totalStock += variant.stockOnHand || 0; // ✅ ใช้ stockOnHand แทน availableStock เพื่อให้ตรงกับ Dashboard
         br.dailySalesRate += dailySalesRate;
         groupByCategory.set(catKey, cat);
         groupByBrand.set(brandKey, br);

@@ -364,7 +364,7 @@ export default function Insights() {
 
   const fmtNumber = new Intl.NumberFormat('th-TH');
 
-  const load = useCallback(async () => {
+  const load = async () => {
     setLoading(true);
     setError('');
     try {
@@ -373,14 +373,19 @@ export default function Insights() {
         ? `/inventory/insights?dateFrom=${dateFrom}&dateTo=${dateTo}`
         : `/inventory/insights?days=${days}`;
       
+      console.log('🔍 [Insights] Loading data with URL:', url);
       const res = await api.get(url);
+      console.log('✅ [Insights] Data loaded:', { 
+        fastMovers: res.data?.fastMovers?.length,
+        dateRange: useDateRange ? `${dateFrom} - ${dateTo}` : `${days} days`
+      });
       setData(res.data);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to load insights');
     } finally {
       setLoading(false);
     }
-  }, [days, useDateRange, dateFrom, dateTo]);
+  };
 
   useEffect(() => {
     const isInitialMount = data === null;
@@ -500,7 +505,9 @@ export default function Insights() {
       }
       const product = productMap.get(key);
       product.totalSold += quantitySold || 0;
-      product.totalStock += currentStock || 0;
+      // ✅ ใช้ stockOnHand (currentStock - incoming) เพื่อให้ตรงกับ Dashboard
+      const stockOnHand = (currentStock || 0) - (incoming || 0);
+      product.totalStock += stockOnHand;
       product.totalIncoming += incoming || 0;
       product.dailySalesRate += dailySalesRate || 0;
       product.variantCount++;
@@ -512,33 +519,90 @@ export default function Insights() {
     const allDeadStock = data?.deadStock || [];
     const allReorder = data?.reorderSuggestions || [];
 
-    // Process fast movers (ทั้งหมด)
+    // ✅ สร้าง variant-level map เพื่อรวมทุก variants ของแต่ละ product
+    const variantMap = new Map(); // variantId -> variant data
+    
+    // รวบรวม variants จากทุก sources
     allFastMovers.forEach(fm => {
-      addProductToMap(fm.productId, fm.productName, fm.categoryName, fm.brandName, fm.quantitySold, fm.currentStock, fm.incoming, fm.dailySalesRate);
+      const vKey = String(fm.variantId);
+      if (!variantMap.has(vKey)) {
+        variantMap.set(vKey, {
+          productId: fm.productId,
+          productName: fm.productName,
+          categoryName: fm.categoryName,
+          brandName: fm.brandName,
+          variantId: fm.variantId,
+          quantitySold: fm.quantitySold || 0,
+          currentStock: fm.currentStock || 0,
+          incoming: fm.incoming || 0,
+          dailySalesRate: fm.dailySalesRate || 0,
+        });
+      }
     });
-
-    // Process low stock (skip if already in map)
+    
     allLowStock.forEach(ls => {
-      const key = String(ls.productId);
-      if (!productMap.has(key)) {
-        addProductToMap(ls.productId, ls.productName, '', '', 0, ls.stockOnHand, 0, 0);
+      const vKey = String(ls.variantId);
+      if (!variantMap.has(vKey)) {
+        variantMap.set(vKey, {
+          productId: ls.productId,
+          productName: ls.productName,
+          categoryName: '',
+          brandName: '',
+          variantId: ls.variantId,
+          quantitySold: 0,
+          currentStock: ls.availableStock || ls.stockOnHand || 0, // availableStock = stockOnHand + incoming
+          incoming: ls.incoming || 0,
+          dailySalesRate: 0,
+        });
       }
     });
-
-    // Process dead stock (skip if already in map)
+    
     allDeadStock.forEach(ds => {
-      const key = String(ds.productId);
-      if (!productMap.has(key)) {
-        addProductToMap(ds.productId, ds.productName, ds.categoryName, ds.brandName, ds.quantitySold, ds.currentStock, ds.incoming, ds.dailySalesRate);
+      const vKey = String(ds.variantId);
+      if (!variantMap.has(vKey)) {
+        variantMap.set(vKey, {
+          productId: ds.productId,
+          productName: ds.productName,
+          categoryName: ds.categoryName,
+          brandName: ds.brandName,
+          variantId: ds.variantId,
+          quantitySold: ds.quantitySold || 0,
+          currentStock: ds.currentStock || 0,
+          incoming: ds.incoming || 0,
+          dailySalesRate: ds.dailySalesRate || 0,
+        });
       }
     });
-
-    // Process reorder (skip if already in map)
+    
     allReorder.forEach(rd => {
-      const key = String(rd.productId);
-      if (!productMap.has(key)) {
-        addProductToMap(rd.productId, rd.productName, '', '', rd.quantitySold, rd.currentStock, rd.incoming, rd.dailySalesRate);
+      const vKey = String(rd.variantId);
+      if (!variantMap.has(vKey)) {
+        variantMap.set(vKey, {
+          productId: rd.productId,
+          productName: rd.productName,
+          categoryName: '',
+          brandName: '',
+          variantId: rd.variantId,
+          quantitySold: rd.quantitySold || 0,
+          currentStock: rd.currentStock || 0,
+          incoming: rd.incoming || 0,
+          dailySalesRate: rd.avgDailySales || 0,
+        });
       }
+    });
+    
+    // ✅ ตอนนี้รวม variants เข้าไปใน products
+    variantMap.forEach(variant => {
+      addProductToMap(
+        variant.productId,
+        variant.productName,
+        variant.categoryName,
+        variant.brandName,
+        variant.quantitySold,
+        variant.currentStock,
+        variant.incoming,
+        variant.dailySalesRate
+      );
     });
 
     return Array.from(productMap.values())
@@ -572,6 +636,7 @@ export default function Insights() {
         <div>
           <h1 className="text-3xl font-bold text-gray-800">📈 Insights & Analytics</h1>
           <p className="text-gray-500 text-sm mt-1">วิเคราะห์เชิงลึก{useDateRange ? ` (${dateFrom} ถึง ${dateTo})` : ` (${days} วันย้อนหลัง)`}</p>
+          <p className="text-blue-600 text-xs mt-1">💡 <strong>หมายเหตุ:</strong> ยอดขาย = ช่วงวันที่ที่เลือก | สต็อก = ปัจจุบัน ณ วันนี้</p>
         </div>
         <div className="flex items-center gap-2 whitespace-nowrap">
           <label className="text-sm font-medium text-gray-700">แสดงสินค้า:</label>
