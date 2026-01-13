@@ -1,7 +1,9 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import moment from 'moment-timezone';
 
 export default function DateRangeFilter({ dateFrom, setDateFrom, dateTo, setDateTo, useDateRange, setUseDateRange, onSearch }) {
+  const [activeQuickSelect, setActiveQuickSelect] = useState(null);
+
   // Initialize default dates on first render (Bangkok timezone)
   useEffect(() => {
     if (!dateFrom || !dateTo) {
@@ -62,6 +64,7 @@ export default function DateRangeFilter({ dateFrom, setDateFrom, dateTo, setDate
     setDateFrom(fromDate);
     setDateTo(toDate);
     setUseDateRange(true);
+    setActiveQuickSelect(type);
   };
 
   return (
@@ -72,43 +75,71 @@ export default function DateRangeFilter({ dateFrom, setDateFrom, dateTo, setDate
           <label className="text-sm font-medium text-gray-700 whitespace-nowrap">เลือกช่วงเวลาด่วน:</label>
           <button
             onClick={() => handleQuickSelect('today')}
-            className="px-3 py-1.5 text-sm bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors"
+            className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+              activeQuickSelect === 'today'
+                ? 'bg-blue-600 text-white hover:bg-blue-700'
+                : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+            }`}
           >
             วันนี้
           </button>
           <button
             onClick={() => handleQuickSelect('yesterday')}
-            className="px-3 py-1.5 text-sm bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors"
+            className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+              activeQuickSelect === 'yesterday'
+                ? 'bg-blue-600 text-white hover:bg-blue-700'
+                : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+            }`}
           >
             เมื่อวาน
           </button>
           <button
             onClick={() => handleQuickSelect('7days')}
-            className="px-3 py-1.5 text-sm bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors"
+            className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+              activeQuickSelect === '7days'
+                ? 'bg-blue-600 text-white hover:bg-blue-700'
+                : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+            }`}
           >
             7 วันที่ผ่านมา
           </button>
           <button
             onClick={() => handleQuickSelect('14days')}
-            className="px-3 py-1.5 text-sm bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors"
+            className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+              activeQuickSelect === '14days'
+                ? 'bg-blue-600 text-white hover:bg-blue-700'
+                : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+            }`}
           >
             14 วันที่ผ่านมา
           </button>
           <button
             onClick={() => handleQuickSelect('30days')}
-            className="px-3 py-1.5 text-sm bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors"
+            className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+              activeQuickSelect === '30days'
+                ? 'bg-blue-600 text-white hover:bg-blue-700'
+                : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+            }`}
           >
             30 วันที่ผ่านมา
           </button>
           <button
             onClick={() => handleQuickSelect('thisMonth')}
-            className="px-3 py-1.5 text-sm bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors"
+            className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+              activeQuickSelect === 'thisMonth'
+                ? 'bg-blue-600 text-white hover:bg-blue-700'
+                : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+            }`}
           >
             เดือนนี้
           </button>
           <button
             onClick={() => handleQuickSelect('lastMonth')}
-            className="px-3 py-1.5 text-sm bg-gray-200 hover:bg-gray-300 rounded-lg transition-colors"
+            className={`px-3 py-1.5 text-sm rounded-lg transition-colors ${
+              activeQuickSelect === 'lastMonth'
+                ? 'bg-blue-600 text-white hover:bg-blue-700'
+                : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+            }`}
           >
             เดือนที่แล้ว
           </button>
@@ -121,7 +152,10 @@ export default function DateRangeFilter({ dateFrom, setDateFrom, dateTo, setDate
             <input
               type="date"
               value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
+              onChange={(e) => {
+                setDateFrom(e.target.value);
+                setActiveQuickSelect(null);
+              }}
               className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
             />
           </div>
@@ -131,7 +165,10 @@ export default function DateRangeFilter({ dateFrom, setDateFrom, dateTo, setDate
             <input
               type="date"
               value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
+              onChange={(e) => {
+                setDateTo(e.target.value);
+                setActiveQuickSelect(null);
+              }}
               className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
             />
           </div>
