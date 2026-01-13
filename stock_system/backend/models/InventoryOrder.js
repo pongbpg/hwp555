@@ -13,8 +13,11 @@ const orderItemSchema = new Schema(
     unitPrice: { type: Number, default: 0 },
     // ✅ เก็บต้นทุนของแต่ละ item เพื่อใช้ตอนยกเลิก
     unitCost: { type: Number, default: 0 },
+    // ✅ สำหรับ adjustment: เก็บ delta ที่เปลี่ยนแปลงจริง (targetStock - currentStock)
+    actualDelta: { type: Number },
     batchRef: String,
     expiryDate: Date,
+    supplier: String, // ✅ ชื่อผู้จัดจำหน่าย/แหล่งที่มา
     notes: String,
   },
   { _id: false }

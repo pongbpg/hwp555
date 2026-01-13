@@ -374,8 +374,17 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
         }
         
         itemData.unitCost = unitCostFromBatch || variant.cost || 0;
+      } else if (type === 'adjustment') {
+        // ✅ Adjustment: บันทึก actualDelta สำหรับใช้ตอน cancel
+        const currentStock = variant.stockOnHand || 0;
+        const targetStock = qty;
+        const actualDelta = targetStock - currentStock;
+        
+        itemData.actualDelta = actualDelta; // 🆕 บันทึก delta
+        itemData.unitPrice = rawItem.unitPrice ?? variant.cost ?? 0;
+        itemData.unitCost = rawItem.unitCost ?? rawItem.unitPrice ?? variant.cost ?? 0;
       } else {
-        // ✅ Purchase/Adjustment/Damage/Expired/Return: ใช้ unitPrice ส่งมา (จะ map เป็น cost ใน batch)
+        // ✅ Purchase/Damage/Expired/Return: ใช้ unitPrice ส่งมา (จะ map เป็น cost ใน batch)
         itemData.unitPrice = rawItem.unitPrice ?? variant.cost ?? 0;
         itemData.unitCost = rawItem.unitCost ?? rawItem.unitPrice ?? variant.cost ?? 0;
       }
@@ -764,24 +773,85 @@ router.patch('/orders/:id/cancel', authenticateToken, authorizeRoles('owner', 'a
           quantity: qty,
           receivedAt: new Date(),
         });
-      } else if (order.type === 'adjustment' || order.type === 'damage' || order.type === 'expired' || order.type === 'return') {
-        // Rollback: ลบ adjustment/damage/expired/return batch ออก
-        // ถ้า qty > 0 ลบ batch ที่สร้าง, ถ้า qty < 0 สร้าง batch ใหม่กลับ
+      } else if (order.type === 'damage' || order.type === 'expired') {
+        // ✅ Damage/Expired: เดิมลดสต็อก (consume batches) → ยกเลิกต้องคืนสต็อก (สร้าง batch)
         const qty = Number(item.quantity) || 0;
         const typePrefix = order.type.toUpperCase();
-        if (qty > 0) {
-          // เดิมเพิ่มสต็อก → ต้องลบ batch ที่เพิ่มไป
-          // ลบ batch ที่ batchRef เริ่มด้วย DMG, EXP, RTN, ADJ
-          variant.batches = (variant.batches || []).filter((b) => !b.batchRef?.startsWith(typePrefix));
-        } else if (qty < 0) {
-          // เดิมลดสต็อก → ต้องสร้าง batch ใหม่
-          variant.batches.push({
-            batchRef: `${typePrefix}-REVERSE-${Date.now()}`,
-            supplier: `${order.type} Reverse`,
-            cost: 0,
-            quantity: Math.abs(qty),
-            receivedAt: new Date(),
-          });
+        const costToRestore = item.unitCost || 0;
+        
+        variant.batches.push({
+          batchRef: `${typePrefix}-REVERSE-${Date.now()}`,
+          supplier: `${order.type} Cancelled - Stock Return`,
+          cost: costToRestore,
+          quantity: qty,
+          receivedAt: new Date(),
+        });
+      } else if (order.type === 'return') {
+        // ✅ Return: เดิมเพิ่มสต็อก (สร้าง batch) → ยกเลิกต้องลบ batch ที่เพิ่ม
+        variant.batches = (variant.batches || []).filter((b) => !b.batchRef?.startsWith('RTN'));
+      } else if (order.type === 'adjustment') {
+        // ✅ Adjustment: ใช้ actualDelta ที่บันทึกไว้ (ถ้ามี)
+        const actualDelta = item.actualDelta; // delta ที่แท้จริง (+ = เพิ่ม, - = ลด)
+        
+        if (actualDelta !== undefined && actualDelta !== null) {
+          // ✅ มี actualDelta → ทำ rollback ได้อย่างถูกต้อง
+          if (actualDelta > 0) {
+            // เดิมเพิ่มสต็อก → ยกเลิกต้องลบ batch ที่เพิ่มไป
+            // 🔧 ลบเฉพาะ batch ที่มาจาก order นี้ (เช็คจำนวนที่ตรงกับ actualDelta)
+            // เรียงตาม receivedAt (ใหม่สุดก่อน) เพื่อลบ batch ที่สร้างล่าสุด
+            const sortedBatches = [...(variant.batches || [])].sort((a, b) => 
+              new Date(b.receivedAt || 0) - new Date(a.receivedAt || 0)
+            );
+            
+            let remainingToRemove = Math.abs(actualDelta);
+            const batchesToKeep = [];
+            
+            for (const batch of sortedBatches) {
+              if (remainingToRemove > 0 && batch.batchRef?.startsWith('ADJ') && batch.quantity === remainingToRemove) {
+                // พบ batch ที่ตรงกับจำนวน actualDelta → ลบทิ้ง
+                remainingToRemove = 0;
+                continue;
+              }
+              batchesToKeep.push(batch);
+            }
+            
+            variant.batches = batchesToKeep;
+          } else if (actualDelta < 0) {
+            // เดิมลดสต็อก (consume) → ยกเลิกต้องคืนสต็อกกลับ
+            const costToRestore = item.unitCost || 0;
+            variant.batches.push({
+              batchRef: `ADJ-REVERSE-${Date.now()}`,
+              supplier: 'Adjustment Cancelled - Stock Return',
+              cost: costToRestore,
+              quantity: Math.abs(actualDelta), // คืนจำนวนที่ลดไป
+              receivedAt: new Date(),
+            });
+          }
+          // ถ้า actualDelta === 0 ไม่ต้องทำอะไร (ไม่มีการเปลี่ยนแปลงสต็อก)
+        } else {
+          // ⚠️ ไม่มี actualDelta (orders เก่าก่อนการอัพเดท)
+          // ลบ ADJ batch ล่าสุดเท่านั้น (สมมติว่าเป็น batch จาก order นี้)
+          const sortedBatches = [...(variant.batches || [])].sort((a, b) => 
+            new Date(b.receivedAt || 0) - new Date(a.receivedAt || 0)
+          );
+          
+          let adjBatchRemoved = false;
+          const batchesToKeep = [];
+          
+          for (const batch of sortedBatches) {
+            if (!adjBatchRemoved && batch.batchRef?.startsWith('ADJ')) {
+              // ลบ ADJ batch แรกที่พบ (ใหม่สุด)
+              adjBatchRemoved = true;
+              continue;
+            }
+            batchesToKeep.push(batch);
+          }
+          
+          variant.batches = batchesToKeep;
+          
+          if (!adjBatchRemoved) {
+            console.warn(`⚠️ [Cancel Adjustment] Cannot fully rollback adjustment for ${variant.sku} - actualDelta not available in order item`);
+          }
         }
       }
     }
