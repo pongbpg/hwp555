@@ -881,6 +881,37 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
     const groupByCategory = new Map();
     const groupByBrand = new Map();
 
+    // ✅ Query sales data สำหรับ lowStock/reorder (ใช้ leadTime + buffer period)
+    // หา max sales period ที่ต้องการ
+    let maxReorderPeriodDays = 30;
+    products.forEach((product) => {
+      if (!product.enableStockAlerts) return;
+      const leadTimeDays = product.leadTimeDays || 7;
+      const bufferDays = product.reorderBufferDays ?? 7;
+      const periodDays = leadTimeDays + bufferDays;
+      if (periodDays > maxReorderPeriodDays) {
+        maxReorderPeriodDays = periodDays;
+      }
+    });
+    
+    const reorderSalesSince = new Date(now.getTime() - maxReorderPeriodDays * 24 * 60 * 60 * 1000);
+    const reorderSalesData = await InventoryOrder.aggregate([
+      { $match: { type: 'sale', orderDate: { $gte: reorderSalesSince }, status: { $ne: 'cancelled' } } },
+      { $unwind: '$items' },
+      {
+        $group: {
+          _id: { productId: '$items.productId', variantId: '$items.variantId' },
+          quantitySold: { $sum: '$items.quantity' },
+        },
+      },
+    ]);
+    
+    const reorderSalesMap = new Map();
+    reorderSalesData.forEach((sale) => {
+      const key = `${sale._id.productId}-${sale._id.variantId}`;
+      reorderSalesMap.set(key, sale.quantitySold);
+    });
+
     // Group variants by product first for MOQ optimization
     const productVariantMap = new Map();
     products.forEach((product) => {
@@ -907,19 +938,24 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
         const leadTimeDays = product.leadTimeDays || 7;
         const bufferDays = product.reorderBufferDays ?? 7;
         
-        // ✅ ใช้ quantitySold จาก salesMap (ตามช่วงวันที่ที่เลือก) แทนการ query ใหม่
+        // ✅ สำหรับ Fast Movers: ใช้ quantitySold จาก salesMap (ช่วงวันที่ที่ user เลือก)
         const quantitySold = salesMap.get(key) || 0;
-        const dailySalesRate = quantitySold / salesPeriodDays; // ใช้ salesPeriodDays จากช่วงวันที่ที่เลือก
+        const dailySalesRate = quantitySold / salesPeriodDays;
+        
+        // ✅ สำหรับ lowStock/reorder: ใช้ยอดขายจาก leadTime + buffer period
+        const reorderSalesPeriodDays = leadTimeDays + bufferDays;
+        const reorderQuantitySold = reorderSalesMap.get(key) || 0;
+        const reorderDailySalesRate = reorderQuantitySold / reorderSalesPeriodDays;
         
         const incoming = Number(variant.incoming) || 0;
         // ✅ ใช้ stockOnHand + incoming (รวมสินค้าสั่งไปแล้ว) 
         const availableStock = (variant.stockOnHand || 0) + incoming;
         const minimumDays = leadTimeDays + bufferDays;
 
-        // คำนวณว่าสต็อกปัจจุบันพอใช้กี่วัน
+        // คำนวณว่าสต็อกปัจจุบันพอใช้กี่วัน (ใช้ dailySalesRate จาก user-selected range สำหรับ Fast Movers)
         const daysUntilStockOut = dailySalesRate > 0 ? availableStock / dailySalesRate : 999999;
 
-        // บันทึก fast movers รายละเอียด
+        // บันทึก fast movers รายละเอียด (ใช้ dailySalesRate จาก user-selected range)
         if (dailySalesRate > 0) {
           fastMoversDetailed.push({
             productId: product._id,
@@ -938,7 +974,7 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
           });
         }
 
-        // กลุ่มตามหมวดหมู่และยี่ห้อ
+        // กลุ่มตามหมวดหมู่และยี่ห้อ (ใช้ dailySalesRate จาก user-selected range)
         const catId = product.category || null;
         const brandId = product.brand || null;
         const catLabel = categoryNameMap.get(String(catId)) || 'Uncategorized';
@@ -956,10 +992,13 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
         groupByCategory.set(catKey, cat);
         groupByBrand.set(brandKey, br);
 
-        // ถ้าสต็อกไม่พอใช้ถึง lead time + buffer
-        const reorderMetrics = calculateReorderMetrics(dailySalesRate, leadTimeDays, bufferDays);
+        // ✅ ถ้าสต็อกไม่พอใช้ถึง lead time + buffer (ใช้ reorderDailySalesRate สำหรับความแม่นยำ)
+        const reorderMetrics = calculateReorderMetrics(reorderDailySalesRate, leadTimeDays, bufferDays);
         const suggestedReorderPoint = reorderMetrics.suggestedReorderPoint;
         const suggestedOrderQty = reorderMetrics.suggestedReorderQty;
+        
+        // คำนวณวันคงเหลือโดยใช้ reorderDailySalesRate (แม่นยำกว่า)
+        const reorderDaysUntilStockOut = reorderDailySalesRate > 0 ? availableStock / reorderDailySalesRate : 999999;
 
         // ✅ รวมเงื่อนไข: 
         // 1. สต็อกต่ำกว่า reorder point (availableStock <= suggestedReorderPoint)
@@ -982,16 +1021,16 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
               sku: variant.sku,
               currentStock: availableStock,
               incoming,
-              quantitySold,
-              dailySalesRate: Math.round(dailySalesRate * 100) / 100,
-              daysUntilStockOut: isOutOfStock ? 0 : Math.round(daysUntilStockOut * 10) / 10,
+              quantitySold: reorderQuantitySold, // ✅ ใช้ยอดขายจาก leadTime + buffer period
+              dailySalesRate: Math.round(reorderDailySalesRate * 100) / 100,
+              daysUntilStockOut: isOutOfStock ? 0 : Math.round(reorderDaysUntilStockOut * 10) / 10,
               suggestedReorderPoint: Math.ceil(suggestedReorderPoint),
               suggestedOrderQty: Math.ceil(suggestedOrderQty),
               recommendedOrderQty: Math.ceil(recommendedOrderQty),
               leadTimeDays,
               bufferDays,
               minOrderQty: product.minOrderQty || 0,
-              avgDailySales: dailySalesRate,
+              avgDailySales: reorderDailySalesRate,
               enableStockAlerts: product.enableStockAlerts,
             });
 
@@ -1004,7 +1043,7 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
               incoming,
               availableStock,
               leadTimeDays,
-              daysRemaining: isOutOfStock ? 0 : Math.round(daysUntilStockOut * 10) / 10,
+              daysRemaining: isOutOfStock ? 0 : Math.round(reorderDaysUntilStockOut * 10) / 10,
             });
           }
         }
@@ -1278,13 +1317,25 @@ router.get('/dashboard', authenticateToken, authorizeRoles('owner', 'stock'), as
     });
     
     // Get reorder suggestions (items needing to be ordered)
-    // ใช้ลอจิกเดียวกับ Alerts API เพื่อให้สอดคล้องกัน
+    // ✅ ใช้ leadTime + buffer ของแต่ละ product เพื่อให้ตรงกับความเป็นจริงในการสั่งซื้อ
     const toReorderItems = [];
-    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
     
-    // ดึงยอดขาย 30 วันย้อนหลัง
+    // หา max sales period ที่ต้องการ (max ของ leadTime + buffer ทั้งหมด)
+    let maxReorderPeriodDays = 30; // minimum
+    products.forEach((product) => {
+      if (!product.enableStockAlerts) return;
+      const leadTimeDays = product.leadTimeDays || 7;
+      const bufferDays = product.reorderBufferDays ?? 7;
+      const periodDays = leadTimeDays + bufferDays;
+      if (periodDays > maxReorderPeriodDays) {
+        maxReorderPeriodDays = periodDays;
+      }
+    });
+    
+    // Query sales data สำหรับ max period
+    const reorderSalesSince = new Date(now.getTime() - maxReorderPeriodDays * 24 * 60 * 60 * 1000);
     const salesDataForReorder = await InventoryOrder.aggregate([
-      { $match: { type: 'sale', orderDate: { $gte: thirtyDaysAgo }, status: { $ne: 'cancelled' } } },
+      { $match: { type: 'sale', orderDate: { $gte: reorderSalesSince }, status: { $ne: 'cancelled' } } },
       { $unwind: '$items' },
       {
         $group: {
@@ -1311,10 +1362,11 @@ router.get('/dashboard', authenticateToken, authorizeRoles('owner', 'stock'), as
         const leadTimeDays = product.leadTimeDays || 7;
         const bufferDays = product.reorderBufferDays ?? 7;
         
-        // คำนวณ daily sales rate
+        // ✅ คำนวณ daily sales rate โดยใช้ leadTime + buffer period ของแต่ละ product
+        const reorderSalesPeriodDays = leadTimeDays + bufferDays;
         const variantKey = String(variant._id);
         const quantitySold = salesByVariantReorder.get(variantKey) || 0;
-        const dailySalesRate = quantitySold / 30;
+        const dailySalesRate = quantitySold / reorderSalesPeriodDays;
         
         // ใช้ calculateReorderMetrics เหมือน Alerts
         const reorderMetrics = calculateReorderMetrics(dailySalesRate, leadTimeDays, bufferDays);
