@@ -104,6 +104,68 @@ export default function ReplenishmentOrder() {
         product.totalNetOrder += netOrder;
       });
 
+      // ✅ BUILD FAST MOVERS MAP
+      const fastMoversByProduct = new Map();
+      (res.data.fastMovers || []).forEach(item => {
+        const key = String(item.productId);
+        if (!fastMoversByProduct.has(key)) {
+          fastMoversByProduct.set(key, []);
+        }
+        fastMoversByProduct.get(key).push(item);
+      });
+
+      // ✅ FOR PRODUCTS WITH MOQ DEFICIT: ADD FAST MOVERS TO FILL GAP
+      for (const [productId, product] of productMap) {
+        const minOrderQty = product.minOrderQty || 0;
+        if (minOrderQty === 0) continue; // No MOQ constraint
+
+        if (product.totalNetOrder >= minOrderQty) continue; // Already meets MOQ
+
+        const deficit = minOrderQty - product.totalNetOrder;
+        const productFastMovers = fastMoversByProduct.get(productId) || [];
+        
+        // Find fast movers not already in reorder list
+        const existingSkus = new Set(product.variants.map(v => v.sku));
+        const availableFastMovers = productFastMovers
+          .filter(fm => !existingSkus.has(fm.sku))
+          .sort((a, b) => b.quantitySold - a.quantitySold); // Sort by sales (highest first)
+
+        console.log(`🔍 Adding Fast Movers for ${product.productName}:`, {
+          minOrderQty,
+          currentTotal: product.totalNetOrder,
+          deficit,
+          availableFastMovers: availableFastMovers.length,
+          skus: availableFastMovers.slice(0, 5).map(fm => fm.sku)
+        });
+
+        // Add fast movers to fill deficit (proportional by sales rate)
+        let remainingDeficit = deficit;
+        const totalSalesRate = productFastMovers.reduce((sum, fm) => sum + (fm.dailySalesRate || 0), 0) || 1;
+
+        for (const fastMover of availableFastMovers) {
+          if (remainingDeficit <= 0) break;
+
+          // Allocate proportional to daily sales rate
+          const salesProportion = (fastMover.dailySalesRate || 0) / totalSalesRate;
+          const allocation = Math.ceil(remainingDeficit * salesProportion);
+          const finalAllocation = Math.min(allocation, remainingDeficit);
+
+          product.variants.push({
+            ...fastMover,
+            recommendedOrderQty: finalAllocation,
+            currentStock: fastMover.currentStock || 0,
+            dailySalesRate: fastMover.dailySalesRate || 0,
+            _isFastMoverAddedForMOQ: true, // Flag ให้ UI ระบุว่านี่ถูก add เพื่อครบ MOQ
+          });
+
+          product.totalRecommended += finalAllocation;
+          product.totalNetOrder += finalAllocation;
+          remainingDeficit -= finalAllocation;
+
+          console.log(`  ✅ Added ${fastMover.sku}: ${finalAllocation} units to meet MOQ`);
+        }
+      }
+
       // Allocate MOQ using Largest Remainder Method for accuracy
       const groupedOrders = Array.from(productMap.values()).map((product) => {
         // ใช้ totalNetOrder (จำนวนที่ต้องสั่งเพิ่ม) เป็นพื้นฐาน
@@ -329,12 +391,20 @@ export default function ReplenishmentOrder() {
                           const allocatedQty = variant._allocatedQty || (variant.recommendedOrderQty || 0);
                           const moqAdjustment = allocatedQty - (variant._netOrder || 0);
                           const currentStock = variant.currentStock || 0;
+                          const isFastMoverForMOQ = variant._isFastMoverAddedForMOQ;
 
                           return (
-                            <div key={idx} className="bg-white rounded p-3 border border-gray-200">
+                            <div key={idx} className={`rounded p-3 border ${isFastMoverForMOQ ? 'bg-blue-50 border-blue-300' : 'bg-white border-gray-200'}`}>
                               <div className="flex items-start justify-between mb-2">
                                 <div>
-                                  <p className="font-medium text-gray-800">{variant.sku}</p>
+                                  <div className="flex items-center gap-2">
+                                    <p className="font-medium text-gray-800">{variant.sku}</p>
+                                    {isFastMoverForMOQ && (
+                                      <span className="px-2 py-0.5 bg-blue-200 text-blue-700 text-xs rounded-full font-semibold">
+                                        ⭐ Fast Mover (MOQ)
+                                      </span>
+                                    )}
+                                  </div>
                                   <p className="text-xs text-gray-500">
                                     ขายเฉลี่ย {variant.dailySalesRate} ชิ้น/วัน
                                   </p>
@@ -372,7 +442,16 @@ export default function ReplenishmentOrder() {
                         })}
                       </div>
 
-                      {product.minOrderQty > 0 && product.minOrderQty > product.totalNetOrder && (
+                      {product.minOrderQty > 0 && product.variants.some(v => v._isFastMoverAddedForMOQ) && (
+                        <div className="mt-3 p-3 bg-blue-50 border border-blue-300 rounded">
+                          <p className="text-xs text-blue-700">
+                            <strong>💡 Smart MOQ Fill:</strong> ได้เพิ่ม Variant ที่มีอัตราขายดี (Fast Movers) เข้ามาเพื่อให้ครบขั้นต่ำการสั่ง
+                            <br/>ระบบแนะนำจากสินค้าที่มีการขายดี เพื่อให้ไม่เสียเวลากำลังการผลิต
+                          </p>
+                        </div>
+                      )}
+
+                      {product.minOrderQty > 0 && !product.variants.some(v => v._isFastMoverAddedForMOQ) && product.minOrderQty > product.totalNetOrder && (
                         <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded">
                           <p className="text-xs text-amber-700">
                             <strong>💡 MOQ Adjustment:</strong> เพิ่ม{' '}
