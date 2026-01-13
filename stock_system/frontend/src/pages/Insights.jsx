@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import moment from 'moment-timezone';
 import api from '../api.js';
 import DateRangeFilter from '../components/DateRangeFilter.jsx';
@@ -63,7 +63,7 @@ const PieChart = ({ data, title, dataKey = 'value', labelKey = 'label', colors =
 };
 
 // Horizontal Bar Chart
-const HBarChart = ({ data, title, valueKey = 'value', labelKey = 'label', color = '#3B82F6' }) => {
+const HBarChart = ({ data, title, valueKey = 'value', labelKey = 'label', color = '#3B82F6', maxItems = 12 }) => {
   if (!data || data.length === 0) return null;
 
   const maxValue = Math.max(...data.map(d => d[valueKey] || 0), 1);
@@ -73,7 +73,7 @@ const HBarChart = ({ data, title, valueKey = 'value', labelKey = 'label', color 
     <div className="bg-white rounded-xl shadow p-6">
       <h3 className="text-lg font-semibold text-gray-800 mb-4">{title}</h3>
       <div className="space-y-3">
-        {data.slice(0, 12).map((item, idx) => (
+        {data.slice(0, maxItems).map((item, idx) => (
           <div key={idx} className="flex items-center gap-3">
             <div className="w-6 text-xs text-gray-400 text-right font-semibold">#{idx + 1}</div>
             <div className="w-32 text-xs text-gray-700 truncate font-medium" title={item[labelKey]}>
@@ -98,9 +98,211 @@ const HBarChart = ({ data, title, valueKey = 'value', labelKey = 'label', color 
   );
 };
 
+// Expandable Fast Movers Table (Grouped by Product Name)
+const ExpandableFastMoversTable = ({ data, title, columns = 'sales' }) => {
+  const [expandedProducts, setExpandedProducts] = useState(new Set());
+  const [sortField, setSortField] = useState('totalQuantitySold');
+  const [sortOrder, setSortOrder] = useState('desc');
+  const fmtNumber = new Intl.NumberFormat('th-TH');
+
+  const handleSort = (field) => {
+    if (sortField === field) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortOrder('desc');
+    }
+  };
+
+  const SortIcon = ({ field }) => {
+    if (sortField !== field) return <span className="text-gray-300 ml-1">⇅</span>;
+    return <span className="text-blue-600 ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>;
+  };
+
+  // Group by productName (ไม่ slice - แสดงทั้งหมด)
+  const groupedByProduct = (() => {
+    const map = new Map();
+    data.forEach(item => {
+      const key = item.productName;
+      if (!map.has(key)) {
+        map.set(key, {
+          productName: item.productName,
+          categoryName: item.categoryName,
+          brandName: item.brandName,
+          totalQuantitySold: 0,
+          avgDailyRate: 0,
+          totalStock: 0,
+          totalIncoming: 0,
+          variants: []
+        });
+      }
+      const group = map.get(key);
+      group.totalQuantitySold += item.quantitySold || 0;
+      group.avgDailyRate += item.dailySalesRate || 0;
+      group.totalStock += (item.currentStock || 0) - (item.incoming || 0);
+      group.totalIncoming += item.incoming || 0;
+      group.variants.push(item);
+    });
+    return Array.from(map.values());
+  })();
+
+  // Sort the grouped data
+  const sortedGroupedByProduct = [...groupedByProduct].sort((a, b) => {
+    let aVal, bVal;
+    
+    if (sortField === 'productName') {
+      aVal = a.productName;
+      bVal = b.productName;
+      return sortOrder === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+    } else if (sortField === 'brandName') {
+      aVal = a.brandName || '';
+      bVal = b.brandName || '';
+      return sortOrder === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+    } else if (sortField === 'categoryName') {
+      aVal = a.categoryName || '';
+      bVal = b.categoryName || '';
+      return sortOrder === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+    } else if (sortField === 'totalQuantitySold') {
+      aVal = a.totalQuantitySold || 0;
+      bVal = b.totalQuantitySold || 0;
+      return sortOrder === 'asc' ? aVal - bVal : bVal - aVal;
+    } else if (sortField === 'avgDailyRate') {
+      aVal = a.avgDailyRate || 0;
+      bVal = b.avgDailyRate || 0;
+      return sortOrder === 'asc' ? aVal - bVal : bVal - aVal;
+    } else if (sortField === 'totalStock') {
+      aVal = a.totalStock || 0;
+      bVal = b.totalStock || 0;
+      return sortOrder === 'asc' ? aVal - bVal : bVal - aVal;
+    } else if (sortField === 'totalIncoming') {
+      aVal = a.totalIncoming || 0;
+      bVal = b.totalIncoming || 0;
+      return sortOrder === 'asc' ? aVal - bVal : bVal - aVal;
+    }
+    return 0;
+  });
+
+  const toggleExpand = (productName) => {
+    const newSet = new Set(expandedProducts);
+    if (newSet.has(productName)) {
+      newSet.delete(productName);
+    } else {
+      newSet.add(productName);
+    }
+    setExpandedProducts(newSet);
+  };
+
+  return (
+    <div className="bg-white rounded-xl shadow p-6">
+      <h3 className="text-lg font-semibold text-gray-800 mb-4">{title}</h3>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-gray-50 border-b-2 border-gray-300">
+              <th className="py-3 px-4 text-left font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 transition" onClick={() => handleSort('productName')}>
+                สินค้า <SortIcon field="productName" />
+              </th>
+              <th className="py-3 px-4 text-left font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 transition" onClick={() => handleSort('brandName')}>
+                แบรนด์ <SortIcon field="brandName" />
+              </th>
+              <th className="py-3 px-4 text-left font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 transition" onClick={() => handleSort('categoryName')}>
+                หมวดหมู่ <SortIcon field="categoryName" />
+              </th>
+              {columns === 'sales' && (
+                <>
+                  <th className="py-3 px-4 text-right font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 transition" onClick={() => handleSort('totalQuantitySold')}>
+                    ยอดขาย (ชิ้น) <SortIcon field="totalQuantitySold" />
+                  </th>
+                  <th className="py-3 px-4 text-right font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 transition" onClick={() => handleSort('avgDailyRate')}>
+                    อัตรา/วัน <SortIcon field="avgDailyRate" />
+                  </th>
+                </>
+              )}
+              {columns === 'stock' && (
+                <>
+                  <th className="py-3 px-4 text-right font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 transition" onClick={() => handleSort('totalStock')}>
+                    สต็อกคงเหลือ <SortIcon field="totalStock" />
+                  </th>
+                  <th className="py-3 px-4 text-right font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 transition" onClick={() => handleSort('totalIncoming')}>
+                    ค้างรับ <SortIcon field="totalIncoming" />
+                  </th>
+                  <th className="py-3 px-4 text-right font-semibold text-gray-700">รวม</th>
+                </>
+              )}
+              <th className="py-3 px-4 text-center font-semibold text-gray-700">SKU</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sortedGroupedByProduct.map((group, groupIdx) => (
+              <React.Fragment key={group.productName}>
+                {/* Parent Row - Product */}
+                <tr className="border-b border-gray-200 hover:bg-blue-50 cursor-pointer transition" onClick={() => toggleExpand(group.productName)}>
+                  <td className="py-3 px-4">
+                    <div className="flex items-center gap-2">
+                      <span className={`transform transition-transform ${expandedProducts.has(group.productName) ? 'rotate-90' : ''}`}>
+                        ▶
+                      </span>
+                      <span className="font-semibold text-gray-800">{group.productName}</span>
+                      <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full font-medium">{group.variants.length} SKU</span>
+                    </div>
+                  </td>
+                  <td className="py-3 px-4 text-gray-600">{group.brandName || '-'}</td>
+                  <td className="py-3 px-4 text-gray-600">{group.categoryName || '-'}</td>
+                  {columns === 'sales' && (
+                    <>
+                      <td className="py-3 px-4 text-right font-bold text-gray-800">{fmtNumber.format(group.totalQuantitySold)}</td>
+                      <td className="py-3 px-4 text-right text-gray-600 font-medium">{group.avgDailyRate?.toFixed(2) || '-'}</td>
+                    </>
+                  )}
+                  {columns === 'stock' && (
+                    <>
+                      <td className="py-3 px-4 text-right font-bold text-gray-800">{fmtNumber.format(group.totalStock)}</td>
+                      <td className="py-3 px-4 text-right font-bold text-amber-600">{fmtNumber.format(group.totalIncoming)}</td>
+                      <td className="py-3 px-4 text-right font-bold text-gray-800">{fmtNumber.format(group.totalStock + group.totalIncoming)}</td>
+                    </>
+                  )}
+                  <td className="py-3 px-4 text-center text-gray-500">รวม</td>
+                </tr>
+                
+                {/* Child Rows - SKU Details */}
+                {expandedProducts.has(group.productName) && group.variants.map((variant, variantIdx) => (
+                  <tr key={`${group.productName}-${variant.sku}`} className="border-b border-gray-100 bg-gray-50 hover:bg-gray-100 transition">
+                    <td className="py-3 px-4 pl-12 text-gray-700"></td>
+                    <td className="py-3 px-4 text-gray-600"></td>
+                    <td className="py-3 px-4 text-gray-600"></td>
+                    {columns === 'sales' && (
+                      <>
+                        <td className="py-3 px-4 text-right text-gray-700 font-medium">{fmtNumber.format(variant.quantitySold || 0)}</td>
+                        <td className="py-3 px-4 text-right text-gray-600">{variant.dailySalesRate?.toFixed(2) || '-'}</td>
+                      </>
+                    )}
+                    {columns === 'stock' && (
+                      <>
+                        <td className="py-3 px-4 text-right text-gray-700 font-medium">{fmtNumber.format((variant.currentStock || 0) - (variant.incoming || 0))}</td>
+                        <td className="py-3 px-4 text-right text-amber-600 font-medium">{fmtNumber.format(variant.incoming || 0)}</td>
+                        <td className="py-3 px-4 text-right text-gray-700 font-medium">{fmtNumber.format(variant.currentStock || 0)}</td>
+                      </>
+                    )}
+                    <td className="py-3 px-4 text-center">
+                      <span className="font-mono text-xs bg-gray-200 text-gray-800 px-2 py-1 rounded">{variant.sku}</span>
+                    </td>
+                  </tr>
+                ))}
+              </React.Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
 // Gauge Chart
 const GaugeChart = ({ value, max, title, unit = '', colorRange = ['#EF4444', '#F59E0B', '#10B981'] }) => {
-  const percentage = Math.min(100, Math.max(0, (value / max) * 100));
+  // ✅ ป้องกัน NaN ใน SVG paths
+  const safeValue = Number(value) || 0;
+  const safeMax = Number(max) || 1;
+  const percentage = Math.min(100, Math.max(0, (safeValue / safeMax) * 100));
   const angle = (percentage / 100) * 180 - 90;
 
   const getColor = () => {
@@ -125,16 +327,16 @@ const GaugeChart = ({ value, max, title, unit = '', colorRange = ['#EF4444', '#F
           />
           <line
             x1="50" y1="50"
-            x2={50 + 30 * Math.cos(angle * Math.PI / 180)}
-            y2={50 + 30 * Math.sin(angle * Math.PI / 180)}
+            x2={50 + 30 * Math.cos((angle || 0) * Math.PI / 180)}
+            y2={50 + 30 * Math.sin((angle || 0) * Math.PI / 180)}
             stroke="#374151"
             strokeWidth="2"
           />
           <circle cx="50" cy="50" r="4" fill="#374151" />
         </svg>
       </div>
-      <div className="text-xl font-bold text-gray-800 mt-2">{value.toLocaleString()}{unit}</div>
-      <div className="text-xs text-gray-500">จาก {max.toLocaleString()}</div>
+      <div className="text-xl font-bold text-gray-800 mt-2">{safeValue.toLocaleString()}{unit}</div>
+      <div className="text-xs text-gray-500">จาก {safeMax.toLocaleString()}</div>
     </div>
   );
 };
@@ -268,7 +470,47 @@ const AlertCard = ({ severity = 'warning', title, items = [], columns = null }) 
 const DataTable = ({ data, columns, title }) => {
   if (!data || data.length === 0) return null;
 
+  const [sortField, setSortField] = useState(null);
+  const [sortOrder, setSortOrder] = useState('desc');
   const fmtNumber = new Intl.NumberFormat('th-TH');
+
+  const handleSort = (field) => {
+    if (sortField === field) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortOrder('desc');
+    }
+  };
+
+  const SortIcon = ({ field }) => {
+    if (sortField !== field) return <span className="text-gray-300 ml-1">⇅</span>;
+    return <span className="text-blue-600 ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>;
+  };
+
+  // Sort data
+  const sortedData = [...data].sort((a, b) => {
+    if (!sortField) return 0;
+
+    let aVal = a[sortField];
+    let bVal = b[sortField];
+
+    // Handle null/undefined
+    if (aVal == null) aVal = '';
+    if (bVal == null) bVal = '';
+
+    // String comparison
+    if (typeof aVal === 'string' && typeof bVal === 'string') {
+      return sortOrder === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+    }
+
+    // Number comparison
+    if (typeof aVal === 'number' && typeof bVal === 'number') {
+      return sortOrder === 'asc' ? aVal - bVal : bVal - aVal;
+    }
+
+    return 0;
+  });
 
   return (
     <div className="bg-white rounded-xl shadow p-6">
@@ -278,14 +520,18 @@ const DataTable = ({ data, columns, title }) => {
           <thead>
             <tr className="border-b-2 border-gray-300">
               {columns.map((col, idx) => (
-                <th key={idx} className={`py-3 px-3 font-semibold text-gray-700 ${col.align === 'right' ? 'text-right' : 'text-left'}`}>
-                  {col.label}
+                <th 
+                  key={idx} 
+                  className={`py-3 px-3 font-semibold text-gray-700 ${col.align === 'right' ? 'text-right' : 'text-left'} cursor-pointer hover:bg-gray-100 transition`}
+                  onClick={() => handleSort(col.key)}
+                >
+                  {col.label} <SortIcon field={col.key} />
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {data.map((row, rowIdx) => (
+            {sortedData.map((row, rowIdx) => (
               <tr key={rowIdx} className="border-b border-gray-100 hover:bg-blue-50 transition">
                 {columns.map((col, colIdx) => {
                   let value = row[col.key];
@@ -344,7 +590,6 @@ export default function Insights() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [days, setDays] = useState(30);
-  const [topN, setTopN] = useState(20);
   
   // Initialize dateFrom/dateTo to 30 days ago - today
   const getInitialDates = () => {
@@ -373,12 +618,7 @@ export default function Insights() {
         ? `/inventory/insights?dateFrom=${dateFrom}&dateTo=${dateTo}`
         : `/inventory/insights?days=${days}`;
       
-      console.log('🔍 [Insights] Loading data with URL:', url);
       const res = await api.get(url);
-      console.log('✅ [Insights] Data loaded:', { 
-        fastMovers: res.data?.fastMovers?.length,
-        dateRange: useDateRange ? `${dateFrom} - ${dateTo}` : `${days} days`
-      });
       setData(res.data);
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to load insights');
@@ -421,8 +661,8 @@ export default function Insights() {
   const totalSold = allFastMovers.reduce((sum, f) => sum + (f.quantitySold || 0), 0);
   const avgDailyRate = allFastMovers.reduce((sum, f) => sum + (f.dailySalesRate || 0), 0);
 
-  // จากนั้นค่อย slice สำหรับแสดงผล
-  const fastMoversData = allFastMovers.slice(0, topN).map(fm => ({
+  // จากนั้นค่อย map สำหรับการแสดงผล (ไม่ slice ที่นี้เพื่อให้ totals ถูกต้อง)
+  const fastMoversData = allFastMovers.map(fm => ({
     label: `${fm.productName} (${fm.sku})`,
     productName: fm.productName,
     sku: fm.sku,
@@ -642,19 +882,6 @@ export default function Insights() {
           <p className="text-gray-500 text-sm mt-1">วิเคราะห์เชิงลึก{useDateRange ? ` (${dateFrom} ถึง ${dateTo})` : ` (${days} วันย้อนหลัง)`}</p>
           <p className="text-blue-600 text-xs mt-1">💡 <strong>หมายเหตุ:</strong> ยอดขาย = ช่วงวันที่ที่เลือก | สต็อก = ปัจจุบัน ณ วันนี้</p>
         </div>
-        <div className="flex items-center gap-2 whitespace-nowrap">
-          <label className="text-sm font-medium text-gray-700">แสดงสินค้า:</label>
-          <select
-            className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm font-medium bg-white"
-            value={topN}
-            onChange={(e) => setTopN(Number(e.target.value))}
-          >
-            <option value={10}>Top 10</option>
-            <option value={20}>Top 20</option>
-            <option value={30}>Top 30</option>
-            <option value={50}>Top 50</option>
-          </select>
-        </div>
       </div>
 
       {/* Filter Section - Full Width */}
@@ -726,28 +953,27 @@ export default function Insights() {
         </div>
       )}
 
-      {/* Sales Analysis Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {/* Sales Analysis Section - Top Fast Movers Expandable Table */}
+      {loading ? (
+        <LoadingSection height="h-96" />
+      ) : (
+        <ExpandableFastMoversTable
+          data={allFastMovers}
+          title={`🔥 สินค้าขายดีทั้งหมด`}
+          columns="sales"
+        />
+      )}
+
+      {/* Dead Stock Chart - Expandable Table */}
+      <div className="grid grid-cols-1 gap-6">
         {loading ? (
-          <>
-            <LoadingSection height="h-96" />
-            <LoadingSection height="h-96" />
-          </>
+          <LoadingSection height="h-96" />
         ) : (
-          <>
-            <HBarChart
-              data={fastMoversData}
-              title={`🔥 Top ${topN} สินค้าขายดี${useDateRange ? ` (${dateFrom} - ${dateTo})` : ` (${days} วัน)`}`}
-              valueKey="quantitySold"
-              color="#10B981"
-            />
-            <HBarChart
-              data={deadStockData}
-              title={`📭 สินค้าขายไม่ออก (Dead Stock)${useDateRange ? ` (${dateFrom} - ${dateTo})` : ` (${days} วัน)`}`}
-              valueKey="currentStock"
-              color="#9CA3AF"
-            />
-          </>
+          <ExpandableFastMoversTable
+            data={deadStockData}
+            title={`📭 สินค้าขายไม่ออก (Dead Stock)`}
+            columns="stock"
+          />
         )}
       </div>
 
