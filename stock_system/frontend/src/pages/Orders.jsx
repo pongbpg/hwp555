@@ -212,7 +212,12 @@ export default function Orders() {
 
   const calcOrderTotal = (o) => {
     const byItems = (o.items || []).reduce(
-      (sum, it) => sum + (Number(it.unitPrice) || 0) * (Number(it.quantity) || 0),
+      (sum, it) => {
+        const price = Number(it.unitPrice);
+        // For damage/expired, unitPrice might be undefined/empty
+        // Treat as 0 for calculation (no monetary value tracked)
+        return sum + (isNaN(price) ? 0 : price) * (Number(it.quantity) || 0);
+      },
       0
     );
     // ใช้ grandTotal ถ้ามีค่า > 0, ไม่งั้นใช้ byItems
@@ -377,6 +382,14 @@ export default function Orders() {
             throw new Error('โปรดระบุจำนวนสินค้าให้ถูกต้อง (ต้องมากกว่า 0)');
           }
           
+          // ✅ Validate unitPrice for Purchase and Adjustment (required)
+          if (['purchase', 'adjustment'].includes(type)) {
+            const unitPrice = Number(it.unitPrice);
+            if (!it.unitPrice || isNaN(unitPrice) || unitPrice <= 0) {
+              throw new Error(`${type === 'purchase' ? 'ใบสั่งซื้อ' : 'การปรับปรุง'}ต้องระบุราคาต่อหน่วย (Unit Price) ที่มากกว่า 0`);
+            }
+          }
+          
           const item = {
             productId: it.productId,
             variantId: it.variantId,
@@ -477,17 +490,32 @@ export default function Orders() {
             quantity: row.quantity,
           };
           
-          // ✅ Sale order: เก็บทั้ง unitPrice + unitCost
+          // ✅ Handle unitPrice/unitCost based on order type
           if (type === 'sale') {
-            item.unitPrice = row.unitPrice;
-            item.unitCost = row.cost || row.unitCost || 0;
-          } else {
-            // ✅ Purchase/Adjustment: เก็บแค่ unitCost
-            item.unitCost = row.unitPrice || row.cost || row.unitCost || 0;
+            // Sale: need both unitPrice and unitCost
+            item.unitPrice = row.unitPrice || 0;
+            item.unitCost = row.unitCost || row.cost || 0;
+          } else if (type === 'purchase') {
+            // Purchase: unitPrice is required (the cost)
+            item.unitPrice = row.unitPrice || 0;
+            item.unitCost = row.unitPrice || 0;
+          } else if (type === 'return') {
+            // Return: need unitPrice for value tracking
+            item.unitPrice = row.unitPrice || 0;
+            item.unitCost = row.unitPrice || 0;
+          } else if (type === 'adjustment') {
+            // Adjustment: unitPrice is required
+            item.unitPrice = row.unitPrice || 0;
+            item.unitCost = row.unitPrice || 0;
           }
+          // damage/expired: no unitPrice needed (ไม่ต้องเพิ่ม unitPrice/unitCost)
           
+          // Optional fields
           if (row.batchRef) item.batchRef = row.batchRef;
           if (row.expiryDate) item.expiryDate = row.expiryDate;
+          if (row.supplier) item.supplier = row.supplier;
+          if (row.notes) item.notes = row.notes;
+          
           return item;
         }),
       };
@@ -1038,12 +1066,17 @@ export default function Orders() {
                         <th className="text-left py-2 px-3">สินค้า</th>
                         <th className="text-left py-2 px-3">SKU</th>
                         <th className="text-right py-2 px-3">จำนวน</th>
-                        <th className="text-right py-2 px-3">ราคา/หน่วย</th>
+                        {!['damage', 'expired'].includes(type) && (
+                          <th className="text-right py-2 px-3">ราคา/หน่วย</th>
+                        )}
                         {type === 'purchase' && (
                           <>
                             <th className="text-left py-2 px-3">Batch Ref</th>
                             <th className="text-left py-2 px-3">Expiry Date</th>
                           </>
+                        )}
+                        {['damage', 'expired', 'return'].includes(type) && (
+                          <th className="text-left py-2 px-3">หมายเหตุ</th>
                         )}
                       </tr>
                     </thead>
@@ -1053,7 +1086,11 @@ export default function Orders() {
                           <td className="py-2 px-3">{row.productName}</td>
                           <td className="py-2 px-3 font-mono text-xs text-gray-600">{row.sku}</td>
                           <td className="py-2 px-3 text-right">{row.quantity}</td>
-                          <td className="py-2 px-3 text-right">{row.unitPrice.toFixed(2)}</td>
+                          {!['damage', 'expired'].includes(type) && (
+                            <td className="py-2 px-3 text-right">
+                              {row.unitPrice != null ? `฿${Number(row.unitPrice).toFixed(2)}` : '-'}
+                            </td>
+                          )}
                           {type === 'purchase' && (
                             <>
                               <td className="py-2 px-3 text-gray-600">{row.batchRef || '-'}</td>
@@ -1061,6 +1098,9 @@ export default function Orders() {
                                 {row.expiryDate ? new Date(row.expiryDate).toLocaleDateString('th-TH') : '-'}
                               </td>
                             </>
+                          )}
+                          {['damage', 'expired', 'return'].includes(type) && (
+                            <td className="py-2 px-3 text-gray-600">{row.notes || '-'}</td>
                           )}
                         </tr>
                       ))}
@@ -1079,12 +1119,17 @@ export default function Orders() {
                       <div className="text-gray-600">จำนวนทั้งหมด</div>
                       <div className="text-2xl font-bold text-blue-600">{csvPreview.reduce((sum, row) => sum + row.quantity, 0)}</div>
                     </div>
-                    <div>
-                      <div className="text-gray-600">มูลค่าทั้งหมด</div>
-                      <div className="text-2xl font-bold text-blue-600">
-                        ฿{(csvPreview.reduce((sum, row) => sum + row.quantity * row.unitPrice, 0)).toLocaleString()}
+                    {!['damage', 'expired'].includes(type) && (
+                      <div>
+                        <div className="text-gray-600">มูลค่าทั้งหมด</div>
+                        <div className="text-2xl font-bold text-blue-600">
+                          ฿{csvPreview.reduce((sum, row) => {
+                            const price = Number(row.unitPrice);
+                            return sum + (isNaN(price) ? 0 : row.quantity * price);
+                          }, 0).toLocaleString()}
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
                 </div>
               </div>

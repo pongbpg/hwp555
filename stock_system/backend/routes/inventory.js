@@ -491,24 +491,32 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
           // ✅ ใช้ unitCost field มาจาก order item (ไม่ต้องอ่านจาก variant)
           const actualNewStock = variant.stockOnHand || 0;
           
-          // ✅ กำหนด movementType ตามประเภท order เดิม (ไม่ใช่ actualType)
+          // ✅ กำหนด movementType และ quantity ตามประเภท order
           let movementType = 'adjust'; // default
+          let movementQty = 0; // จำนวนที่เปลี่ยนแปลง (+ = เพิ่ม, - = ลด)
+          
           if (type === 'sale') {
             movementType = 'out';
+            movementQty = -qty; // ลดสต็อก
           } else if (type === 'damage') {
             movementType = 'damage';
+            movementQty = -qty; // ลดสต็อก
           } else if (type === 'expired') {
             movementType = 'expired';
+            movementQty = -qty; // ลดสต็อก
           } else if (type === 'return') {
             movementType = 'return';
+            movementQty = qty; // เพิ่มสต็อก
+          } else if (type === 'adjustment') {
+            movementType = 'adjust';
+            movementQty = actualQty; // ใช้ delta จริง (+ หรือ - ตามการปรับ)
           }
           
-          const adjustQty = type === 'sale' ? -qty : (type === 'return' ? qty : -qty);
           movementRecords.push({
             movementType,
             product,
             variant,
-            quantity: adjustQty,
+            quantity: movementQty,
             previousStock: stockBeforeChange,
             newStock: actualNewStock,
             reference,

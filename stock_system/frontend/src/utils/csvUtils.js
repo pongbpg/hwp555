@@ -83,7 +83,12 @@ const parseXLSX = (file) => {
  * @returns {object[]} - Array of parsed objects
  */
 const parseCSV = (csvText) => {
-  const lines = csvText.trim().split('\n');
+  const lines = csvText.trim().split('\n').filter(line => {
+    const trimmed = line.trim();
+    // Skip empty lines and comment lines (starting with #)
+    return trimmed && !trimmed.startsWith('#');
+  });
+  
   if (lines.length < 2) throw new Error('CSV ต้องมีอย่างน้อย header row และ 1 data row');
 
   // Parse header
@@ -94,7 +99,7 @@ const parseCSV = (csvText) => {
   const rows = [];
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i].trim();
-    if (!line) continue; // Skip empty lines
+    if (!line) continue; // Skip empty lines (extra safety)
 
     const values = parseCSVLine(line);
     const row = {};
@@ -137,7 +142,7 @@ const parseCSVLine = (line) => {
  * Validate parsed CSV rows against available products
  * @param {object[]} rows - Parsed CSV rows
  * @param {object[]} products - Available products from API
- * @param {string} orderType - 'sale' | 'purchase' | 'adjustment'
+ * @param {string} orderType - 'sale' | 'purchase' | 'adjustment' | 'damage' | 'expired' | 'return'
  * @returns {{valid: boolean, errors: string[], data: object[]}} - Validation result
  */
 export const validateCSVRows = (rows, products, orderType = 'sale') => {
@@ -148,22 +153,38 @@ export const validateCSVRows = (rows, products, orderType = 'sale') => {
     return { valid: false, errors: ['ไม่มีข้อมูล'], data: [] };
   }
 
-  // Check required columns
-  const requiredColumns = ['product name', 'sku', 'quantity', 'unit price'];
-  const purchaseColumns = ['batch ref', 'expiry date'];
-
+  // Check required columns based on order type
   const firstRow = rows[0];
-  const columnNames = Object.keys(firstRow);
-
-  for (const col of requiredColumns) {
-    if (!columnNames.some((c) => c.toLowerCase().includes(col.toLowerCase().split(' ')[0]))) {
-      errors.push(`✗ Missing required column: ${col}`);
+  const columnNames = Object.keys(firstRow).map(c => c.toLowerCase());
+  
+  // Base required columns for all types
+  if (!columnNames.some(c => c.includes('product') && c.includes('name'))) {
+    errors.push(`✗ Missing required column: Product Name`);
+  }
+  if (!columnNames.some(c => c.includes('sku'))) {
+    errors.push(`✗ Missing required column: SKU`);
+  }
+  
+  // Quantity/Target Stock validation (different for adjustment)
+  if (orderType === 'adjustment') {
+    // Adjustment uses "Target Stock" instead of "Quantity"
+    if (!columnNames.some(c => c.includes('target') && c.includes('stock'))) {
+      errors.push(`✗ Missing required column: Target Stock (for adjustment orders)`);
+    }
+  } else {
+    // All other types use "Quantity"
+    if (!columnNames.some(c => c.includes('quantity'))) {
+      errors.push(`✗ Missing required column: Quantity`);
     }
   }
-
-  if (orderType === 'purchase') {
-    // Batch ref and expiry date ไม่บังคับ แต่ให้เตือน
+  
+  // Unit Price validation based on order type
+  if (['sale', 'purchase', 'return', 'adjustment'].includes(orderType)) {
+    if (!columnNames.some(c => c.includes('unit') && c.includes('price'))) {
+      errors.push(`✗ Missing required column: Unit Price`);
+    }
   }
+  // Only damage/expired don't require unit price
 
   if (errors.length > 0) {
     return { valid: false, errors, data: [] };
@@ -174,23 +195,38 @@ export const validateCSVRows = (rows, products, orderType = 'sale') => {
     const rowNum = rowIdx + 2; // Row number in CSV (1 for header, start from 2)
     const productName = row['product name'] || '';
     const sku = row['sku'] || '';
-    const quantity = row['quantity'] || '';
+    const quantity = row['quantity'] || row['target stock'] || ''; // adjustment uses 'target stock'
     const unitPrice = row['unit price'] || '';
     const batchRef = row['batch ref'] || '';
     const expiryDate = row['expiry date'] || '';
+    const supplier = row['supplier'] || '';
+    const notes = row['notes'] || '';
 
     // Required fields - SKU is primary identifier
     if (!sku) {
       errors.push(`Row ${rowNum}: ต้องมี SKU`);
       return;
     }
-    if (!quantity || isNaN(quantity) || Number(quantity) <= 0) {
+    
+    // Quantity validation
+    if (!quantity || isNaN(quantity)) {
+      errors.push(`Row ${rowNum}: Quantity/Target Stock ต้องเป็นตัวเลข`);
+      return;
+    }
+    // For adjustment, allow 0 or negative (to reduce stock)
+    // For others, must be > 0
+    if (orderType !== 'adjustment' && Number(quantity) <= 0) {
       errors.push(`Row ${rowNum}: Quantity ต้องเป็นตัวเลขที่ > 0`);
       return;
     }
-    if (!unitPrice || isNaN(unitPrice) || Number(unitPrice) < 0) {
-      errors.push(`Row ${rowNum}: Unit Price ต้องเป็นตัวเลข`);
-      return;
+    
+    // Unit Price validation (not required for damage/expired only)
+    const requiresUnitPrice = ['sale', 'purchase', 'return', 'adjustment'].includes(orderType);
+    if (requiresUnitPrice) {
+      if (!unitPrice || isNaN(unitPrice) || Number(unitPrice) < 0) {
+        errors.push(`Row ${rowNum}: Unit Price ต้องเป็นตัวเลข`);
+        return;
+      }
     }
 
     // Find matching variant by SKU (SKU is unique and never changes)
@@ -221,7 +257,7 @@ export const validateCSVRows = (rows, products, orderType = 'sale') => {
     }
 
     // Validate expiry date format if provided
-    if (expiryDate && orderType === 'purchase') {
+    if (expiryDate && ['purchase', 'damage', 'expired', 'return'].includes(orderType)) {
       const dateObj = new Date(expiryDate);
       if (isNaN(dateObj.getTime())) {
         errors.push(`Row ${rowNum}: Expiry Date "${expiryDate}" ไม่ถูกต้อง (YYYY-MM-DD)`);
@@ -230,16 +266,32 @@ export const validateCSVRows = (rows, products, orderType = 'sale') => {
     }
 
     // Push validated row
-    validatedRows.push({
+    const validatedRow = {
       productId: product._id,
       variantId: variant._id,
       quantity: Number(quantity),
-      unitPrice: Number(unitPrice),
-      batchRef: batchRef || '',
-      expiryDate: expiryDate || '',
       productName: product.name,
       sku: variant.sku,
-    });
+    };
+    
+    // Add optional fields based on order type
+    if (unitPrice) {
+      validatedRow.unitPrice = Number(unitPrice);
+    }
+    if (batchRef) {
+      validatedRow.batchRef = batchRef;
+    }
+    if (expiryDate) {
+      validatedRow.expiryDate = expiryDate;
+    }
+    if (supplier) {
+      validatedRow.supplier = supplier;
+    }
+    if (notes) {
+      validatedRow.notes = notes;
+    }
+    
+    validatedRows.push(validatedRow);
   });
 
   return {
@@ -251,7 +303,7 @@ export const validateCSVRows = (rows, products, orderType = 'sale') => {
 
 /**
  * Generate CSV template as downloadable file
- * @param {string} orderType - 'sale' | 'purchase' | 'adjustment'
+ * @param {string} orderType - 'sale' | 'purchase' | 'adjustment' | 'damage' | 'expired' | 'return'
  * @param {object[]} selectedProducts - Selected products with variants (optional)
  */
 export const downloadTemplate = (orderType = 'sale', selectedProducts = null) => {
@@ -259,15 +311,33 @@ export const downloadTemplate = (orderType = 'sale', selectedProducts = null) =>
     sale: 'SO',
     purchase: 'PO',
     adjustment: 'ADJ',
+    damage: 'DMG',
+    expired: 'EXP',
+    return: 'RTN',
   }[orderType] || 'ORDER';
 
   let header = 'Product Name,SKU,Quantity,Unit Price';
   const contentLines = [header];
 
+  // Different order types have different field requirements
   if (orderType === 'purchase') {
-    header = 'Product Name,SKU,Quantity,Unit Price,Batch Ref,Expiry Date';
+    // Purchase: need pricing, batch tracking, supplier info
+    header = 'Product Name,SKU,Quantity,Unit Price,Batch Ref,Expiry Date,Supplier';
+    contentLines[0] = header;
+  } else if (orderType === 'damage' || orderType === 'expired') {
+    // Damage/Expired: no pricing needed, just quantity and notes
+    header = 'Product Name,SKU,Quantity,Notes';
+    contentLines[0] = header;
+  } else if (orderType === 'return') {
+    // Return: need pricing (for value tracking), batch ref optional
+    header = 'Product Name,SKU,Quantity,Unit Price,Batch Ref,Notes';
+    contentLines[0] = header;
+  } else if (orderType === 'adjustment') {
+    // Adjustment: target stock, optional unit price for value adjustment
+    header = 'Product Name,SKU,Target Stock,Unit Price,Notes';
     contentLines[0] = header;
   }
+  // Sale: default header (Product Name,SKU,Quantity,Unit Price)
 
   // If products are selected, add all their variants as rows
   if (selectedProducts && selectedProducts.length > 0) {
@@ -275,10 +345,21 @@ export const downloadTemplate = (orderType = 'sale', selectedProducts = null) =>
       if (product.variants && product.variants.length > 0) {
         product.variants.forEach((variant) => {
           if (variant.status === 'active') {
-            let row = `${product.name},${variant.sku},0,${variant.price || 0}`;
+            let row = `${product.name},${variant.sku}`;
+            
             if (orderType === 'purchase') {
-              row += ',,';
+              row += `,0,${variant.cost || variant.price || 0},,,`; // Qty, Unit Price, Batch, Expiry, Supplier
+            } else if (orderType === 'damage' || orderType === 'expired') {
+              row += `,0,`; // Qty, Notes
+            } else if (orderType === 'return') {
+              row += `,0,${variant.price || 0},,`; // Qty, Unit Price, Batch, Notes
+            } else if (orderType === 'adjustment') {
+              row += `,${variant.stockOnHand || 0},${variant.cost || variant.price || 0},`; // Target Stock, Unit Price, Notes
+            } else {
+              // Sale: default
+              row += `,0,${variant.price || 0}`; // Qty, Unit Price
             }
+            
             contentLines.push(row);
           }
         });
@@ -286,19 +367,25 @@ export const downloadTemplate = (orderType = 'sale', selectedProducts = null) =>
     });
   } else {
     // Default sample rows if no products selected
-    let sampleRow = 'Air Max 90,NIKE - SHOE - AIRMAX90 - BLACK - 40 - LEATHER,0,3500';
+    let sampleRow = '';
+    
     if (orderType === 'purchase') {
-      sampleRow += ',LOT-2025-001,2027-12-31';
+      sampleRow = 'Air Max 90,NIKE - SHOE - AIRMAX90 - BLACK - 40 - LEATHER,10,3500,LOT-2025-001,2027-12-31,Nike Thailand';
+    } else if (orderType === 'damage') {
+      sampleRow = 'Air Max 90,NIKE - SHOE - AIRMAX90 - BLACK - 40 - LEATHER,5,สินค้าชำรุด - กล่องแตก';
+    } else if (orderType === 'expired') {
+      sampleRow = 'Air Max 90,NIKE - SHOE - AIRMAX90 - BLACK - 40 - LEATHER,3,หมดอายุ - ผ่านมา 2 เดือน';
+    } else if (orderType === 'return') {
+      sampleRow = 'Air Max 90,NIKE - SHOE - AIRMAX90 - BLACK - 40 - LEATHER,2,3500,LOT-2025-001,ลูกค้าคืนสินค้า';
+    } else if (orderType === 'adjustment') {
+      sampleRow = 'Air Max 90,NIKE - SHOE - AIRMAX90 - BLACK - 40 - LEATHER,50,3200,ปรับสต็อกจากการตรวจนับ';
+    } else {
+      // Sale: default
+      sampleRow = 'Air Max 90,NIKE - SHOE - AIRMAX90 - BLACK - 40 - LEATHER,5,3500';
     }
+    
     contentLines.push(sampleRow);
   }
-
-  // Add comment footer
-  contentLines.push('');
-  contentLines.push('# เขียนหมายเหตุ ไม่ต้องลบแถวนี้');
-  contentLines.push(`# ประเภท: ${orderType}`);
-  contentLines.push(`# วันที่: ${new Date().toISOString().split('T')[0]}`);
-  contentLines.push('');
 
   const csvContent = contentLines.join('\n');
 
