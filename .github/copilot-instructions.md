@@ -69,12 +69,15 @@ Product (name, category, brand, leadTimeDays, reorderBufferDays, costingMethod, 
 **SKU Generation** (automatic in POST /products/:id/variants):
 - Formula: `{Brand} - {Category} - {Model} - {Color} - {Size} - {Material}`
 - Example: `APPLE - ELECTRONICS - IPHONE15 - BLACK - 256GB - GLASS`
-- Parts assembled from `product.brand`, `product.category`, `variant.attributes` map
-- See [SKU_NAMING_FORMULA.md](../SKU_NAMING_FORMULA.md) for full formula rules
+- Parts assembled from `product.brand.name`, `product.category.name`, `variant.model`, and other attributes
+- **Auto-generation**: If SKU field left empty in POST/PATCH, backend auto-generates using formula
+- See [SKU_NAMING_FORMULA.md](../SKU_NAMING_FORMULA.md) for full formula rules and examples
 
 **Reorder Calculation Standardization** (⚠️ Critical):
-- **ALL endpoints use 30-day sales window** (never query parameter-dependent)
-- Formula: `safetyStock = ceil(dailySalesRate × bufferDays)` then `reorderPoint = ceil(dailySalesRate × leadTimeDays + safetyStock)`
+- **Calculation window**: Uses `leadTimeDays + bufferDays` for sales aggregation (allows per-product customization)
+  - Old practice (❌): 30-day fixed window  
+  - New practice (✅): `product.leadTimeDays + product.reorderBufferDays` (varies by product)
+- **Formula**: `safetyStock = ceil(dailySalesRate × bufferDays)` then `reorderPoint = ceil(dailySalesRate × leadTimeDays + safetyStock)`
 - **bufferDays source**: `product.reorderBufferDays ?? 7` (always fallback to 7, never hardcode)
 - **leadTimeDays source**: `product.leadTimeDays || 7`
 - Used in: LINE alerts, Alerts API, Insights API, Dashboard calculations
@@ -101,11 +104,20 @@ npm run dev                  # Start all systems with concurrently
 - **Sale Frontend**: `cd sale_system/frontend && npm run dev` (Vite, port 3002)
 - Environment: set `VITE_API_BASE_URL` (default http://localhost:5001/api for stock, http://localhost:5000 for HR, http://localhost:5002 for sale)
 - Note: Frontend uses axios client initialized with baseURL; token set via `setAuthToken()` interceptor
+- **Critical**: Each frontend .env must reference correct backend API URL (mismatches cause 401/404 errors)
 
 ### Building
-- `npm run build` - builds both frontends
-- `npm run build:hr` / `npm run build:stock` - selective builds
+- `npm run build` - builds all three frontends
+- `npm run build:hr` / `npm run build:stock` / `npm run build:sale` - selective builds
 - Stock frontend uses Tailwind CSS + PostCSS for styling
+
+### Environment Setup
+**Required env variables** (set in root `.env`):
+- `MONGODB_URI`: MongoDB connection string (shared across all systems)
+- `JWT_SECRET`: Secret key for signing JWTs (must be identical across all backends)
+- `LINE_CHANNEL_ACCESS_TOKEN` (optional): For LINE Messaging API integration (stock system alerts)
+- `LINE_NOTIFY_TOKEN` (optional): For LINE Notify API fallback
+- `DEBUG_STOCK_ALERTS` (optional): Set to '1' or 'true' for detailed stock alert logs
 
 ## Sale System Architecture
 
@@ -141,12 +153,20 @@ npm run dev                  # Start all systems with concurrently
 ### Mongoose Schemas (Backend Models)
 
 **Product Schema Structure:**
-- Top-level fields: name, category, brand, unit, status, tags
+- Top-level fields: name, category, brand, unit, status ('active'|'archived'), enableStockAlerts (boolean), leadTimeDays, reorderBufferDays, minOrderQty, costingMethod
 - `variants[]` (subdocument array): Each product can have multiple SKUs with independent stock
-- `variantSchema` includes: sku, price, cost, stockOnHand, committed, incoming, reorderPoint, batches[], status
-- `batchSchema`: batchRef, supplier, cost, quantity, expiryDate, receivedAt, **orderId** (reference to InventoryOrder for cancelled order tracking)
-- Virtual fields: `available`, `totalBatchQuantity`, `isLowStock`, `stockStatus`
-- **Important**: Virtuals set with `.set('toJSON', { virtuals: true })` to include in JSON responses
+- `variantSchema` includes: sku, model, price, cost, committed, incoming, reorderPoint, batches[], status, allowBackorder
+- `batchSchema`: batchRef, supplier, cost, quantity, expiryDate, receivedAt, orderId (reference to InventoryOrder for cancelled order tracking)
+- **Virtual fields** (computed from batches, always up-to-date):
+  - `stockOnHand`: Sum of all batch quantities (read-only, computed from `batches` array)
+  - `available`: `stockOnHand - committed` (available for new sales)
+  - `totalBatchQuantity`: Total quantity across all batches (diagnostic)
+  - `isLowStock`, `stockStatus`: Computed alert indicators
+- **Important**: Virtuals require `.set('toJSON', { virtuals: true })` to serialize in responses; `stockOnHand` is **never directly written** - update through batch mutations
+
+**Product Status & Alerts:**
+- `status: 'active' | 'archived'` - Archive products without data loss (archived products hidden from order entry)
+- `enableStockAlerts: boolean` - Toggle alerts per product (when false, variant is skipped in checkAndAlertAfterSale and alerts APIs)
 
 **InventoryOrder Schema:**
 - `type`: 'sale' | 'purchase' | 'adjustment'
@@ -195,10 +215,11 @@ PATCH /orders/:id/cancel
 
 **Reorder Alerts Flow** (stockAlertService.js):
 1. After sale, `checkAndAlertAfterSale()` called with soldItems array
-2. For each item, `calculateAverageDailySalesFromOrders(variantId, 30)` queries InventoryOrder aggregation (30-day window fixed)
-3. `checkVariantStockRisk()` determines if alert needed using `calculateReorderMetrics()`
-4. If alert triggered, sends via `sendStockAlertFlexMessage()` (LINE Messaging API) or `sendStockAlertText()` (LINE Notify)
-5. Optional MOQ optimization: `optimizeOrderWithMOQ()` distributes deficit proportionally if product.minOrderQty > total suggested order
+2. **Calculation window**: Uses `leadTimeDays + bufferDays` sales period (✅ NOT 30 days - allows per-product customization)
+3. For each item, `calculateAverageDailySalesFromOrders(variantId, salesPeriodDays)` queries InventoryOrder aggregation
+4. `checkVariantStockRisk()` determines if alert needed using `calculateReorderMetrics()`, respects `product.enableStockAlerts`
+5. If alert triggered, sends via `sendStockAlertFlexMessage()` (LINE Messaging API) or `sendStockAlertText()` (LINE Notify)
+6. Optional MOQ optimization: `optimizeOrderWithMOQ()` distributes deficit proportionally if product.minOrderQty > total suggested order
 
 ### Stock Valuation & Costing
 
