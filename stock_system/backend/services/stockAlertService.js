@@ -68,6 +68,8 @@ export const checkVariantStockRisk = async (product, variant, avgDailySales = nu
   }
 
   const currentStock = variant.stockOnHand || 0;
+  const incoming = variant.incoming || 0;
+  const availableStock = currentStock + incoming; // ✅ รวม incoming (PO ที่สั่งไว้แล้ว)
   const reorderPoint = variant.reorderPoint || 0;
   const leadTimeDays = product.leadTimeDays || 7; // Get from product level
   const bufferDays = product.reorderBufferDays ?? 7;
@@ -91,8 +93,8 @@ export const checkVariantStockRisk = async (product, variant, avgDailySales = nu
 
   const finalAvgDailySales = avgDailySales;
 
-  // คำนวณจำนวนวันที่สต็อกจะเพียงพอ
-  const daysOfStock = Math.floor(currentStock / finalAvgDailySales);
+  // ✅ คำนวณจำนวนวันที่สต็อกจะเพียงพอ (ใช้ availableStock รวม incoming)
+  const daysOfStock = Math.floor(availableStock / finalAvgDailySales);
 
   // ใช้ calculateReorderMetrics เพื่อให้ผลลัพธ์สอดคล้องกับ endpoints ทั้งหมด
   const reorderMetrics = calculateReorderMetrics(finalAvgDailySales, leadTimeDays, bufferDays);
@@ -102,6 +104,8 @@ export const checkVariantStockRisk = async (product, variant, avgDailySales = nu
 
   logDebug(`🔍 [Stock Risk] Checking ${variant.sku}:`, {
     currentStock,
+    incoming,
+    availableStock,
     avgDailySales: finalAvgDailySales.toFixed(3),
     leadTimeDays,
     bufferDays,
@@ -111,26 +115,26 @@ export const checkVariantStockRisk = async (product, variant, avgDailySales = nu
     daysOfStock,
   });
 
-  // ตรวจสอบว่าต้องแจ้งเตือนหรือไม่
+  // ✅ ตรวจสอบว่าต้องแจ้งเตือนหรือไม่ (ใช้ availableStock รวม incoming)
   const shouldAlert =
-    currentStock <= 0 || // หมดสต็อก
-    currentStock <= reorderPoint || // ถึงจุดสั่งซื้อ
-    currentStock <= safetyStock || // ต่ำกว่า safety stock
+    availableStock <= 0 || // หมดสต็อก (รวม incoming แล้ว)
+    availableStock <= reorderPoint || // ถึงจุดสั่งซื้อ
+    availableStock <= safetyStock || // ต่ำกว่า safety stock
     daysOfStock <= leadTimeDays; // สต็อกเหลือไม่พอช่วง lead time
 
   if (!shouldAlert) {
     return null;
   }
 
-  // คำนวณจำนวนที่แนะนำให้สั่งซื้อ (เพื่อให้ถึงจุด reorder point)
+  // ✅ คำนวณจำนวนที่แนะนำให้สั่งซื้อ (ใช้ availableStock รวม incoming)
   const suggestedOrder = Math.max(
     0,
-    computedReorderQty - currentStock
+    computedReorderQty - availableStock
   );
 
-  // กำหนด stock status
+  // กำหนด stock status (ใช้ availableStock)
   let stockStatus = 'low-stock';
-  if (currentStock <= 0) {
+  if (availableStock <= 0) {
     stockStatus = 'out-of-stock';
   } else if (daysOfStock <= 3) {
     stockStatus = 'critical';
@@ -143,6 +147,8 @@ export const checkVariantStockRisk = async (product, variant, avgDailySales = nu
     variantName: variant.name,
     sku: variant.sku,
     currentStock,
+    incoming, // ✅ เพิ่ม field incoming เพื่อให้ LINE แสดงได้
+    availableStock, // ✅ เพิ่ม field availableStock (รวม incoming)
     // ให้ field `reorderPoint` ยังคงเก็บค่าที่ user กำหนดใน variant (ถ้ามี)
     reorderPoint,
     // ส่งค่าที่คำนวณแนะนำด้วยเพื่อให้ client/notifications แสดงค่าเดียวกับการคำนวณ
