@@ -132,15 +132,17 @@ const ExpandableFastMoversTable = ({ data, title, columns = 'sales' }) => {
           totalQuantitySold: 0,
           avgDailyRate: 0,
           totalStock: 0,
-          totalIncoming: 0,
+          totalPurchaseRemaining: 0,
           variants: []
         });
       }
       const group = map.get(key);
       group.totalQuantitySold += item.quantitySold || 0;
       group.avgDailyRate += item.dailySalesRate || 0;
-      group.totalStock += (item.currentStock || 0) - (item.incoming || 0);
-      group.totalIncoming += item.incoming || 0;
+      // ✅ currentStock = availableStock (รวม purchaseRemaining แล้ว) ดังนั้นไม่ต้องลบ incoming
+      group.totalStock += item.currentStock || 0;
+      // ✅ ใช้ purchaseRemaining (ยอดค้างรับจาก purchase orders) แทน incoming
+      group.totalPurchaseRemaining += item.purchaseRemaining || 0;
       group.variants.push(item);
     });
     return Array.from(map.values());
@@ -174,9 +176,9 @@ const ExpandableFastMoversTable = ({ data, title, columns = 'sales' }) => {
       aVal = a.totalStock || 0;
       bVal = b.totalStock || 0;
       return sortOrder === 'asc' ? aVal - bVal : bVal - aVal;
-    } else if (sortField === 'totalIncoming') {
-      aVal = a.totalIncoming || 0;
-      bVal = b.totalIncoming || 0;
+    } else if (sortField === 'totalPurchaseRemaining') {
+      aVal = a.totalPurchaseRemaining || 0;
+      bVal = b.totalPurchaseRemaining || 0;
       return sortOrder === 'asc' ? aVal - bVal : bVal - aVal;
     }
     return 0;
@@ -223,8 +225,8 @@ const ExpandableFastMoversTable = ({ data, title, columns = 'sales' }) => {
                   <th className="py-3 px-4 text-right font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 transition" onClick={() => handleSort('totalStock')}>
                     สต็อกคงเหลือ <SortIcon field="totalStock" />
                   </th>
-                  <th className="py-3 px-4 text-right font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 transition" onClick={() => handleSort('totalIncoming')}>
-                    ค้างรับ <SortIcon field="totalIncoming" />
+                  <th className="py-3 px-4 text-right font-semibold text-gray-700 cursor-pointer hover:bg-gray-100 transition" onClick={() => handleSort('totalPurchaseRemaining')}>
+                    ค้างรับ <SortIcon field="totalPurchaseRemaining" />
                   </th>
                   <th className="py-3 px-4 text-right font-semibold text-gray-700">รวม</th>
                 </>
@@ -256,9 +258,12 @@ const ExpandableFastMoversTable = ({ data, title, columns = 'sales' }) => {
                   )}
                   {columns === 'stock' && (
                     <>
+                      {/* ✅ totalStock เป็น availableStock (รวม purchaseRemaining แล้ว) */}
                       <td className="py-3 px-4 text-right font-bold text-gray-800">{fmtNumber.format(group.totalStock)}</td>
-                      <td className="py-3 px-4 text-right font-bold text-amber-600">{fmtNumber.format(group.totalIncoming)}</td>
-                      <td className="py-3 px-4 text-right font-bold text-gray-800">{fmtNumber.format(group.totalStock + group.totalIncoming)}</td>
+                      <td className="py-3 px-4 text-right font-bold text-amber-600">{fmtNumber.format(group.totalPurchaseRemaining)}</td>
+                      {/* ✅ รวม = totalStock + totalPurchaseRemaining (แต่ totalStock รวม purchaseRemaining แล้ว) */}
+                      {/* ขึ้นอยู่กับ backend ส่งอะไรมา ถ้า totalStock คำนวณจาก stockOnHand ต้องบวก totalPurchaseRemaining */}
+                      <td className="py-3 px-4 text-right font-bold text-gray-800">{fmtNumber.format(group.totalStock)}</td>
                     </>
                   )}
                   <td className="py-3 px-4 text-center text-gray-500">รวม</td>
@@ -278,9 +283,12 @@ const ExpandableFastMoversTable = ({ data, title, columns = 'sales' }) => {
                     )}
                     {columns === 'stock' && (
                       <>
-                        <td className="py-3 px-4 text-right text-gray-700 font-medium">{fmtNumber.format((variant.currentStock || 0) - (variant.incoming || 0))}</td>
-                        <td className="py-3 px-4 text-right text-amber-600 font-medium">{fmtNumber.format(variant.incoming || 0)}</td>
-                        <td className="py-3 px-4 text-right text-gray-700 font-medium">{fmtNumber.format(variant.currentStock || 0)}</td>
+                        {/* ✅ variant.stockOnHand = currentStock - incoming (สต็อกจริง) */}
+                        <td className="py-3 px-4 text-right text-gray-700 font-medium">{fmtNumber.format(variant.stockOnHand || 0)}</td>
+                        {/* ✅ variant.purchaseRemaining = สินค้าค้างรับจาก PO */}
+                        <td className="py-3 px-4 text-right text-amber-600 font-medium">{fmtNumber.format(variant.purchaseRemaining || 0)}</td>
+                        {/* ✅ รวม = stockOnHand + purchaseRemaining */}
+                        <td className="py-3 px-4 text-right text-gray-700 font-medium">{fmtNumber.format((variant.stockOnHand || 0) + (variant.purchaseRemaining || 0))}</td>
                       </>
                     )}
                     <td className="py-3 px-4 text-center">
@@ -668,9 +676,12 @@ export default function Insights() {
     sku: fm.sku,
     quantitySold: fm.quantitySold,
     dailySalesRate: fm.dailySalesRate,
-    stockOnHand: (fm.currentStock || 0) - (fm.incoming || 0),
+    // ✅ currentStock จาก API เป็น availableStock (รวม purchaseRemaining แล้ว)
+    // stockOnHand = currentStock - purchaseRemaining (สต็อกจริงในคลัง)
+    stockOnHand: (fm.currentStock || 0) - (fm.purchaseRemaining || 0),
     currentStock: fm.currentStock,
-    incoming: fm.incoming,
+    incoming: fm.incoming || 0,
+    purchaseRemaining: fm.purchaseRemaining || 0,
     daysRemaining: fm.daysRemaining,
     categoryName: fm.categoryName,
     brandName: fm.brandName,
@@ -698,7 +709,8 @@ export default function Insights() {
 
   const reorderData = (data?.reorderSuggestions || []).map(item => ({
     ...item,
-    stockOnHand: (item.currentStock || 0) - (item.incoming || 0),
+    // ✅ currentStock จาก API เป็น availableStock (รวม purchaseRemaining แล้ว)
+    stockOnHand: item.currentStock || 0,
     urgency: item.daysUntilStockOut <= 7 ? 'ด่วนมาก' : item.daysUntilStockOut <= 14 ? 'ด่วน' : 'ปกติ',
     urgencyColor: item.daysUntilStockOut <= 7 ? 'bg-red-100 text-red-700' : item.daysUntilStockOut <= 14 ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700',
   }))
@@ -1183,7 +1195,7 @@ export default function Insights() {
             { key: 'quantitySold', label: 'ขายแล้ว', format: 'number', align: 'right' },
             { key: 'dailySalesRate', label: '/วัน', format: 'number', align: 'right' },
             { key: 'stockOnHand', label: 'มีอยู่', format: 'number', align: 'right' },
-            { key: 'incoming', label: 'ค้างรับ', format: 'number', align: 'right' },
+            { key: 'purchaseRemaining', label: 'ค้างรับ', format: 'number', align: 'right' },
             { key: 'currentStock', label: 'รวม', format: 'number', align: 'right' },
             { key: 'daysRemaining', label: 'เหลือใช้', format: 'days', align: 'right', highlight: true, highlightThreshold: 14 },
           ]}

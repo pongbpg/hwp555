@@ -158,9 +158,7 @@ export const validateCSVRows = (rows, products, orderType = 'sale') => {
   const columnNames = Object.keys(firstRow).map(c => c.toLowerCase());
   
   // Base required columns for all types
-  if (!columnNames.some(c => c.includes('product') && c.includes('name'))) {
-    errors.push(`✗ Missing required column: Product Name`);
-  }
+  // ✅ Product Name is optional - will auto-lookup from SKU
   if (!columnNames.some(c => c.includes('sku'))) {
     errors.push(`✗ Missing required column: SKU`);
   }
@@ -256,8 +254,8 @@ export const validateCSVRows = (rows, products, orderType = 'sale') => {
       return;
     }
 
-    // Validate expiry date format if provided
-    if (expiryDate && ['purchase', 'damage', 'expired', 'return'].includes(orderType)) {
+    // Validate expiry date format if provided (ไม่ใช้สำหรับ purchase - จะใส่ตอน receive)
+    if (expiryDate && ['damage', 'expired', 'return'].includes(orderType)) {
       const dateObj = new Date(expiryDate);
       if (isNaN(dateObj.getTime())) {
         errors.push(`Row ${rowNum}: Expiry Date "${expiryDate}" ไม่ถูกต้อง (YYYY-MM-DD)`);
@@ -321,8 +319,8 @@ export const downloadTemplate = (orderType = 'sale', selectedProducts = null) =>
 
   // Different order types have different field requirements
   if (orderType === 'purchase') {
-    // Purchase: need pricing, batch tracking, supplier info
-    header = 'Product Name,SKU,Quantity,Unit Price,Batch Ref,Expiry Date,Supplier';
+    // Purchase: need pricing, batch tracking, supplier info (ไม่มี Expiry Date - จะใส่ตอน receive)
+    header = 'Product Name,SKU,Quantity,Unit Price,Batch Ref,Supplier';
     contentLines[0] = header;
   } else if (orderType === 'damage' || orderType === 'expired') {
     // Damage/Expired: no pricing needed, just quantity and notes
@@ -348,7 +346,7 @@ export const downloadTemplate = (orderType = 'sale', selectedProducts = null) =>
             let row = `${product.name},${variant.sku}`;
             
             if (orderType === 'purchase') {
-              row += `,0,${variant.cost || variant.price || 0},,,`; // Qty, Unit Price, Batch, Expiry, Supplier
+              row += `,0,${variant.cost || variant.price || 0},,`; // Qty, Unit Price, Batch, Supplier
             } else if (orderType === 'damage' || orderType === 'expired') {
               row += `,0,`; // Qty, Notes
             } else if (orderType === 'return') {
@@ -370,7 +368,7 @@ export const downloadTemplate = (orderType = 'sale', selectedProducts = null) =>
     let sampleRow = '';
     
     if (orderType === 'purchase') {
-      sampleRow = 'Air Max 90,NIKE - SHOE - AIRMAX90 - BLACK - 40 - LEATHER,10,3500,LOT-2025-001,2027-12-31,Nike Thailand';
+      sampleRow = 'Air Max 90,NIKE - SHOE - AIRMAX90 - BLACK - 40 - LEATHER,10,3500,LOT-2025-001,Nike Thailand';
     } else if (orderType === 'damage') {
       sampleRow = 'Air Max 90,NIKE - SHOE - AIRMAX90 - BLACK - 40 - LEATHER,5,สินค้าชำรุด - กล่องแตก';
     } else if (orderType === 'expired') {

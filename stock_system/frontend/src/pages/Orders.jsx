@@ -23,6 +23,13 @@ const getTodayThailand = () => {
   return thaiDate.toISOString().split('T')[0]; // Format as YYYY-MM-DD
 };
 
+// ✅ Helper: Calculate aggregated receivedQuantity from receipts array
+const calculateReceivedQuantity = (receipts, itemIndex) => {
+  return (receipts || [])
+    .filter((r) => r.itemIndex === itemIndex && r.status === 'completed')
+    .reduce((sum, r) => sum + (r.quantity || 0), 0);
+};
+
 // Generate reference number like SO2569-0001, PO2569-0001, etc.
 // ✅ ดึง max number จาก reference string แทนการนับ length (เพราะ orders มี pagination)
 const generateReference = (type, orderDate, orders) => {
@@ -75,6 +82,7 @@ export default function Orders() {
   const [totalCount, setTotalCount] = useState(0);
   const [expandedOrders, setExpandedOrders] = useState(new Set());
   const [receiveEdits, setReceiveEdits] = useState({});
+  const [receiveExpiryDates, setReceiveExpiryDates] = useState({}); // ✅ เก็บวันหมดอายุตอนรับ
   const [receiving, setReceiving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [filterType, setFilterType] = useState('');
@@ -203,9 +211,10 @@ export default function Orders() {
     });
     const order = orders.find((o) => o._id === id);
     if (order?.type === 'purchase' && order.items) {
+      // ✅ Initialize receiveEdits to 0 for each item (input for THIS transaction, not aggregate)
       setReceiveEdits((prev) => ({
         ...prev,
-        [id]: order.items.map((it) => it.receivedQuantity ?? 0),
+        [id]: order.items.map(() => 0), // Always start from 0, not from receivedQuantity
       }));
     }
   };
@@ -226,10 +235,19 @@ export default function Orders() {
   };
 
   const handleReceiveChange = (orderId, idx, val) => {
+    const numVal = Math.max(0, Number(val) || 0); // ✅ ensure number, minimum 0
     setReceiveEdits((prev) => {
       const list = prev[orderId] ? [...prev[orderId]] : [];
-      list[idx] = val;
+      list[idx] = numVal;
       return { ...prev, [orderId]: list };
+    });
+  };
+
+  // ✅ Handle expiry date change when receiving
+  const handleReceiveExpiryDateChange = (orderId, idx, val) => {
+    setReceiveExpiryDates((prev) => {
+      const key = `${orderId}-${idx}`;
+      return { ...prev, [key]: val };
     });
   };
 
@@ -241,23 +259,28 @@ export default function Orders() {
     const decreasedItems = [];
     
     (order.items || []).forEach((it, idx) => {
-      const newReceived = Number(edits[idx] ?? it.receivedQuantity ?? 0) || 0;
+      // ✅ Only use edits[idx] if it exists (even if 0), otherwise use current receivedQuantity
+      const newReceived = edits[idx] !== undefined ? Number(edits[idx]) : Number(it.receivedQuantity ?? 0) || 0;
       const oldReceived = Number(it.receivedQuantity ?? 0) || 0;
-      if (newReceived < oldReceived) {
+      // ✅ newReceived should be the amount to SUBMIT THIS TIME, not aggregate
+      // So we add it to oldReceived to get the new total
+      const newTotal = oldReceived + newReceived;
+      
+      if (newTotal < oldReceived) {
         decreasedItems.push({
           productName: it.productName,
           sku: it.sku,
           ordered: it.quantity,
           oldQuantity: oldReceived,
-          newQuantity: newReceived,
-          difference: oldReceived - newReceived,
+          newQuantity: newTotal,
+          difference: oldReceived - newTotal,
         });
       }
     });
     
     // ❌ Prevent if any items have decreased quantity
     if (decreasedItems.length > 0) {
-      let errorMsg = '❌ ไม่ได้ เพราะเคยบันทึกยอดรับแล้ว\n\nไม่สามารถลดจำนวนที่บันทึกไปแล้ว:\n';
+      let errorMsg = '❌ ไม่ได้รับการยอมรับ\n\nไม่สามารถลดจำนวนที่บันทึกไปแล้ว:\n';
       decreasedItems.forEach((item) => {
         errorMsg += `\n  • ${item.productName} (${item.sku})\n    สั่งซื้อ: ${item.ordered} ชิ้น\n    เคยรับ: ${item.oldQuantity} ชิ้น\n    ⚠️ พยายามปรับเป็น: ${item.newQuantity} ชิ้น (ลด ${item.difference} ชิ้น)\n`;
       });
@@ -269,10 +292,11 @@ export default function Orders() {
     // ✅ Show confirmation dialog for normal save
     const editsDetails = (order.items || [])
       .map((it, idx) => {
-        const newReceived = Number(edits[idx] ?? it.receivedQuantity ?? 0) || 0;
+        const thisTimeQty = edits[idx] !== undefined ? Number(edits[idx]) : 0;
         const oldReceived = Number(it.receivedQuantity ?? 0) || 0;
-        if (newReceived > oldReceived) {
-          return `  • ${it.productName} (${it.sku}): +${newReceived - oldReceived} ชิ้น`;
+        const newTotal = oldReceived + thisTimeQty;
+        if (thisTimeQty > 0) {
+          return `  • ${it.productName} (${it.sku}): +${thisTimeQty} ชิ้น (รวม ${newTotal})`;
         }
         return null;
       })
@@ -289,16 +313,37 @@ export default function Orders() {
     setError('');
     setMessage('');
     try {
-      const payloadItems = (order.items || []).map((it, idx) => ({
-        variantId: it.variantId,
-        receivedQuantity: Number(edits[idx] ?? it.receivedQuantity ?? 0) || 0,
-      }));
+      const payloadItems = (order.items || []).map((it, idx) => {
+        const key = `${order._id}-${idx}`;
+        const expiryDate = receiveExpiryDates[key] || it.expiryDate; // ✅ ใช้ expiryDate ใหม่ถ้ามี
+        // ✅ Send only THIS TIME quantity (edits[idx]), not aggregate receivedQuantity
+        return {
+          variantId: it.variantId,
+          receivedQuantity: edits[idx] !== undefined ? Number(edits[idx]) : 0,
+          expiryDate: expiryDate ? expiryDate : undefined, // ✅ ส่ง expiryDate ไป API
+        };
+      });
       await api.patch(`/inventory/orders/${order._id}/receive`, { items: payloadItems });
-      setMessage('บันทึกรับของแล้ว');
+      setMessage('✅ บันทึกรับของแล้ว');
+      // ✅ Clear input fields after successful save
+      setReceiveEdits((prev) => {
+        const updated = { ...prev };
+        delete updated[order._id];
+        return updated;
+      });
+      setReceiveExpiryDates((prev) => {
+        const updated = { ...prev };
+        (order.items || []).forEach((_, idx) => {
+          delete updated[`${order._id}-${idx}`];
+        });
+        return updated;
+      });
       // โหลดข้อมูลใหม่ - รอให้ทั้งสองเสร็จ
       await Promise.all([loadOrders(page), loadProducts()]);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to receive');
+      // ✅ แสดง error message ที่ชัดเจน
+      const errorMsg = err.response?.data?.error || err.message || '❌ ไม่สามารถบันทึกรับของได้';
+      setError(errorMsg);
     } finally {
       setReceiving(false);
     }
@@ -306,17 +351,19 @@ export default function Orders() {
 
   const cancelOrder = async (order) => {
     if (!order?._id) return;
-    if (!window.confirm(`ยืนยันยกเลิก Order ${order.reference || order._id}?\nStock จะถูก rollback กลับ`)) return;
+    if (!window.confirm(`ยืนยันยกเลิก Order ${order.reference || order._id}?\n\n⚠️ Stock จะถูก rollback กลับเท่าเดิม`)) return;
     setError('');
     setMessage('');
     try {
       const reason = window.prompt('เหตุผลในการยกเลิก (ไม่บังคับ):', '') || '';
       await api.patch(`/inventory/orders/${order._id}/cancel`, { reason });
-      setMessage('ยกเลิก Order แล้ว');
+      setMessage('✅ ยกเลิก Order แล้ว');
       // โหลดข้อมูลใหม่ - รอให้ทั้งสองเสร็จ
       await Promise.all([loadOrders(page), loadProducts()]);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to cancel order');
+      // ✅ แสดง error message ที่ชัดเจน
+      const errorMsg = err.response?.data?.error || err.message || '❌ ไม่สามารถยกเลิก Order ได้';
+      setError(errorMsg);
     }
   };
 
@@ -330,10 +377,12 @@ export default function Orders() {
     setMessage('');
     try {
       await api.patch(`/inventory/orders/${order._id}`, { reference: newReference, notes: newNotes });
-      setMessage('แก้ไข Order แล้ว');
+      setMessage('✅ แก้ไข Order แล้ว');
       await loadOrders(page);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to edit order');
+      // ✅ แสดง error message ที่ชัดเจน
+      const errorMsg = err.response?.data?.error || err.message || '❌ ไม่สามารถแก้ไข Order ได้';
+      setError(errorMsg);
     }
   };
 
@@ -374,19 +423,28 @@ export default function Orders() {
           
           // ✅ ต้องมี productId, variantId, quantity ทั้งหมด
           if (!it.productId || !it.variantId) {
-            throw new Error('โปรดเลือกสินค้าและเวอร์ชันให้ครบ');
+            throw new Error('❌ รายการที่ ' + (items.indexOf(it) + 1) + ': โปรดเลือกสินค้าและเวอร์ชั่นให้ครบ');
           }
           
           const qty = Number(it.quantity);
           if (isNaN(qty) || qty === 0) {
-            throw new Error('โปรดระบุจำนวนสินค้าให้ถูกต้อง (ต้องมากกว่า 0)');
+            throw new Error('❌ รายการที่ ' + (items.indexOf(it) + 1) + ': จำนวนสินค้าต้องมากกว่า 0');
           }
           
-          // ✅ Validate unitPrice for Purchase and Adjustment (required)
-          if (['purchase', 'adjustment'].includes(type)) {
+          // ✅ Validate unitPrice for Purchase, Adjustment, and Return (required)
+          if (['purchase', 'adjustment', 'return'].includes(type)) {
             const unitPrice = Number(it.unitPrice);
             if (!it.unitPrice || isNaN(unitPrice) || unitPrice <= 0) {
-              throw new Error(`${type === 'purchase' ? 'ใบสั่งซื้อ' : 'การปรับปรุง'}ต้องระบุราคาต่อหน่วย (Unit Price) ที่มากกว่า 0`);
+              const typeLabel = type === 'purchase' ? 'สั่งซื้อ' : type === 'adjustment' ? 'ปรับปรุง' : 'รับคืน';
+              throw new Error('❌ รายการที่ ' + (items.indexOf(it) + 1) + ': ต้องระบุต้นทุน/หน่วย มากกว่า 0 สำหรับการ ' + typeLabel);
+            }
+          }
+
+          // ✅ Validate unitPrice for Sale (must have selling price)
+          if (type === 'sale') {
+            const unitPrice = Number(it.unitPrice);
+            if (!it.unitPrice || isNaN(unitPrice) || unitPrice <= 0) {
+              throw new Error('❌ รายการที่ ' + (items.indexOf(it) + 1) + ': ต้องระบุราคาขาย/หน่วย มากกว่า 0');
             }
           }
           
@@ -416,7 +474,7 @@ export default function Orders() {
         }),
       };
       await api.post('/inventory/orders', payload);
-      setMessage('Order recorded');
+      setMessage('✅ บันทึก Order สำเร็จ!');
       // Reset form
       setItems([{ ...defaultItem }]);
       setReference('');
@@ -427,7 +485,9 @@ export default function Orders() {
       // โหลดข้อมูลใหม่ - รอให้ทั้งสอง request เสร็จก่อนเคลียร์ message
       await Promise.all([loadOrders(1), loadProducts()]);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to record');
+      // ✅ แสดง error message ที่ชัดเจน จาก validation หรือ API
+      const errorMsg = err.response?.data?.error || err.message || 'Failed to record';
+      setError(errorMsg);
     } finally {
       setSubmitting(false);
     }
@@ -533,7 +593,9 @@ export default function Orders() {
       // Reload data
       await Promise.all([loadOrders(1), loadProducts()]);
     } catch (err) {
-      setError(`❌ ${err.response?.data?.error || 'Failed to import'}`);
+      // ✅ แสดง error message ที่ชัดเจน
+      const errorMsg = err.response?.data?.error || err.message || '❌ ไม่สามารถ import CSV ได้';
+      setError(errorMsg);
     } finally {
       setCsvImporting(false);
     }
@@ -774,7 +836,7 @@ export default function Orders() {
                           )}
                         </div>
                       </div>
-                      {/* Purchase Order: เพิ่มช่อง Batch และ วันหมดอายุ */}
+                      {/* Purchase Order: เพิ่มช่อง Batch เท่านั้น (expiryDate จะใส่ตอน receive) */}
                       {type === 'purchase' && (
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
                           <div>
@@ -784,18 +846,9 @@ export default function Orders() {
                               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                               value={item.batchRef || ''}
                               onChange={(e) => updateItem(idx, { batchRef: e.target.value })}
-                              placeholder="เช่น LOT-2025-001"
+                              placeholder="เช่น LOT-2025-001 (ไม่บังคับ)"
                             />
-                          </div>
-                          <div>
-                            <label className="block text-xs text-gray-500 mb-1">📅 วันหมดอายุ (ไม่บังคับ)</label>
-                            <input
-                              type="date"
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                              value={item.expiryDate || ''}
-                              onChange={(e) => updateItem(idx, { expiryDate: e.target.value })}
-                            />
-                            <p className="text-xs text-gray-400 mt-1">สำหรับสินค้าที่มีอายุการใช้ (เช่น ยา อาหาร)</p>
+                            <p className="text-xs text-gray-400 mt-1">วันหมดอายุจะใส่ตอนรับสินค้า</p>
                           </div>
                         </div>
                       )}
@@ -1072,7 +1125,7 @@ export default function Orders() {
                         {type === 'purchase' && (
                           <>
                             <th className="text-left py-2 px-3">Batch Ref</th>
-                            <th className="text-left py-2 px-3">Expiry Date</th>
+                            <th className="text-left py-2 px-3">Supplier</th>
                           </>
                         )}
                         {['damage', 'expired', 'return'].includes(type) && (
@@ -1094,9 +1147,7 @@ export default function Orders() {
                           {type === 'purchase' && (
                             <>
                               <td className="py-2 px-3 text-gray-600">{row.batchRef || '-'}</td>
-                              <td className="py-2 px-3 text-gray-600">
-                                {row.expiryDate ? new Date(row.expiryDate).toLocaleDateString('th-TH') : '-'}
-                              </td>
+                              <td className="py-2 px-3 text-gray-600">{row.supplier || '-'}</td>
                             </>
                           )}
                           {['damage', 'expired', 'return'].includes(type) && (
@@ -1325,6 +1376,8 @@ export default function Orders() {
                                   <th className="text-right py-2 px-2 w-20">จำนวน</th>
                                   {o.type === 'purchase' && (
                                     <>
+                                      <th className="py-2 px-2">วันหมดอายุ</th>
+                                      <th className="text-right py-2 px-2 w-20">รับครั้งนี้</th>
                                       <th className="text-right py-2 px-2 w-20">รับแล้ว</th>
                                       <th className="text-right py-2 px-2 w-20">ค้างรับ</th>
                                       <th className="text-right py-2 px-2 w-20">ต้นทุน/หน่วย</th>
@@ -1359,26 +1412,46 @@ export default function Orders() {
                                     <td className="py-2 px-2 text-right">{it.quantity ?? 0}</td>
                                     {o.type === 'purchase' && (
                                       <>
+                                        <td className="py-2 px-2">
+                                          {/* ✅ Input for expiry date when receiving */}
+                                          <input
+                                            type="date"
+                                            className="w-32 px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                                            value={receiveExpiryDates[`${o._id}-${idx}`] || it.expiryDate || ''}
+                                            onChange={(e) => handleReceiveExpiryDateChange(o._id, idx, e.target.value)}
+                                          />
+                                        </td>
                                         <td className="py-2 px-2 text-right">
+                                          {/* ✅ Input for receiving quantity THIS TIME ONLY (starts from 0) */}
                                           {(() => {
-                                            const received = receiveEdits[o._id]?.[idx] ?? it.receivedQuantity ?? 0;
-                                            const isCompleteFromDB = it.receivedQuantity >= (it.quantity ?? 0);
-                                            return isCompleteFromDB ? (
-                                              <span className="font-semibold text-green-700">{it.receivedQuantity}</span>
+                                            const currentReceiveQty = receiveEdits[o._id]?.[idx] ?? 0; // เริ่มจาก 0 เสมอ
+                                            const totalOrdered = it.quantity ?? 0;
+                                            const alreadyReceived = calculateReceivedQuantity(o.receipts, idx);
+                                            const remaining = totalOrdered - alreadyReceived;
+                                            const isComplete = alreadyReceived >= totalOrdered;
+                                            
+                                            return isComplete ? (
+                                              <span className="font-semibold text-green-700 text-xs">สมบูรณ์</span>
                                             ) : (
                                               <input
                                                 type="number"
                                                 min="0"
-                                                max={it.quantity ?? 0}
+                                                max={remaining}
                                                 className="w-20 px-2 py-1 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 outline-none text-right"
-                                                value={received}
+                                                placeholder="0"
+                                                value={currentReceiveQty}
                                                 onChange={(e) => handleReceiveChange(o._id, idx, e.target.value)}
                                               />
                                             );
                                           })()}
                                         </td>
+                                        <td className="py-2 px-2 text-right font-semibold">
+                                          {/* ✅ Already received (read-only aggregate) */}
+                                          {calculateReceivedQuantity(o.receipts, idx)}
+                                        </td>
                                         <td className="py-2 px-2 text-right">
-                                          {Math.max(0, (it.quantity ?? 0) - (receiveEdits[o._id]?.[idx] ?? it.receivedQuantity ?? 0))}
+                                          {/* ✅ Remaining to receive */}
+                                          {Math.max(0, (it.quantity ?? 0) - calculateReceivedQuantity(o.receipts, idx))}
                                         </td>
                                         <td className="py-2 px-2 text-right">{(Number(it.unitCost) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                                         <td className="py-2 px-2 text-right text-orange-600 font-medium">
@@ -1410,17 +1483,136 @@ export default function Orders() {
                                 ))}
                               </tbody>
                             </table>
+                            
+                            {/* ✅ Receipt History Table for Purchase Orders */}
+                            {o.type === 'purchase' && (o.receipts?.length > 0) && (
+                              <div className="mt-6 pt-4 border-t border-gray-300">
+                                <h4 className="font-semibold text-gray-700 mb-3">📥 ประวัติการรับสินค้า</h4>
+                                <div className="overflow-x-auto">
+                                  <table className="w-full text-sm border border-gray-300">
+                                    <thead>
+                                      <tr className="bg-gray-100 border-b border-gray-300">
+                                        <th className="text-center py-2 px-2 w-16">ครั้ง</th>
+                                        <th className="text-left py-2 px-2">SKU</th>
+                                        <th className="text-center py-2 px-2 w-16">ได้รับ</th>
+                                        <th className="text-left py-2 px-2">ล็อต</th>
+                                        <th className="text-left py-2 px-2">ผู้จัดจำหน่าย</th>
+                                        <th className="text-left py-2 px-2">วันหมดอายุ</th>
+                                        <th className="text-left py-2 px-2">วันที่รับ</th>
+                                        <th className="text-center py-2 px-2">สถานะ</th>
+                                        <th className="text-center py-2 px-2">ดำเนินการ</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {o.receipts.map((receipt, recIdx) => {
+                                        const item = o.items[receipt.itemIndex];
+                                        const receiptNum = o.receipts.filter((r, i) => i <= recIdx && r.itemIndex === receipt.itemIndex && r.status === 'completed').length;
+                                        return (
+                                          <tr key={recIdx} className={`border-b border-gray-200 ${receipt.status === 'cancelled' ? 'opacity-50 bg-red-50' : ''}`}>
+                                            <td className="py-2 px-2 text-center font-semibold">{receiptNum}</td>
+                                            <td className="py-2 px-2 font-mono text-gray-600">{item?.sku || '-'}</td>
+                                            <td className="py-2 px-2 text-center font-medium">{receipt.quantity}</td>
+                                            <td className="py-2 px-2 text-gray-600">{receipt.batchRef || '-'}</td>
+                                            <td className="py-2 px-2 text-gray-600">{receipt.supplier || '-'}</td>
+                                            <td className="py-2 px-2 text-gray-600">
+                                              {receipt.expiryDate ? new Date(receipt.expiryDate).toLocaleDateString('th-TH') : '-'}
+                                            </td>
+                                            <td className="py-2 px-2 text-gray-600">
+                                              {receipt.receivedAt ? new Date(receipt.receivedAt).toLocaleDateString('th-TH') : '-'}
+                                            </td>
+                                            <td className="py-2 px-2 text-center">
+                                              {receipt.status === 'completed' ? (
+                                                <span className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs font-semibold">✅ เสร็จสิ้น</span>
+                                              ) : (
+                                                <span className="bg-red-100 text-red-800 px-2 py-1 rounded text-xs font-semibold">❌ ยกเลิก</span>
+                                              )}
+                                            </td>
+                                            <td className="py-2 px-2 text-center">
+                                              {receipt.status === 'completed' && (
+                                                <div className="flex gap-1 justify-center">
+                                                  <button
+                                                    type="button"
+                                                    className="text-blue-600 hover:text-blue-800 text-lg"
+                                                    title="แก้ไขการรับ"
+                                                    onClick={() => {
+                                                      const newQty = prompt(`แก้ไขจำนวนรับ (ปัจจุบัน: ${receipt.quantity}):`, String(receipt.quantity));
+                                                      const newExpiry = prompt(`แก้ไขวันหมดอายุ (ปัจจุบัน: ${receipt.expiryDate ? new Date(receipt.expiryDate).toISOString().split('T')[0] : ''}):`);
+                                                      
+                                                      if (newQty !== null && Number(newQty) > 0) {
+                                                        (async () => {
+                                                          try {
+                                                            const response = await api.patch(`/inventory/orders/${o._id}/receipts/${recIdx}`, {
+                                                              quantity: Number(newQty),
+                                                              expiryDate: newExpiry || undefined,
+                                                            });
+                                                            setOrders((prev) =>
+                                                              prev.map((order) =>
+                                                                order._id === o._id ? response.data : order
+                                                              )
+                                                            );
+                                                            setMessage('✅ แก้ไขการรับสินค้าสำเร็จ');
+                                                          } catch (err) {
+                                                            setError(`❌ ไม่สามารถแก้ไข: ${err.response?.data?.error || err.message}`);
+                                                          }
+                                                        })();
+                                                      }
+                                                    }}
+                                                  >
+                                                    ✏️
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    className="text-red-600 hover:text-red-800 text-lg"
+                                                    title="ยกเลิกการรับ"
+                                                    onClick={() => {
+                                                      if (confirm(`ยกเลิกการรับจำนวน ${receipt.quantity} ชิ้น ใช่หรือไม่?`)) {
+                                                        (async () => {
+                                                          try {
+                                                            setReceiving(true);
+                                                            const response = await api.patch(`/inventory/orders/${o._id}/receipts/${recIdx}/cancel`);
+                                                            setOrders((prev) =>
+                                                              prev.map((order) =>
+                                                                order._id === o._id ? response.data : order
+                                                              )
+                                                            );
+                                                            setMessage('✅ ยกเลิกการรับสินค้าสำเร็จ');
+                                                          } catch (err) {
+                                                            setError(`❌ ไม่สามารถยกเลิก: ${err.response?.data?.error || err.message}`);
+                                                          } finally {
+                                                            setReceiving(false);
+                                                          }
+                                                        })();
+                                                      }
+                                                    }}
+                                                  >
+                                                    🗑️
+                                                  </button>
+                                                </div>
+                                              )}
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            )}
+                            
                             {o.type === 'purchase' && (() => {
-                              const allReceived = (o.items || []).every((it) => (it.receivedQuantity ?? 0) >= (it.quantity ?? 0));
+                              const allReceived = (o.items || []).every((_, idx) => calculateReceivedQuantity(o.receipts, idx) >= (o.items[idx].quantity ?? 0));
                               return !allReceived && (
                                 <div className="mt-3 flex justify-end gap-3">
                                   <button
                                     type="button"
                                     className="bg-gray-400 hover:bg-gray-500 text-white px-4 py-2 rounded-lg font-medium"
                                     onClick={() => {
-                                      // Set all receive quantities to match remaining quantities
+                                      // Set all receive quantities to match REMAINING quantities (not total ordered)
                                       const newEdits = {};
-                                      newEdits[o._id] = (o.items || []).map((it) => it.quantity ?? 0);
+                                      newEdits[o._id] = (o.items || []).map((it, i) => {
+                                        const alreadyReceived = calculateReceivedQuantity(o.receipts, i);
+                                        return Math.max(0, (it.quantity ?? 0) - alreadyReceived);
+                                      });
                                       setReceiveEdits((prev) => ({ ...prev, ...newEdits }));
                                     }}
                                     disabled={receiving}

@@ -422,6 +422,34 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
 
     await order.save();
     
+    // ✅ NEW: สำหรับ purchase order ที่สั่งมาแล้วรับ ต้องสร้าง receipt record อัตโนมัติ
+    // (order items ที่มี receivedQuantity = quantity แปลว่ารับเต็มแล้ว)
+    if (type === 'purchase' && order.status === 'completed') {
+      const newReceipts = [];
+      for (let idx = 0; idx < order.items.length; idx++) {
+        const item = order.items[idx];
+        if (item.receivedQuantity && item.receivedQuantity > 0) {
+          // สร้าง receipt record
+          newReceipts.push({
+            itemIndex: idx,
+            quantity: item.receivedQuantity,
+            batchRef: item.batchRef || `LOT${Date.now()}-${idx}`,
+            supplier: item.supplier || 'Direct',
+            expiryDate: item.expiryDate || null,
+            unitCost: item.unitCost || 0,
+            receivedAt: new Date(),
+            receivedBy: req.user?._id,
+            status: 'completed',
+          });
+        }
+      }
+      
+      if (newReceipts.length > 0) {
+        order.receipts.push(...newReceipts);
+        await order.save();
+      }
+    }
+    
     // ✅ Phase 3: Group items by product and apply stock changes
     // This prevents version conflicts when saving products with multiple variant changes
     const productMap = new Map();
@@ -573,6 +601,29 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
   }
 });
 
+// ============= Helper: Receipt Management =============
+/**
+ * Calculate aggregated received quantity for an item by summing active receipts
+ * @param {Array} receipts - Order receipts array
+ * @param {number} itemIndex - Index of the item in order.items
+ * @returns {number} - Total received quantity
+ */
+const calculateReceivedQuantity = (receipts, itemIndex) => {
+  return (receipts || [])
+    .filter((r) => r.itemIndex === itemIndex && r.status === 'completed')
+    .reduce((sum, r) => sum + (r.quantity || 0), 0);
+};
+
+/**
+ * Find batches created by a specific receipt
+ * @param {Array} batches - Variant batches array
+ * @param {string} batchRef - Batch reference to find
+ * @returns {Array} - Matching batches
+ */
+const findReceiptBatches = (batches, batchRef) => {
+  return (batches || []).filter((b) => b.batchRef === batchRef);
+};
+
 // รับของสำหรับใบสั่งซื้อ
 router.patch('/orders/:id/receive', authenticateToken, authorizeRoles('owner', 'admin', 'hr', 'stock'), async (req, res) => {
   try {
@@ -582,22 +633,58 @@ router.patch('/orders/:id/receive', authenticateToken, authorizeRoles('owner', '
     if (order.status === 'cancelled') return res.status(400).json({ error: 'Order is cancelled' });
 
     const receivedMap = new Map();
+    const expiryDateMap = new Map(); // ✅ เก็บ expiryDate จาก request body
+    const receiveItemsData = new Map(); // ✅ เก็บข้อมูล receipt ที่จะสร้าง
+    
     for (const it of req.body.items || []) {
       if (!it.variantId) continue;
       const qty = Math.max(0, Number(it.receivedQuantity) || 0);
+      if (qty <= 0) continue; // ข้าม item ที่ไม่มีการรับ
+      
       receivedMap.set(String(it.variantId), qty);
+      if (it.expiryDate) {
+        expiryDateMap.set(String(it.variantId), it.expiryDate);
+      }
+      
+      // ✅ เก็บข้อมูลสำหรับสร้าง receipt record
+      receiveItemsData.set(String(it.variantId), {
+        supplier: it.supplier,
+        unitCost: it.unitCost || it.unitPrice || 0,
+        batchRef: it.batchRef,
+      });
+    }
+
+    if (receivedMap.size === 0) {
+      return res.status(400).json({ error: 'No items to receive' });
     }
 
     // load products once per productId
     const productCache = new Map();
     const movementRecords = []; // เก็บข้อมูลสำหรับบันทึก movement
+    const newReceipts = []; // ✅ เก็บ receipt records ที่จะ push เข้า order.receipts
 
-    for (const item of order.items) {
+    for (let itemIndex = 0; itemIndex < order.items.length; itemIndex++) {
+      const item = order.items[itemIndex];
       const key = String(item.variantId);
       if (!receivedMap.has(key)) continue;
-      const newReceived = Math.min(item.quantity, receivedMap.get(key));
-      const delta = newReceived - (item.receivedQuantity || 0);
-      if (delta <= 0) continue;
+      
+      // ✅ receivedMap.get(key) = quantity received THIS TIME (from frontend)
+      // Not aggregate - just the amount in this receive transaction
+      const thisTimeQty = receivedMap.get(key);
+      const currentReceivedQty = calculateReceivedQuantity(order.receipts, itemIndex);
+      const totalWillBe = currentReceivedQty + thisTimeQty;
+      
+      // ✅ Validate: total can't exceed ordered quantity
+      if (totalWillBe > item.quantity) {
+        return res.status(400).json({
+          error: `SKU ${item.sku}: tried to receive ${totalWillBe} total, but only ordered ${item.quantity}`
+        });
+      }
+      
+      // ✅ delta = amount to add THIS TIME (THIS TIME quantity)
+      const delta = thisTimeQty;
+      
+      if (delta <= 0) continue; // ข้าม ถ้าไม่มีการรับ
 
       const productId = String(item.productId);
       let product = productCache.get(productId);
@@ -612,7 +699,6 @@ router.patch('/orders/:id/receive', authenticateToken, authorizeRoles('owner', '
       const previousStock = variant.stockOnHand || 0;
       // ✅ ไม่เขียน stockOnHand ตรง - สร้าง batch แทน
       variant.incoming = Math.max(0, (variant.incoming || 0) - delta);
-      item.receivedQuantity = newReceived;
 
       // สร้างเลขล็อตอัตโนมัติ (ถ้าไม่ได้ระบุ)
       const generateBatchRef = () => {
@@ -623,25 +709,36 @@ router.patch('/orders/:id/receive', authenticateToken, authorizeRoles('owner', '
         return `LOT${dateStr}-${timeStr}-${random}`;
       };
 
-      // ✅ สร้าง batch ใหม่เสมอ พร้อม orderId เพื่อ link กับ order นี้
-      // ดังนี้ batch จะไม่ถูกจับใหม่เมื่อ receive PO อื่น
-      const createdBatchRef = item.batchRef || generateBatchRef();
-      // ✅ ใช้ unitPrice จาก InventoryOrder item (ราคาต้นทุนที่สั่งมา)
-      // หรือ unitCost ถ้ามี (สำหรับ consistency กับ manual batch creation)
-      const batchCost = item.unitCost || item.unitPrice || 0;
+      const receiveData = receiveItemsData.get(key) || {};
+      const createdBatchRef = receiveData.batchRef || generateBatchRef();
+      const batchCost = receiveData.unitCost || 0;
+      const expiryDateFromRequest = expiryDateMap.get(key);
+      
+      // ✅ สร้าง batch ใหม่
       variant.batches.push({
         batchRef: createdBatchRef,
-        supplier: item.supplier || 'Direct',
+        supplier: receiveData.supplier || 'Direct',
         cost: batchCost,
         quantity: delta,
-        expiryDate: item.expiryDate,
+        expiryDate: expiryDateFromRequest || item.expiryDate,
         receivedAt: new Date(),
-        orderId: order._id, // ✅ Link batch กับ order นี้ เพื่อป้องกัน overwrite
+        orderId: order._id,
       });
-      item.batchRef = createdBatchRef;
+      
+      // ✅ สร้าง receipt record สำหรับประวัติการรับ
+      newReceipts.push({
+        itemIndex,
+        quantity: delta,
+        batchRef: createdBatchRef,
+        supplier: receiveData.supplier || 'Direct',
+        expiryDate: expiryDateFromRequest || item.expiryDate,
+        unitCost: batchCost,
+        receivedAt: new Date(),
+        receivedBy: req.user?._id,
+        status: 'completed',
+      });
       
       // เก็บข้อมูลสำหรับ movement
-      // newStock คำนวณจาก batch ใหม่
       const newStock = previousStock + delta;
       movementRecords.push({
         movementType: 'in',
@@ -651,8 +748,8 @@ router.patch('/orders/:id/receive', authenticateToken, authorizeRoles('owner', '
         previousStock,
         newStock,
         reference: order.reference,
-        batchRef: item.batchRef,
-        expiryDate: item.expiryDate,
+        batchRef: createdBatchRef,
+        expiryDate: expiryDateFromRequest || item.expiryDate,
         unitCost: batchCost,
       });
     }
@@ -663,8 +760,20 @@ router.patch('/orders/:id/receive', authenticateToken, authorizeRoles('owner', '
       await p.save();
     }
 
-    // Update order status
-    const allReceived = order.items.every((it) => (it.receivedQuantity || 0) >= (it.quantity || 0));
+    // ✅ Add receipts to order
+    order.receipts.push(...newReceipts);
+    
+    // ✅ Update items[].receivedQuantity to reflect aggregated receipts
+    for (let idx = 0; idx < order.items.length; idx++) {
+      const totalReceived = calculateReceivedQuantity(order.receipts, idx);
+      order.items[idx].receivedQuantity = totalReceived;
+    }
+    
+    // Update order status based on aggregated received quantities
+    const allReceived = order.items.every((_, idx) => {
+      const totalReceived = calculateReceivedQuantity(order.receipts, idx);
+      return totalReceived >= order.items[idx].quantity;
+    });
     order.status = allReceived ? 'completed' : 'pending';
     await order.save();
     
@@ -882,6 +991,193 @@ router.patch('/orders/:id/cancel', authenticateToken, authorizeRoles('owner', 'a
   }
 });
 
+// ✅ Delete receipt (ยกเลิกการรับแต่ละครั้ง)
+router.patch('/orders/:id/receipts/:receiptIndex/cancel', authenticateToken, authorizeRoles('owner', 'admin', 'hr', 'stock'), async (req, res) => {
+  try {
+    const order = await InventoryOrder.findById(req.params.id);
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+    if (order.type !== 'purchase') return res.status(400).json({ error: 'Receipt management is only for purchase orders' });
+
+    const receiptIndex = Number(req.params.receiptIndex);
+    const receipt = order.receipts?.[receiptIndex];
+    if (!receipt) return res.status(404).json({ error: 'Receipt not found' });
+    if (receipt.status === 'cancelled') return res.status(400).json({ error: 'Receipt is already cancelled' });
+
+    // ✅ ตรวจสอบว่าสามารถยกเลิกได้หรือไม่ (ต้องมีสต็อกพอ)
+    const productCache = new Map();
+    const itemIndex = receipt.itemIndex;
+    const item = order.items[itemIndex];
+
+    const productId = String(item.productId);
+    let product = await Product.findById(productId);
+    if (!product) return res.status(404).json({ error: 'Product not found' });
+
+    const variant = selectVariant(product, item.variantId, item.sku);
+    if (!variant) return res.status(404).json({ error: 'Variant not found' });
+
+    // ตรวจสอบว่าสต็อกพอลบหรือไม่
+    const currentStock = variant.stockOnHand || 0;
+    if (!variant.allowBackorder && currentStock < receipt.quantity) {
+      return res.status(400).json({
+        error: `Cannot cancel receipt: SKU ${variant.sku} has only ${currentStock} units but received ${receipt.quantity}. ` +
+               `Insufficient stock to reverse this receipt.`
+      });
+    }
+
+    // ✅ ยกเลิกการรับ
+    const batchesToRemove = findReceiptBatches(variant.batches, receipt.batchRef);
+    const previousStock = variant.stockOnHand || 0;
+
+    // ลบ batches ที่สร้างจาก receipt นี้
+    variant.batches = (variant.batches || []).filter((b) => b.batchRef !== receipt.batchRef);
+
+    // บันทึก movement เพื่อ rollback
+    const newStock = previousStock - receipt.quantity;
+    await recordMovement({
+      movementType: 'out', // ลดสต็อก
+      product,
+      variant,
+      quantity: -receipt.quantity, // negative to indicate reduction
+      previousStock,
+      newStock,
+      reference: `${order.reference}-RECEIPT-${receiptIndex}-CANCEL`,
+      batchRef: receipt.batchRef,
+      orderId: order._id,
+      userId: req.user._id,
+      userName: `${req.user?.firstName || ''} ${req.user?.lastName || ''}`.trim() || req.user?.username,
+    });
+
+    // ✅ ทำการยกเลิก receipt
+    receipt.status = 'cancelled';
+
+    // ✅ อัพเดท items[].receivedQuantity ตามการรับที่เหลือ
+    const updatedReceivedQty = calculateReceivedQuantity(order.receipts, itemIndex);
+    order.items[itemIndex].receivedQuantity = updatedReceivedQty;
+
+    // ✅ อัพเดท order status ตามการรับที่เหลือ
+    const allReceived = order.items.every((_, idx) => {
+      const totalReceived = calculateReceivedQuantity(order.receipts, idx);
+      return totalReceived >= order.items[idx].quantity;
+    });
+    order.status = allReceived ? 'completed' : 'pending';
+
+    // บันทึกการเปลี่ยนแปลง
+    product.markModified('variants');
+    await Promise.all([
+      product.save(),
+      order.save(),
+    ]);
+
+    res.json(order);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ✅ Edit receipt (แก้ไขการรับแต่ละครั้ง - เปลี่ยนจำนวน/วันหมดอายุ)
+router.patch('/orders/:id/receipts/:receiptIndex', authenticateToken, authorizeRoles('owner', 'admin', 'hr', 'stock'), async (req, res) => {
+  try {
+    const order = await InventoryOrder.findById(req.params.id);
+    if (!order) return res.status(404).json({ error: 'Order not found' });
+    if (order.type !== 'purchase') return res.status(400).json({ error: 'Receipt management is only for purchase orders' });
+
+    const receiptIndex = Number(req.params.receiptIndex);
+    const receipt = order.receipts?.[receiptIndex];
+    if (!receipt) return res.status(404).json({ error: 'Receipt not found' });
+    if (receipt.status === 'cancelled') return res.status(400).json({ error: 'Cannot edit cancelled receipt' });
+
+    const { quantity: newQuantity, expiryDate: newExpiryDate } = req.body;
+    if (!newQuantity || newQuantity <= 0) return res.status(400).json({ error: 'Quantity must be greater than 0' });
+
+    const itemIndex = receipt.itemIndex;
+    const item = order.items[itemIndex];
+    const oldQuantity = receipt.quantity;
+    const quantityDelta = newQuantity - oldQuantity;
+
+    const productId = String(item.productId);
+    let product = await Product.findById(productId);
+    if (!product) return res.status(404).json({ error: 'Product not found' });
+
+    const variant = selectVariant(product, item.variantId, item.sku);
+    if (!variant) return res.status(404).json({ error: 'Variant not found' });
+
+    const currentStock = variant.stockOnHand || 0;
+
+    // ตรวจสอบว่าสต็อกพอหรือไม่
+    if (quantityDelta < 0 && !variant.allowBackorder && currentStock < Math.abs(quantityDelta)) {
+      return res.status(400).json({
+        error: `Cannot reduce quantity: SKU ${variant.sku} has only ${currentStock} units. ` +
+               `Need ${Math.abs(quantityDelta)} to reduce by this amount.`
+      });
+    }
+
+    const previousStock = currentStock;
+
+    // ✅ ลบ batch เก่า
+    const oldBatches = findReceiptBatches(variant.batches, receipt.batchRef);
+    if (oldBatches.length > 0) {
+      variant.batches = (variant.batches || []).filter((b) => b.batchRef !== receipt.batchRef);
+    }
+
+    // ✅ สร้าง batch ใหม่ตามปริมาณใหม่
+    variant.batches.push({
+      batchRef: receipt.batchRef,
+      supplier: receipt.supplier || 'Direct',
+      cost: receipt.unitCost || 0,
+      quantity: newQuantity,
+      expiryDate: newExpiryDate || receipt.expiryDate,
+      receivedAt: receipt.receivedAt,
+      orderId: order._id,
+    });
+
+    // บันทึก movement สำหรับ delta
+    if (quantityDelta !== 0) {
+      const newStock = previousStock + quantityDelta;
+      await recordMovement({
+        movementType: quantityDelta > 0 ? 'in' : 'out',
+        product,
+        variant,
+        quantity: quantityDelta,
+        previousStock,
+        newStock,
+        reference: `${order.reference}-RECEIPT-${receiptIndex}-EDIT`,
+        batchRef: receipt.batchRef,
+        orderId: order._id,
+        userId: req.user._id,
+        userName: `${req.user?.firstName || ''} ${req.user?.lastName || ''}`.trim() || req.user?.username,
+      });
+    }
+
+    // ✅ อัพเดท receipt
+    receipt.quantity = newQuantity;
+    if (newExpiryDate) {
+      receipt.expiryDate = new Date(newExpiryDate);
+    }
+
+    // ✅ อัพเดท items[].receivedQuantity ตามค่า receipt ใหม่
+    const updatedReceivedQty = calculateReceivedQuantity(order.receipts, itemIndex);
+    order.items[itemIndex].receivedQuantity = updatedReceivedQty;
+
+    // ✅ อัพเดท order status
+    const allReceived = order.items.every((_, idx) => {
+      const totalReceived = calculateReceivedQuantity(order.receipts, idx);
+      return totalReceived >= order.items[idx].quantity;
+    });
+    order.status = allReceived ? 'completed' : 'pending';
+
+    // บันทึกการเปลี่ยนแปลง
+    product.markModified('variants');
+    await Promise.all([
+      product.save(),
+      order.save(),
+    ]);
+
+    res.json(order);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // แก้ไข order (เฉพาะ reference, notes, channel)
 router.patch('/orders/:id', authenticateToken, authorizeRoles('owner', 'admin', 'hr'), async (req, res) => {
   try {
@@ -1018,12 +1314,30 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
       },
     ]);
 
+    // ✅ ประกาศ debugInsights ก่อนใช้งาน
+    const debugInsights = true; // Always log for debugging
+    
+    if (debugInsights) {
+      console.log(`[GET /insights] salesData query result: ${salesData.length} items`);
+      if (salesData.length > 0) {
+        console.log(`  - Sample sale:`, salesData[0]);
+      }
+    }
+    
     // สร้าง Map ของยอดขาย
     const salesMap = new Map();
     salesData.forEach((sale) => {
       const key = `${sale.productId}-${sale.variantId}`;
       salesMap.set(key, sale.quantitySold);
     });
+    
+    if (debugInsights) {
+      console.log(`[GET /insights] salesMap size: ${salesMap.size}`);
+      const sample = Array.from(salesMap.entries()).slice(0, 3);
+      sample.forEach(([key, qty]) => {
+        console.log(`  - ${key}: sold=${qty}`);
+      });
+    }
 
     // ดึงสินค้าทั้งหมดพร้อม variants
     // ⚠️ ไม่ใช้ .lean() เพื่อให้ virtual field (stockOnHand) ถูกคำนวณ
@@ -1034,6 +1348,66 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
     ]);
     const categoryNameMap = new Map(categoriesAll.map((c) => [String(c._id), c.name]));
     const brandNameMap = new Map(brandsAll.map((b) => [String(b._id), b.name]));
+    
+    // ✅ ดึง pending purchase orders พร้อม receipts เพื่อคำนวณ receivedQuantity ที่แท้จริง
+    const purchaseOrders = await InventoryOrder.find({ type: 'purchase', status: { $in: ['pending', 'completed'] } }).lean();
+    if (debugInsights) {
+      console.log(`[GET /insights] Found ${purchaseOrders.length} purchase orders`);
+      console.log(`[GET /insights] Sample order receipts:`, purchaseOrders[0]?.receipts?.length || 0);
+      console.log(`[GET /insights] First order:`, purchaseOrders[0]?._id, 'items:', purchaseOrders[0]?.items?.length);
+    }
+    
+    // สร้าง map ของ receivedQuantity และ remainingQuantity per (orderId, variantId)
+    const receivedByVariant = new Map(); // key: `${orderId}-${variantId}` -> { received, remaining, ordered }
+    
+    // สร้าง map ของ purchaseRemaining per variantId (รวมจากทุก purchase orders)
+    const purchaseRemainingByVariant = new Map(); // key: variantId -> { purchased, received, remaining }
+    
+    purchaseOrders.forEach((order) => {
+      (order.receipts || []).forEach((receipt) => {
+        if (receipt.status !== 'completed') return;
+        const itemIndex = receipt.itemIndex;
+        const item = order.items[itemIndex];
+        if (!item) return;
+        
+        const key = `${order._id}-${item.variantId}`;
+        if (!receivedByVariant.has(key)) {
+          receivedByVariant.set(key, {
+            ordered: item.quantity,
+            received: 0,
+            remaining: item.quantity,
+          });
+        }
+        const data = receivedByVariant.get(key);
+        data.received += receipt.quantity;
+        data.remaining = data.ordered - data.received;
+      });
+      
+      // คำนวณ purchaseRemaining per variantId
+      order.items.forEach((item, itemIndex) => {
+        const variantKey = String(item.variantId);
+        const received = (order.receipts || [])
+          .filter((r) => r.status === 'completed' && r.itemIndex === itemIndex)
+          .reduce((sum, r) => sum + (r.quantity || 0), 0);
+        
+        if (!purchaseRemainingByVariant.has(variantKey)) {
+          purchaseRemainingByVariant.set(variantKey, { purchased: 0, received: 0, remaining: 0 });
+        }
+        const data = purchaseRemainingByVariant.get(variantKey);
+        data.purchased += item.quantity;
+        data.received += received;
+        data.remaining += item.quantity - received;
+      });
+    });
+    
+    if (debugInsights) {
+      console.log(`[GET /insights] purchaseRemainingByVariant map size: ${purchaseRemainingByVariant.size}`);
+      const sample = Array.from(purchaseRemainingByVariant.entries()).slice(0, 3);
+      sample.forEach(([variantId, data]) => {
+        console.log(`  - ${variantId}: purchased=${data.purchased}, received=${data.received}, remaining=${data.remaining}`);
+      });
+    }
+    
     const reorderSuggestions = [];
     const lowStock = [];
     const fastMoversDetailed = [];
@@ -1106,9 +1480,9 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
         const reorderQuantitySold = reorderSalesMap.get(key) || 0;
         const reorderDailySalesRate = reorderQuantitySold / reorderSalesPeriodDays;
         
-        const incoming = Number(variant.incoming) || 0;
-        // ✅ ใช้ stockOnHand + incoming (รวมสินค้าสั่งไปแล้ว) 
-        const availableStock = (variant.stockOnHand || 0) + incoming;
+        // ✅ ใช้ purchaseRemaining ที่คำนวณจาก receipts แทน variant.incoming
+        const purchaseRemaining = purchaseRemainingByVariant.get(String(variant._id))?.remaining || 0;
+        const availableStock = (variant.stockOnHand || 0) + purchaseRemaining;
         const minimumDays = leadTimeDays + bufferDays;
 
         // คำนวณว่าสต็อกปัจจุบันพอใช้กี่วัน (ใช้ dailySalesRate จาก user-selected range สำหรับ Fast Movers)
@@ -1116,6 +1490,9 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
 
         // บันทึก fast movers รายละเอียด (ใช้ dailySalesRate จาก user-selected range)
         if (dailySalesRate > 0) {
+          if (debugInsights && fastMoversDetailed.length < 3) {
+            console.log(`[Fast Mover] ${variant.sku}: variantId=${variant._id}, purchaseRemaining=${purchaseRemaining}, stockOnHand=${variant.stockOnHand}, availableStock=${availableStock}`);
+          }
           fastMoversDetailed.push({
             productId: product._id,
             productName: product.name,
@@ -1128,7 +1505,7 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
             quantitySold,
             dailySalesRate: Math.round(dailySalesRate * 100) / 100,
             currentStock: availableStock,
-            incoming,
+            purchaseRemaining,
             daysRemaining: Math.round(daysUntilStockOut * 10) / 10,
           });
         }
@@ -1173,13 +1550,36 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
 
           // ✅ สั่งซื้อแม้ recommendedOrderQty = 0 ถ้าเป็น out-of-stock
           if (recommendedOrderQty > 0 || isOutOfStock) {
+            // ✅ ดึงข้อมูลการรับจาก purchase orders
+            const purchaseData = purchaseOrders
+              .filter((order) => order.items.some((it) => String(it.variantId) === String(variant._id)))
+              .flatMap((order) => 
+                order.items
+                  .filter((it) => String(it.variantId) === String(variant._id))
+                  .map((it, idx) => {
+                    const received = (order.receipts || [])
+                      .filter((r) => r.status === 'completed' && r.itemIndex === idx)
+                      .reduce((sum, r) => sum + (r.quantity || 0), 0);
+                    return {
+                      orderId: order._id,
+                      ordered: it.quantity,
+                      received,
+                      remaining: it.quantity - received,
+                    };
+                  })
+              );
+            
+            const totalOrdered = purchaseData.reduce((sum, p) => sum + p.ordered, 0);
+            const totalReceived = purchaseData.reduce((sum, p) => sum + p.received, 0);
+            const totalRemaining = purchaseData.reduce((sum, p) => sum + p.remaining, 0);
+            
             variantSuggestions.push({
               productId: product._id,
               productName: product.name,
               variantId: variant._id,
               sku: variant.sku,
               currentStock: availableStock,
-              incoming,
+              purchaseRemaining,
               quantitySold: reorderQuantitySold, // ✅ ใช้ยอดขายจาก leadTime + buffer period
               dailySalesRate: Math.round(reorderDailySalesRate * 100) / 100,
               daysUntilStockOut: isOutOfStock ? 0 : Math.round(reorderDaysUntilStockOut * 10) / 10,
@@ -1191,6 +1591,10 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
               minOrderQty: product.minOrderQty || 0,
               avgDailySales: reorderDailySalesRate,
               enableStockAlerts: product.enableStockAlerts,
+              // ✅ เพิ่มข้อมูล purchase orders
+              purchaseOrdered: totalOrdered,
+              purchaseReceived: totalReceived,
+              purchaseRemaining: totalRemaining,
             });
 
             lowStock.push({
@@ -1199,7 +1603,7 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
               variantId: variant._id,
               sku: variant.sku,
               stockOnHand: variant.stockOnHand || 0,
-              incoming,
+              purchaseRemaining,
               availableStock,
               leadTimeDays,
               daysRemaining: isOutOfStock ? 0 : Math.round(reorderDaysUntilStockOut * 10) / 10,
@@ -1269,7 +1673,8 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
         
         // ตรวจสอบเฉพาะ variants ที่ไม่มีการขายแล้วมีสต็อกอยู่
         if (quantitySold === 0) {
-          const currentStock = (variant.stockOnHand || 0) + (variant.incoming || 0);
+          const purchaseRemaining = purchaseRemainingByVariant.get(String(variant._id))?.remaining || 0;
+          const currentStock = (variant.stockOnHand || 0) + purchaseRemaining;
           if (currentStock > 0) {  // มีสต็อกแต่ไม่มีการขาย
             deadStockDetailed.push({
               productId: product._id,
@@ -1281,7 +1686,7 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
               variantId: variant._id,
               sku: variant.sku,
               currentStock,
-              incoming: variant.incoming || 0,
+              purchaseRemaining,
               quantitySold: 0,
               dailySalesRate: 0,
             });
@@ -1314,6 +1719,14 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
         daysRemaining: c.dailySalesRate > 0 ? Math.round((c.totalStock / c.dailySalesRate) * 10) / 10 : 999999,
       }))
       .sort((a, b) => b.totalSold - a.totalSold);
+
+    if (debugInsights) {
+      console.log(`[GET /insights] Final results:`);
+      console.log(`  - fastMovers: ${fastMovers.length} items`);
+      if (fastMovers.length > 0) {
+        console.log(`  - Sample fastMover: ${fastMovers[0].sku}, purchaseRemaining=${fastMovers[0].purchaseRemaining}, currentStock=${fastMovers[0].currentStock}`);
+      }
+    }
 
     res.json({
       lowStock,
@@ -1355,6 +1768,27 @@ router.get('/dashboard', authenticateToken, authorizeRoles('owner', 'stock'), as
     categoriesList.forEach(cat => { categoryMap[cat._id.toString()] = cat.name; });
     const brandMap = {};
     brandsList.forEach(brand => { brandMap[brand._id.toString()] = brand.name; });
+
+    // ✅ สร้าง purchaseRemainingByVariant map จาก purchase orders พร้อม receipts
+    const purchaseOrders = await InventoryOrder.find({ type: 'purchase', status: { $in: ['pending', 'completed'] } }).lean();
+    const purchaseRemainingByVariant = new Map(); // key: variantId -> { purchased, received, remaining }
+    
+    purchaseOrders.forEach((order) => {
+      order.items.forEach((item, itemIndex) => {
+        const variantKey = String(item.variantId);
+        const received = (order.receipts || [])
+          .filter((r) => r.status === 'completed' && r.itemIndex === itemIndex)
+          .reduce((sum, r) => sum + (r.quantity || 0), 0);
+        
+        if (!purchaseRemainingByVariant.has(variantKey)) {
+          purchaseRemainingByVariant.set(variantKey, { purchased: 0, received: 0, remaining: 0 });
+        }
+        const data = purchaseRemainingByVariant.get(variantKey);
+        data.purchased += item.quantity;
+        data.received += received;
+        data.remaining += item.quantity - received;
+      });
+    });
     
     let totalProducts = 0;
     let totalVariants = 0;
@@ -1517,8 +1951,8 @@ router.get('/dashboard', authenticateToken, authorizeRoles('owner', 'stock'), as
       (product.variants || []).forEach((variant) => {
         if (variant.status !== 'active') return;
         const stockOnHand = variant.stockOnHand || 0;
-        const incoming = variant.incoming || 0;
-        const availableStock = stockOnHand + incoming; // ✅ รวม incoming
+        const purchaseRemaining = purchaseRemainingByVariant.get(String(variant._id))?.remaining || 0;
+        const availableStock = stockOnHand + purchaseRemaining; // ✅ รวม purchaseRemaining ที่คำนวณจาก receipts
         const reorderPoint = variant.reorderPoint || 0;
         const leadTimeDays = product.leadTimeDays || 7;
         const bufferDays = product.reorderBufferDays ?? 7;
@@ -1564,14 +1998,23 @@ router.get('/dashboard', authenticateToken, authorizeRoles('owner', 'stock'), as
     const inboundToday = inboundOrders.filter(order => {
       const orderDate = new Date(order.orderDate || order.createdAt);
       return orderDate >= thaiToday && orderDate < thaiTomorrow;
-    }).slice(0, 5).map(order => ({
-      id: order._id,
-      reference: order.reference,
-      status: order.status,
-      itemCount: (order.items || []).length,
-      totalQty: (order.items || []).reduce((sum, item) => sum + (item.quantity || 0), 0),
-      receivedQty: (order.items || []).reduce((sum, item) => sum + (item.receivedQuantity || 0), 0),
-    }));
+    }).slice(0, 5).map(order => {
+      // ✅ คำนวณ receivedQty จาก receipts แทน item.receivedQuantity
+      const receivedQty = (order.items || []).reduce((sum, _, idx) => {
+        const itemReceipts = (order.receipts || []).filter((r) => r.status === 'completed' && r.itemIndex === idx);
+        const received = itemReceipts.reduce((itemSum, r) => itemSum + (r.quantity || 0), 0);
+        return sum + received;
+      }, 0);
+      
+      return {
+        id: order._id,
+        reference: order.reference,
+        status: order.status,
+        itemCount: (order.items || []).length,
+        totalQty: (order.items || []).reduce((sum, item) => sum + (item.quantity || 0), 0),
+        receivedQty,
+      };
+    });
     
     // Get recent activities (last 15 stock movements)
     const recentActivities = await StockMovement.find()
@@ -1743,6 +2186,27 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
     
     // ดึง cancelled order batches data
     const { cancelledOrderIds, cancelledBatchRefs } = await getCancelledBatchRefs();
+
+    // ✅ สร้าง purchaseRemainingByVariant map จาก purchase orders พร้อม receipts
+    const purchaseOrders = await InventoryOrder.find({ type: 'purchase', status: { $in: ['pending', 'completed'] } }).lean();
+    const purchaseRemainingByVariant = new Map(); // key: variantId -> { purchased, received, remaining }
+    
+    purchaseOrders.forEach((order) => {
+      order.items.forEach((item, itemIndex) => {
+        const variantKey = String(item.variantId);
+        const received = (order.receipts || [])
+          .filter((r) => r.status === 'completed' && r.itemIndex === itemIndex)
+          .reduce((sum, r) => sum + (r.quantity || 0), 0);
+        
+        if (!purchaseRemainingByVariant.has(variantKey)) {
+          purchaseRemainingByVariant.set(variantKey, { purchased: 0, received: 0, remaining: 0 });
+        }
+        const data = purchaseRemainingByVariant.get(variantKey);
+        data.purchased += item.quantity;
+        data.received += received;
+        data.remaining += item.quantity - received;
+      });
+    });
     
     // ⚠️ ไม่ใช้ .lean() เพื่อให้ virtual field (stockOnHand) ถูกคำนวณ
     const products = await Product.find({ status: 'active' });
@@ -1758,8 +2222,9 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
       for (const variant of product.variants || []) {
         if (variant.status !== 'active') continue;
         const stockOnHand = variant.stockOnHand || 0;
-        const incoming = variant.incoming || 0;
-        const availableStock = stockOnHand + incoming; // ✅ รวม incoming
+        // ✅ ใช้ purchaseRemaining ที่คำนวณจาก receipts แทน variant.incoming
+        const purchaseRemaining = purchaseRemainingByVariant.get(String(variant._id))?.remaining || 0;
+        const availableStock = stockOnHand + purchaseRemaining; // ✅ รวม purchaseRemaining
         const rawReorderPoint = variant.reorderPoint || 0;
         const leadTimeDays = product.leadTimeDays || 7; // Get from product level
         const bufferDays = product.reorderBufferDays ?? 7;
@@ -1811,7 +2276,7 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
             variantId: variant._id,
             sku: variant.sku,
             stockOnHand,
-            incoming,
+            incoming: purchaseRemaining, // ✅ ใช้ purchaseRemaining แทน incoming
             availableStock,
             reorderPoint,
             suggestedReorderPoint: computedReorderPoint,
@@ -1834,7 +2299,7 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
             variantId: variant._id,
             sku: variant.sku,
             stockOnHand,
-            incoming,
+            incoming: purchaseRemaining, // ✅ ใช้ purchaseRemaining แทน incoming
             availableStock,
             reorderPoint,
             suggestedReorderPoint: computedReorderPoint,
@@ -1844,7 +2309,7 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
             dailySalesRate: Math.round(dailySalesRate * 100) / 100,
             daysUntilStockOut: Math.round(daysUntilStockOut * 10) / 10,
             leadTimeDays,
-            message: `${product.name} (${variant.sku}) สต็อกต่ำ: ${availableStock} ชิ้น (มี ${stockOnHand} + ค้าง ${incoming}) (เหลือ ${Math.round(daysUntilStockOut)} วัน)`,
+            message: `${product.name} (${variant.sku}) สต็อกต่ำ: ${availableStock} ชิ้น (มี ${stockOnHand} + ค้าง ${purchaseRemaining}) (เหลือ ${Math.round(daysUntilStockOut)} วัน)`,
           });
         }
 

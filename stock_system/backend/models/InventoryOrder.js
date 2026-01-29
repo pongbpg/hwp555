@@ -23,6 +23,23 @@ const orderItemSchema = new Schema(
   { _id: false }
 );
 
+// Receipt history for tracking each receive transaction
+const receiptSchema = new Schema(
+  {
+    itemIndex: { type: Number, required: true }, // ชี้ไปที่ items array index
+    quantity: { type: Number, required: true },
+    batchRef: String,
+    supplier: String,
+    expiryDate: Date,
+    unitCost: { type: Number, default: 0 },
+    receivedAt: { type: Date, default: Date.now },
+    receivedBy: { type: Schema.Types.ObjectId, ref: 'Employee' },
+    status: { type: String, enum: ['completed', 'cancelled'], default: 'completed' },
+    notes: String,
+  },
+  { _id: false }
+);
+
 const orderSchema = new Schema(
   {
     type: { type: String, enum: ['sale', 'purchase', 'adjustment', 'damage', 'expired', 'return'], required: true },
@@ -40,8 +57,31 @@ const orderSchema = new Schema(
     placedBy: { type: Schema.Types.ObjectId, ref: 'Employee' },
     metadata: { type: Map, of: String },
     items: { type: [orderItemSchema], validate: [(val) => val.length > 0, 'At least one item is required'] },
+    // ✅ ประวัติการรับสินค้า (สำหรับ purchase orders)
+    receipts: { type: [receiptSchema], default: [] },
   },
   { timestamps: true }
 );
+
+// ✅ Virtual field: aggregated receivedQuantity from receipts (สำหรับ purchase orders)
+// ข้าม receipts ที่ cancelled และรวมปริมาณที่รับได้จริง
+orderSchema.virtual('aggregatedReceivedQuantity').get(function() {
+  if (this.type !== 'purchase') return null;
+  
+  const itemReceipts = new Map();
+  
+  // Group receipts by itemIndex and sum quantities
+  (this.receipts || []).forEach((receipt) => {
+    if (receipt.status === 'completed') { // ข้าม cancelled receipts
+      const key = receipt.itemIndex;
+      if (!itemReceipts.has(key)) {
+        itemReceipts.set(key, 0);
+      }
+      itemReceipts.set(key, itemReceipts.get(key) + receipt.quantity);
+    }
+  });
+  
+  return itemReceipts;
+});
 
 export default mongoose.model('InventoryOrder', orderSchema);

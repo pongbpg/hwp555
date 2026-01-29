@@ -9,6 +9,7 @@ import Alerts from './pages/Alerts.jsx';
 import Insights from './pages/Insights.jsx';
 import ReplenishmentOrder from './pages/ReplenishmentOrder.jsx';
 import CategoriesBrands from './pages/CategoriesBrands.jsx';
+import DebugInsights from './pages/DebugInsights.jsx';
 import Header from './components/Header.jsx';
 import Sidebar from './components/Sidebar.jsx';
 import { setAuthToken } from './api.js';
@@ -94,6 +95,11 @@ export default function App() {
                       <AnalyticsRoute user={user}>
                         <ReplenishmentOrder />
                       </AnalyticsRoute>
+                    } />
+                    <Route path="/debug-insights" element={
+                      <Protected>
+                        <DebugInsights />
+                      </Protected>
                     } />
                   </Routes>
                 </main>
