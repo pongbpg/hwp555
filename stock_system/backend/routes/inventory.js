@@ -1350,7 +1350,8 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
     const brandNameMap = new Map(brandsAll.map((b) => [String(b._id), b.name]));
     
     // ✅ ดึง pending purchase orders พร้อม receipts เพื่อคำนวณ receivedQuantity ที่แท้จริง
-    const purchaseOrders = await InventoryOrder.find({ type: 'purchase', status: { $in: ['pending', 'completed'] } }).lean();
+    // ⚠️ เฉพาะ status='pending' เท่านั้น ไม่รวม 'completed' (ได้รับเต็มแล้ว)
+    const purchaseOrders = await InventoryOrder.find({ type: 'purchase', status: 'pending' }).lean();
     if (debugInsights) {
       console.log(`[GET /insights] Found ${purchaseOrders.length} purchase orders`);
       console.log(`[GET /insights] Sample order receipts:`, purchaseOrders[0]?.receipts?.length || 0);
@@ -1770,7 +1771,8 @@ router.get('/dashboard', authenticateToken, authorizeRoles('owner', 'stock'), as
     brandsList.forEach(brand => { brandMap[brand._id.toString()] = brand.name; });
 
     // ✅ สร้าง purchaseRemainingByVariant map จาก purchase orders พร้อม receipts
-    const purchaseOrders = await InventoryOrder.find({ type: 'purchase', status: { $in: ['pending', 'completed'] } }).lean();
+    // ⚠️ เฉพาะ status='pending' เท่านั้น ไม่รวม 'completed' (ได้รับเต็มแล้ว)
+    const purchaseOrders = await InventoryOrder.find({ type: 'purchase', status: 'pending' }).lean();
     const purchaseRemainingByVariant = new Map(); // key: variantId -> { purchased, received, remaining }
     
     purchaseOrders.forEach((order) => {
@@ -2188,7 +2190,8 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
     const { cancelledOrderIds, cancelledBatchRefs } = await getCancelledBatchRefs();
 
     // ✅ สร้าง purchaseRemainingByVariant map จาก purchase orders พร้อม receipts
-    const purchaseOrders = await InventoryOrder.find({ type: 'purchase', status: { $in: ['pending', 'completed'] } }).lean();
+    // ⚠️ เฉพาะ status='pending' เท่านั้น ไม่รวม 'completed' (ได้รับเต็มแล้ว)
+    const purchaseOrders = await InventoryOrder.find({ type: 'purchase', status: 'pending' }).lean();
     const purchaseRemainingByVariant = new Map(); // key: variantId -> { purchased, received, remaining }
     
     purchaseOrders.forEach((order) => {

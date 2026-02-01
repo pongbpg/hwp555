@@ -68,8 +68,31 @@ export const checkVariantStockRisk = async (product, variant, avgDailySales = nu
   }
 
   const currentStock = variant.stockOnHand || 0;
-  const incoming = variant.incoming || 0;
-  const availableStock = currentStock + incoming; // ✅ รวม incoming (PO ที่สั่งไว้แล้ว)
+  
+  // ✅ คำนวณ purchaseRemaining จาก purchase orders (status='pending' เท่านั้น)
+  // ไม่ใช้ variant.incoming เพราะอาจไม่ตรงกับการคำนวณใน insights/dashboard
+  const purchaseOrders = await InventoryOrder.find({ 
+    type: 'purchase', 
+    status: 'pending',
+    'items.variantId': variant._id 
+  }).lean();
+  
+  let purchaseRemaining = 0;
+  for (const order of purchaseOrders) {
+    for (let itemIndex = 0; itemIndex < order.items.length; itemIndex++) {
+      const item = order.items[itemIndex];
+      if (String(item.variantId) !== String(variant._id)) continue;
+      
+      // คำนวณจำนวนที่รับแล้วจาก receipts
+      const received = (order.receipts || [])
+        .filter((r) => r.status === 'completed' && r.itemIndex === itemIndex)
+        .reduce((sum, r) => sum + (r.quantity || 0), 0);
+      
+      purchaseRemaining += item.quantity - received;
+    }
+  }
+  
+  const availableStock = currentStock + purchaseRemaining; // ✅ รวม purchaseRemaining ที่คำนวณจาก receipts
   const reorderPoint = variant.reorderPoint || 0;
   const leadTimeDays = product.leadTimeDays || 7; // Get from product level
   const bufferDays = product.reorderBufferDays ?? 7;
@@ -104,7 +127,7 @@ export const checkVariantStockRisk = async (product, variant, avgDailySales = nu
 
   logDebug(`🔍 [Stock Risk] Checking ${variant.sku}:`, {
     currentStock,
-    incoming,
+    purchaseRemaining,
     availableStock,
     avgDailySales: finalAvgDailySales.toFixed(3),
     leadTimeDays,
@@ -147,8 +170,8 @@ export const checkVariantStockRisk = async (product, variant, avgDailySales = nu
     variantName: variant.name,
     sku: variant.sku,
     currentStock,
-    incoming, // ✅ เพิ่ม field incoming เพื่อให้ LINE แสดงได้
-    availableStock, // ✅ เพิ่ม field availableStock (รวม incoming)
+    incoming: purchaseRemaining, // ✅ ใช้ purchaseRemaining ที่คำนวณจาก receipts
+    availableStock, // ✅ รวม purchaseRemaining
     // ให้ field `reorderPoint` ยังคงเก็บค่าที่ user กำหนดใน variant (ถ้ามี)
     reorderPoint,
     // ส่งค่าที่คำนวณแนะนำด้วยเพื่อให้ client/notifications แสดงค่าเดียวกับการคำนวณ
