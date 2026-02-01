@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, Routes, Route } from 'react-router-dom';
 import Login from './pages/Login';
 import Register from './pages/Register';
@@ -7,11 +7,18 @@ import Employees from './pages/Employees';
 import Attendance from './pages/Attendance';
 import KPI from './pages/KPI';
 import Salary from './pages/Salary';
+import { setAuthToken } from './api';
 import './index.css';
 
 function App() {
   const [user, setUser] = useState(JSON.parse(localStorage.getItem('user')));
   const navigate = useNavigate();
+
+  // Set auth token when component mounts or token changes
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (token) setAuthToken(token);
+  }, []);
 
   // Permission checks
   const canViewKpi = user && ['owner', 'hr'].includes(user.role);

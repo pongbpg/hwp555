@@ -6,7 +6,16 @@ const api = axios.create({
   baseURL: API_BASE_URL,
 });
 
-// Add token to requests
+// Function to set auth token
+export const setAuthToken = (token) => {
+  if (token) {
+    api.defaults.headers.common.Authorization = `Bearer ${token}`;
+  } else {
+    delete api.defaults.headers.common.Authorization;
+  }
+};
+
+// Add token to requests (fallback for manual token setting)
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
   if (token) {
@@ -14,6 +23,20 @@ api.interceptors.request.use((config) => {
   }
   return config;
 });
+
+// Handle 401 Unauthorized responses (token expired or invalid)
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      // Token expired or invalid - clear storage and redirect to login
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      window.location.href = '/login';
+    }
+    return Promise.reject(error);
+  }
+);
 
 export const authAPI = {
   login: (email, password) => api.post('/auth/login', { email, password }),

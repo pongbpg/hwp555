@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { authAPI } from '../api';
+import { authAPI, setAuthToken } from '../api';
 
 export default function Login({ onLogin }) {
   const [email, setEmail] = useState('');
@@ -16,8 +16,10 @@ export default function Login({ onLogin }) {
 
     try {
       const response = await authAPI.login(email, password);
-      localStorage.setItem('token', response.data.token);
+      const token = response.data.token;
+      localStorage.setItem('token', token);
       localStorage.setItem('user', JSON.stringify(response.data.employee));
+      setAuthToken(token);
       onLogin(response.data.employee);
       navigate('/dashboard');
     } catch (err) {
