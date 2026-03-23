@@ -1489,7 +1489,12 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
     // หา max sales period ที่ต้องการ
     let maxReorderPeriodDays = 30;
     products.forEach((product) => {
-      if (!product.enableStockAlerts) return;
+      // ✅ ถ้า product ปิด แต่บาง variant เปิด ก็ยังต้องรวม period
+      const hasAnyAlertEnabled = (product.variants || []).some(v => {
+        const variantAlert = v.enableStockAlerts !== undefined ? v.enableStockAlerts : product.enableStockAlerts;
+        return variantAlert;
+      });
+      if (!hasAnyAlertEnabled) return;
       const leadTimeDays = product.leadTimeDays || 7;
       const bufferDays = product.reorderBufferDays ?? 7;
       const periodDays = leadTimeDays + bufferDays;
@@ -1530,14 +1535,14 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
 
     // Process each product group for MOQ optimization
     for (const [productId, { product, variants }] of productVariantMap) {
-      // ⛔ ข้ามสินค้าที่ปิดการแจ้งเตือน (เหมือน Alerts endpoint)
-      if (!product.enableStockAlerts) continue;
-      
       const variantSuggestions = []; // Temporary holder for this product's variants
 
       for (const variant of variants) {
         // ⛔ ข้าม variants ที่ inactive
         if (variant.status !== 'active') continue;
+        // ⛔ ข้ามสินค้าที่ปิดการแจ้งเตือน (variant level > product level)
+        const variantAlertEnabled = variant.enableStockAlerts !== undefined ? variant.enableStockAlerts : product.enableStockAlerts;
+        if (!variantAlertEnabled) continue;
         
         const key = `${product._id}-${variant._id}`;
         const leadTimeDays = product.leadTimeDays || 7;
@@ -1665,7 +1670,7 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
               bufferDays,
               minOrderQty: product.minOrderQty || 0,
               avgDailySales: reorderDailySalesRate,
-              enableStockAlerts: product.enableStockAlerts,
+              enableStockAlerts: variant.enableStockAlerts !== undefined ? variant.enableStockAlerts : product.enableStockAlerts,
               // ✅ เพิ่มข้อมูล purchase orders
               purchaseOrdered: totalOrdered,
               purchaseReceived: totalReceived,
@@ -1737,11 +1742,11 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
     // ✅ หาสินค้าขายไม่ออก (Dead Stock) - ไม่มีการขายเลยในช่วง
     const deadStockDetailed = [];
     for (const [productId, { product, variants }] of productVariantMap) {
-      // ⛔ ข้ามสินค้าที่ปิดการแจ้งเตือน
-      if (!product.enableStockAlerts) continue;
-      
       for (const variant of variants) {
         if (variant.status !== 'active') continue;
+        // ⛔ ข้ามสินค้าที่ปิดการแจ้งเตือน (variant level > product level)
+        const variantAlertEnabled = variant.enableStockAlerts !== undefined ? variant.enableStockAlerts : product.enableStockAlerts;
+        if (!variantAlertEnabled) continue;
         
         const key = `${product._id}-${variant._id}`;
         const quantitySold = salesMap.get(key) || 0;
@@ -1994,7 +1999,12 @@ router.get('/dashboard', authenticateToken, authorizeRoles('owner', 'stock'), as
     // หา max sales period ที่ต้องการ (max ของ leadTime + buffer ทั้งหมด)
     let maxReorderPeriodDays = 30; // minimum
     products.forEach((product) => {
-      if (!product.enableStockAlerts) return;
+      // ✅ ถ้า product ปิด แต่บาง variant เปิด ก็ยังต้องรวม period
+      const hasAnyAlertEnabled = (product.variants || []).some(v => {
+        const variantAlert = v.enableStockAlerts !== undefined ? v.enableStockAlerts : product.enableStockAlerts;
+        return variantAlert;
+      });
+      if (!hasAnyAlertEnabled) return;
       const leadTimeDays = product.leadTimeDays || 7;
       const bufferDays = product.reorderBufferDays ?? 7;
       const periodDays = leadTimeDays + bufferDays;
@@ -2023,9 +2033,11 @@ router.get('/dashboard', authenticateToken, authorizeRoles('owner', 'stock'), as
     });
     
     products.forEach((product) => {
-      if (!product.enableStockAlerts) return;
       (product.variants || []).forEach((variant) => {
         if (variant.status !== 'active') return;
+        // ⛔ ข้าม variant ที่ปิดการแจ้งเตือน (variant level > product level)
+        const variantAlertEnabled = variant.enableStockAlerts !== undefined ? variant.enableStockAlerts : product.enableStockAlerts;
+        if (!variantAlertEnabled) return;
         const stockOnHand = variant.stockOnHand || 0;
         const purchaseRemaining = purchaseRemainingByVariant.get(String(variant._id))?.remaining || 0;
         const availableStock = stockOnHand + purchaseRemaining; // ✅ รวม purchaseRemaining ที่คำนวณจาก receipts
@@ -2293,11 +2305,11 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
     const nearExpiryAlerts = [];
     
     for (const product of products) {
-      // ⛔ ข้ามสินค้าที่ปิดการแจ้งเตือน
-      if (!product.enableStockAlerts) continue;
-      
       for (const variant of product.variants || []) {
         if (variant.status !== 'active') continue;
+        // ⛔ ข้าม variant ที่ปิดการแจ้งเตือน (variant level > product level)
+        const variantAlertEnabled = variant.enableStockAlerts !== undefined ? variant.enableStockAlerts : product.enableStockAlerts;
+        if (!variantAlertEnabled) continue;
         const stockOnHand = variant.stockOnHand || 0;
         // ✅ ใช้ purchaseRemaining ที่คำนวณจาก receipts แทน variant.incoming
         const purchaseRemaining = purchaseRemainingByVariant.get(String(variant._id))?.remaining || 0;

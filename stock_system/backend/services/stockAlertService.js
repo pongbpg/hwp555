@@ -62,8 +62,9 @@ export const calculateAverageDailySalesFromOrders = async (variantId, days = 30)
  * @returns {Promise<object|null>} - Alert object หรือ null ถ้าไม่มีความเสี่ยง
  */
 export const checkVariantStockRisk = async (product, variant, avgDailySales = null) => {
-  // ✅ ตรวจสอบว่าเปิดการแจ้งเตือนอยู่หรือไม่
-  if (!product.enableStockAlerts) {
+  // ✅ ตรวจสอบว่าเปิดการแจ้งเตือนอยู่หรือไม่ (variant level > product level)
+  const alertEnabled = variant.enableStockAlerts !== undefined ? variant.enableStockAlerts : product.enableStockAlerts;
+  if (!alertEnabled) {
     return null;
   }
 

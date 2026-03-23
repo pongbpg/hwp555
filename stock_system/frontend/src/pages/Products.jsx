@@ -309,6 +309,7 @@ export default function Products() {
         price: v.price ?? 0,
         batches: v.batches || [],
         allowBackorder: v.allowBackorder || false,
+        enableStockAlerts: v.enableStockAlerts,
       }));
       setVariants(loadedVariants);
     } else {
@@ -367,6 +368,7 @@ export default function Products() {
               },
               price: Number(v.price) || 0,
               allowBackorder: v.allowBackorder || false,
+              enableStockAlerts: v.enableStockAlerts,
               // ✅ ไม่ส่ง batches เลย ให้ backend preserve เอง
             };
           })
@@ -378,6 +380,7 @@ export default function Products() {
               price: Number(newProduct.price) || 0,
               attributes: {},
               allowBackorder: variants[0]?.allowBackorder || false,
+              enableStockAlerts: variants[0]?.enableStockAlerts,
             },
           ];
 
@@ -427,6 +430,7 @@ export default function Products() {
               },
               price: Number(v.price) || 0,
               allowBackorder: v.allowBackorder || false,
+              enableStockAlerts: v.enableStockAlerts,
             };
           })
         : [
@@ -435,6 +439,7 @@ export default function Products() {
               price: Number(newProduct.price) || 0,
               attributes: {},
               allowBackorder: variants[0]?.allowBackorder || false,
+              enableStockAlerts: variants[0]?.enableStockAlerts,
             },
           ];
 
@@ -1005,6 +1010,25 @@ export default function Products() {
                 </div>
                 <p className="text-xs text-gray-500 mt-1 ml-6">เปิด = สต็อกติดลบได้เมื่อขาย</p>
               </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="enableStockAlertsSingle"
+                    type="checkbox"
+                    className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                    checked={variants[0]?.enableStockAlerts !== undefined ? variants[0]?.enableStockAlerts : (newProduct.enableStockAlerts ?? true)}
+                    onChange={(e) => {
+                      const updated = [...variants];
+                      updated[0] = { ...updated[0], enableStockAlerts: e.target.checked };
+                      setVariants(updated);
+                    }}
+                  />
+                  <label htmlFor="enableStockAlertsSingle" className="text-sm font-medium text-gray-700 cursor-pointer">
+                    🔔 เปิดแจ้งเตือนสต็อกต่ำ (SKU นี้)
+                  </label>
+                </div>
+                <p className="text-xs text-gray-500 mt-1 ml-6">ปิด = ไม่แจ้งเตือนเมื่อสต็อกต่ำ</p>
+              </div>
             </div>
           ) : (
             <div className="mt-4">
@@ -1044,7 +1068,7 @@ export default function Products() {
                     </div>
                   )}
 
-                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">รุ่น</label>
                       <input
@@ -1113,6 +1137,17 @@ export default function Products() {
                           onChange={(e) => updateVariant(idx, 'allowBackorder', e.target.checked)}
                         />
                         <span className="text-xs text-gray-600">📦 พรีออเดอร์</span>
+                      </label>
+                    </div>
+                    <div className="flex items-end pb-1">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                          checked={variant.enableStockAlerts !== undefined ? variant.enableStockAlerts : (newProduct.enableStockAlerts ?? true)}
+                          onChange={(e) => updateVariant(idx, 'enableStockAlerts', e.target.checked)}
+                        />
+                        <span className="text-xs text-gray-600">🔔 แจ้งเตือน</span>
                       </label>
                     </div>
                   </div>
@@ -1321,6 +1356,7 @@ export default function Products() {
                                     <th className="text-right px-3 py-2 font-semibold text-gray-700">คงคลัง</th>
                                     <th className="text-center px-3 py-2 font-semibold text-gray-700">Reorder</th>
                                     <th className="text-center px-3 py-2 font-semibold text-gray-700">พรีออเดอร์</th>
+                                    <th className="text-center px-3 py-2 font-semibold text-gray-700">แจ้งเตือน</th>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -1354,6 +1390,13 @@ export default function Products() {
                                           <span className="text-orange-600 font-medium text-xs">📦 เปิด</span>
                                         ) : (
                                           <span className="text-gray-400 text-xs">-</span>
+                                        )}
+                                      </td>
+                                      <td className="px-3 py-2 text-center">
+                                        {(v.enableStockAlerts !== undefined ? v.enableStockAlerts : (p.enableStockAlerts ?? true)) ? (
+                                          <span className="text-blue-600 font-medium text-xs">🔔 เปิด</span>
+                                        ) : (
+                                          <span className="text-orange-600 font-medium text-xs">🔇 ปิด</span>
                                         )}
                                       </td>
                                     </tr>

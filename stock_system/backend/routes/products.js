@@ -131,6 +131,7 @@ router.put('/:id', authenticateToken, authorizeRoles('owner', 'admin', 'hr'), as
               reorderPoint: newVariant.reorderPoint !== undefined ? newVariant.reorderPoint : oldVariant.reorderPoint,
               reorderQty: newVariant.reorderQty !== undefined ? newVariant.reorderQty : oldVariant.reorderQty,
               allowBackorder: newVariant.allowBackorder !== undefined ? newVariant.allowBackorder : oldVariant.allowBackorder,
+              enableStockAlerts: newVariant.enableStockAlerts !== undefined ? newVariant.enableStockAlerts : oldVariant.enableStockAlerts,
               status: newVariant.status || oldVariant.status || 'active',
               // ✅ CRITICAL: Always preserve batches from old variant
               batches: (newVariant.batches && newVariant.batches.length > 0) 

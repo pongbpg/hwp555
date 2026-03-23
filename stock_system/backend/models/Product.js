@@ -41,6 +41,7 @@ const variantSchema = new Schema(
     reorderPoint: { type: Number, default: 0 },
     reorderQty: { type: Number, default: 0 },
     allowBackorder: { type: Boolean, default: false },
+    enableStockAlerts: { type: Boolean, default: undefined, description: 'เปิดปิดแจ้งเตือนระดับ SKU (undefined = ใช้ค่าจาก product)' },
     batches: { type: [batchSchema], default: [] },
     status: { type: String, enum: ['active', 'inactive'], default: 'active' },
   },
