@@ -308,6 +308,7 @@ export default function Products() {
         material: v.attributes?.material || '',
         price: v.price ?? 0,
         batches: v.batches || [],
+        allowBackorder: v.allowBackorder || false,
       }));
       setVariants(loadedVariants);
     } else {
@@ -365,6 +366,7 @@ export default function Products() {
                 ...(v.material && { material: v.material }),
               },
               price: Number(v.price) || 0,
+              allowBackorder: v.allowBackorder || false,
               // ✅ ไม่ส่ง batches เลย ให้ backend preserve เอง
             };
           })
@@ -375,6 +377,7 @@ export default function Products() {
               sku: newProduct.sku,
               price: Number(newProduct.price) || 0,
               attributes: {},
+              allowBackorder: variants[0]?.allowBackorder || false,
             },
           ];
 
@@ -423,6 +426,7 @@ export default function Products() {
                 ...(v.material && { material: v.material }),
               },
               price: Number(v.price) || 0,
+              allowBackorder: v.allowBackorder || false,
             };
           })
         : [
@@ -430,6 +434,7 @@ export default function Products() {
               sku: newProduct.sku,
               price: Number(newProduct.price) || 0,
               attributes: {},
+              allowBackorder: variants[0]?.allowBackorder || false,
             },
           ];
 
@@ -981,6 +986,25 @@ export default function Products() {
                   onChange={(e) => setNewProduct({ ...newProduct, price: e.target.value })}
                 />
               </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="allowBackorderSingle"
+                    type="checkbox"
+                    className="w-4 h-4 text-orange-600 border-gray-300 rounded focus:ring-2 focus:ring-orange-500 cursor-pointer"
+                    checked={variants[0]?.allowBackorder || false}
+                    onChange={(e) => {
+                      const updated = [...variants];
+                      updated[0] = { ...updated[0], allowBackorder: e.target.checked };
+                      setVariants(updated);
+                    }}
+                  />
+                  <label htmlFor="allowBackorderSingle" className="text-sm font-medium text-gray-700 cursor-pointer">
+                    📦 อนุญาตพรีออเดอร์ (ขายแม้สต็อกหมด)
+                  </label>
+                </div>
+                <p className="text-xs text-gray-500 mt-1 ml-6">เปิด = สต็อกติดลบได้เมื่อขาย</p>
+              </div>
             </div>
           ) : (
             <div className="mt-4">
@@ -1020,7 +1044,7 @@ export default function Products() {
                     </div>
                   )}
 
-                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">รุ่น</label>
                       <input
@@ -1079,6 +1103,17 @@ export default function Products() {
                         value={variant.price ?? 0}
                         onChange={(e) => updateVariant(idx, 'price', e.target.value)}
                       />
+                    </div>
+                    <div className="flex items-end pb-1">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="w-4 h-4 text-orange-600 border-gray-300 rounded focus:ring-2 focus:ring-orange-500 cursor-pointer"
+                          checked={variant.allowBackorder || false}
+                          onChange={(e) => updateVariant(idx, 'allowBackorder', e.target.checked)}
+                        />
+                        <span className="text-xs text-gray-600">📦 พรีออเดอร์</span>
+                      </label>
                     </div>
                   </div>
                 </div>
@@ -1285,6 +1320,7 @@ export default function Products() {
                                     <th className="text-right px-3 py-2 font-semibold text-gray-700">ราคา</th>
                                     <th className="text-right px-3 py-2 font-semibold text-gray-700">คงคลัง</th>
                                     <th className="text-center px-3 py-2 font-semibold text-gray-700">Reorder</th>
+                                    <th className="text-center px-3 py-2 font-semibold text-gray-700">พรีออเดอร์</th>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -1312,6 +1348,13 @@ export default function Products() {
                                       </td>
                                       <td className="px-3 py-2 text-center text-xs text-gray-600">
                                         {v.reorderPoint ?? '-'}
+                                      </td>
+                                      <td className="px-3 py-2 text-center">
+                                        {v.allowBackorder ? (
+                                          <span className="text-orange-600 font-medium text-xs">📦 เปิด</span>
+                                        ) : (
+                                          <span className="text-gray-400 text-xs">-</span>
+                                        )}
                                       </td>
                                     </tr>
                                   ))}

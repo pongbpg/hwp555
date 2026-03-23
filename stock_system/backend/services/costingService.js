@@ -135,7 +135,8 @@ const calculateLIFO = (batches, stockOnHand = 0) => {
 export const getBatchConsumptionOrder = (batches, costingMethod = 'FIFO') => {
   if (!batches || batches.length === 0) return [];
 
-  const batchesCopy = [...batches];
+  // ✅ Exclude BACKORDER batches (negative qty) — they are not consumable
+  const batchesCopy = [...batches].filter(b => (b.quantity || 0) > 0 && !b.batchRef?.startsWith('BACKORDER-'));
 
   if (costingMethod === 'LIFO') {
     // LIFO: ใหม่สุดมาก่อน (reverse order of receivedAt)
@@ -222,7 +223,7 @@ export const consumeBatchesByOrder = (variant, sortedBatches, quantity, costingM
     }
   }
 
-  variant.batches = updated.filter((b) => (b.quantity || 0) > 0);
+  variant.batches = updated.filter((b) => (b.quantity || 0) > 0 || (b.batchRef && b.batchRef.startsWith('BACKORDER-')));
   return remaining;
 };
 

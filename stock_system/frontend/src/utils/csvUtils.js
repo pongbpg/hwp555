@@ -194,7 +194,7 @@ export const validateCSVRows = (rows, products, orderType = 'sale') => {
     const productName = row['product name'] || '';
     const sku = row['sku'] || '';
     const quantity = row['quantity'] || row['target stock'] || ''; // adjustment uses 'target stock'
-    const unitPrice = row['unit price'] || '';
+    const unitPrice = row['unit price'] != null && row['unit price'] !== '' ? row['unit price'] : '';
     const batchRef = row['batch ref'] || '';
     const expiryDate = row['expiry date'] || '';
     const supplier = row['supplier'] || '';
@@ -221,8 +221,13 @@ export const validateCSVRows = (rows, products, orderType = 'sale') => {
     // Unit Price validation (not required for damage/expired only)
     const requiresUnitPrice = ['sale', 'purchase', 'return', 'adjustment'].includes(orderType);
     if (requiresUnitPrice) {
-      if (!unitPrice || isNaN(unitPrice) || Number(unitPrice) < 0) {
-        errors.push(`Row ${rowNum}: Unit Price ต้องเป็นตัวเลข`);
+      if (unitPrice === '' || isNaN(unitPrice) || Number(unitPrice) < 0) {
+        errors.push(`Row ${rowNum}: Unit Price ต้องเป็นตัวเลข (>= 0)`);
+        return;
+      }
+      // Sale allows 0 (freebies), but purchase/return/adjustment require > 0
+      if (['purchase', 'return', 'adjustment'].includes(orderType) && Number(unitPrice) <= 0) {
+        errors.push(`Row ${rowNum}: Unit Price ต้องมากกว่า 0 สำหรับ ${orderType}`);
         return;
       }
     }
@@ -273,7 +278,7 @@ export const validateCSVRows = (rows, products, orderType = 'sale') => {
     };
     
     // Add optional fields based on order type
-    if (unitPrice) {
+    if (unitPrice !== '' && unitPrice != null) {
       validatedRow.unitPrice = Number(unitPrice);
     }
     if (batchRef) {

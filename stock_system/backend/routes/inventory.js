@@ -153,7 +153,7 @@ const applyStockChange = (variant, product, item, type, metadata = {}) => {
     const currentStock = variant.stockOnHand || 0;
     
     if (debugStockAlerts) {
-      console.log(`[applyStockChange] SKU: ${variant.sku}, Type: sale, Requested qty: ${qty}, Current stock: ${currentStock}, Has batches: ${(variant.batches && variant.batches.length > 0) ? 'yes' : 'no'}`);
+      console.log(`[applyStockChange] SKU: ${variant.sku}, Type: sale, Requested qty: ${qty}, Current stock: ${currentStock}, Has batches: ${(variant.batches && variant.batches.length > 0) ? 'yes' : 'no'}, allowBackorder: ${variant.allowBackorder}`);
     }
 
     // ✅ ตรวจสอบ: ถ้าไม่อนุญาต backorder ต้องมีสต็อกพอ
@@ -192,10 +192,21 @@ const applyStockChange = (variant, product, item, type, metadata = {}) => {
         
         if (remaining > 0) {
           // ยังมี unconsumed quantity แม้ว่า batch calc บอกว่าพอ
-          // นี่ควรไม่เกิด แต่ถ้าเกิด rollback
           if (!variant.allowBackorder) {
             variant.batches = snapshot.batches;
             throw new Error(`Batch consumption mismatch for SKU ${variant.sku}: remain ${remaining}`);
+          }
+          // ✅ allowBackorder: สร้าง backorder batch (quantity ลบ) เพื่อให้ stockOnHand ติดลบได้
+          variant.batches.push({
+            batchRef: `BACKORDER-${Date.now()}`,
+            supplier: 'Backorder (Pre-order)',
+            cost: item.unitCost || item.unitPrice || 0,
+            quantity: -remaining,
+            receivedAt: new Date(),
+            orderId: metadata.orderId,
+          });
+          if (debugStockAlerts) {
+            console.log(`[applyStockChange] Created backorder batch: -${remaining} units for SKU ${variant.sku}`);
           }
         }
       } else {
@@ -204,7 +215,6 @@ const applyStockChange = (variant, product, item, type, metadata = {}) => {
         
         if (remaining > 0 && unbatchedQty >= remaining) {
           // ✅ ปลอดภัย - unbatched stock คุมครอง remaining
-          // สต็อกเดิมที่ไม่มี batch ก็ถูก consume แล้ว
           if (debugStockAlerts) {
             console.log(`[applyStockChange] Using unbatched stock: ${remaining} units`);
           }
@@ -212,13 +222,40 @@ const applyStockChange = (variant, product, item, type, metadata = {}) => {
           // ❌ ยังขาดเหลือ แม้ใช้ unbatched
           variant.batches = snapshot.batches;
           throw new Error(`Insufficient total quantities for SKU ${variant.sku}: need ${qty}, available ${totalBatchQty + unbatchedQty}`);
+        } else if (remaining > 0 && variant.allowBackorder) {
+          // ✅ allowBackorder: สร้าง backorder batch (quantity ลบ) สำหรับส่วนที่ขาด
+          const deficit = remaining - Math.max(0, unbatchedQty);
+          if (deficit > 0) {
+            variant.batches.push({
+              batchRef: `BACKORDER-${Date.now()}`,
+              supplier: 'Backorder (Pre-order)',
+              cost: item.unitCost || item.unitPrice || 0,
+              quantity: -deficit,
+              receivedAt: new Date(),
+              orderId: metadata.orderId,
+            });
+            if (debugStockAlerts) {
+              console.log(`[applyStockChange] Created backorder batch: -${deficit} units for SKU ${variant.sku}`);
+            }
+          }
         }
       }
       
       // ✅ stockOnHand เป็น virtual field - คำนวณจาก batches อัตโนมัติ
-      // ไม่ต้องเขียนค่า stockOnHand เอง
+    } else if (variant.allowBackorder) {
+      // ✅ ไม่มี batches เลย แต่เปิด allowBackorder → สร้าง backorder batch (quantity ลบ)
+      variant.batches.push({
+        batchRef: `BACKORDER-${Date.now()}`,
+        supplier: 'Backorder (Pre-order)',
+        cost: item.unitCost || item.unitPrice || 0,
+        quantity: -qty,
+        receivedAt: new Date(),
+        orderId: metadata.orderId,
+      });
+      if (debugStockAlerts) {
+        console.log(`[applyStockChange] Created backorder batch (no existing batches): -${qty} units for SKU ${variant.sku}`);
+      }
     }
-    // ✅ ถ้าไม่มี batches และเปิด allowBackorder ให้อนุญาต (สต็อกติดลบ)
     return;
   }
 
@@ -725,6 +762,30 @@ router.patch('/orders/:id/receive', authenticateToken, authorizeRoles('owner', '
         orderId: order._id,
       });
       
+      // ✅ Clear BACKORDER batches if stock is now positive after receiving
+      const totalStockAfterReceive = (variant.batches || []).reduce((sum, b) => sum + (b.quantity || 0), 0);
+      if (totalStockAfterReceive >= 0) {
+        variant.batches = (variant.batches || []).filter(b => !b.batchRef?.startsWith('BACKORDER-'));
+      } else {
+        // ✅ ยังติดลบอยู่ — ปรับ BACKORDER batch ให้เหลือเฉพาะส่วนที่ยังขาด
+        const positiveSum = (variant.batches || []).filter(b => (b.quantity || 0) > 0).reduce((sum, b) => sum + (b.quantity || 0), 0);
+        variant.batches = (variant.batches || []).filter(b => !b.batchRef?.startsWith('BACKORDER-'));
+        if (positiveSum < 0) {
+          // should not happen, but safe fallback
+        } else {
+          const deficit = totalStockAfterReceive; // negative value
+          if (deficit < 0) {
+            variant.batches.push({
+              batchRef: `BACKORDER-${Date.now()}`,
+              supplier: 'Backorder (Pre-order)',
+              cost: 0,
+              quantity: deficit,
+              receivedAt: new Date(),
+            });
+          }
+        }
+      }
+      
       // ✅ สร้าง receipt record สำหรับประวัติการรับ
       newReceipts.push({
         itemIndex,
@@ -883,6 +944,15 @@ router.patch('/orders/:id/cancel', authenticateToken, authorizeRoles('owner', 'a
         const qty = Number(item.quantity) || 0;
         // ✅ ดึงต้นทุนจาก item.unitCost (เก็บไว้ตอนสร้างออเดอร์)
         const costToRestore = item.unitCost || 0;
+        
+        // ✅ ลบ BACKORDER batches ที่สร้างจาก order นี้ก่อน (ถ้ามี)
+        variant.batches = (variant.batches || []).filter((b) => {
+          if (b.batchRef?.startsWith('BACKORDER-') && b.orderId && String(b.orderId) === String(order._id)) {
+            return false; // ลบ backorder batch ที่เกี่ยวกับ order นี้
+          }
+          return true;
+        });
+        
         variant.batches.push({
           batchRef: batchRefToRestore,
           supplier: `Return from ${order.reference || 'cancelled sale'}`,

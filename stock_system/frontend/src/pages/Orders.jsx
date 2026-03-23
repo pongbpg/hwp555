@@ -440,11 +440,11 @@ export default function Orders() {
             }
           }
 
-          // ✅ Validate unitPrice for Sale (must have selling price)
+          // ✅ Validate unitPrice for Sale (allow 0 for freebies/gifts)
           if (type === 'sale') {
             const unitPrice = Number(it.unitPrice);
-            if (!it.unitPrice || isNaN(unitPrice) || unitPrice <= 0) {
-              throw new Error('❌ รายการที่ ' + (items.indexOf(it) + 1) + ': ต้องระบุราคาขาย/หน่วย มากกว่า 0');
+            if (it.unitPrice === '' || it.unitPrice === undefined || it.unitPrice === null || isNaN(unitPrice) || unitPrice < 0) {
+              throw new Error('❌ รายการที่ ' + (items.indexOf(it) + 1) + ': ต้องระบุราคาขาย/หน่วย (0 = ของแถม/ของขวัญ)');
             }
           }
           
@@ -757,7 +757,18 @@ export default function Orders() {
                               displayName: `${v.sku || v.name || 'Variant'} (stock: ${v.stockOnHand})`,
                             }))}
                             value={item.variantId}
-                            onChange={(val) => updateItem(idx, { variantId: val })}
+                            onChange={(val) => {
+                              const product = products.find((p) => p._id === item.productId);
+                              const variant = product?.variants?.find((v) => v._id === val);
+                              const patch = { variantId: val };
+                              // Auto-fill price from variant
+                              if (type === 'sale' && variant?.price) {
+                                patch.unitPrice = variant.price;
+                              } else if (type !== 'sale' && variant?.cost) {
+                                patch.unitPrice = variant.cost;
+                              }
+                              updateItem(idx, patch);
+                            }}
                             placeholder="ค้นหา SKU..."
                             getLabel={(v) => v.displayName}
                             getId={(v) => v._id}
