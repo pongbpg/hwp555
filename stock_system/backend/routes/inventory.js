@@ -1435,15 +1435,16 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
       {
         $group: {
           _id: { productId: '$items.productId', variantId: '$items.variantId' },
-          quantitySold: { $sum: '$items.quantity' },
+          sales: { $push: { quantity: '$items.quantity', orderDate: '$orderDate' } },
         },
       },
     ]);
     
+    // ✅ เก็บยอดขายแยกตาม orderDate เพื่อให้แต่ละ product filter ตาม leadTime+buffer ของตัวเอง
     const reorderSalesMap = new Map();
     reorderSalesData.forEach((sale) => {
       const key = `${sale._id.productId}-${sale._id.variantId}`;
-      reorderSalesMap.set(key, sale.quantitySold);
+      reorderSalesMap.set(key, sale.sales);
     });
 
     // Group variants by product first for MOQ optimization
@@ -1476,9 +1477,12 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
         const quantitySold = salesMap.get(key) || 0;
         const dailySalesRate = quantitySold / salesPeriodDays;
         
-        // ✅ สำหรับ lowStock/reorder: ใช้ยอดขายจาก leadTime + buffer period
+        // ✅ สำหรับ lowStock/reorder: ใช้ยอดขายจาก leadTime + buffer period ของสินค้านี้เท่านั้น
         const reorderSalesPeriodDays = leadTimeDays + bufferDays;
-        const reorderQuantitySold = reorderSalesMap.get(key) || 0;
+        const reorderSalesSinceForProduct = new Date(now.getTime() - reorderSalesPeriodDays * 24 * 60 * 60 * 1000);
+        const reorderQuantitySold = (reorderSalesMap.get(key) || [])
+          .filter(s => s.orderDate >= reorderSalesSinceForProduct)
+          .reduce((sum, s) => sum + s.quantity, 0);
         const reorderDailySalesRate = reorderQuantitySold / reorderSalesPeriodDays;
         
         // ✅ ใช้ purchaseRemaining ที่คำนวณจาก receipts แทน variant.incoming

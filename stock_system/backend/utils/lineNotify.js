@@ -215,6 +215,27 @@ export const sendStockAlertFlexMessage = async (alerts, userId = null) => {
             },
           ],
         },
+        ...(alert.incoming > 0 ? [{
+          type: 'box',
+          layout: 'horizontal',
+          contents: [
+            {
+              type: 'text',
+              text: 'ค้างรับ (PO)',
+              size: 'sm',
+              color: '#555555',
+              flex: 1,
+            },
+            {
+              type: 'text',
+              text: `+${alert.incoming} ชิ้น`,
+              size: 'sm',
+              weight: 'bold',
+              color: '#10B981',
+              align: 'end',
+            },
+          ],
+        }] : []),
         {
           type: 'box',
           layout: 'horizontal',
@@ -331,6 +352,9 @@ export const sendStockAlertText = async (alerts, userId = null) => {
     message += `\n${icon} ${alert.productName}\n`;
     message += `   SKU: ${alert.sku}\n`;
     message += `   คงเหลือ: ${alert.currentStock} ชิ้น\n`;
+    if (alert.incoming > 0) {
+      message += `   ค้างรับ (PO): +${alert.incoming} ชิ้น\n`;
+    }
     message += `   ขายเฉลี่ย/วัน: ${alert.avgDailySales.toFixed(1)}\n`;
     message += `   สต็อกเพียงพอ: ~${alert.daysOfStock} วัน\n`;
     message += `   จุดสั่งซื้อ: ${alert.suggestedReorderPoint ?? alert.reorderPoint ?? 0} ชิ้น\n`;

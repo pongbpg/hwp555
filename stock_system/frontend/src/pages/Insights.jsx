@@ -521,8 +521,8 @@ const DataTable = ({ data, columns, title }) => {
   });
 
   return (
-    <div className="bg-white rounded-xl shadow p-6">
-      <h3 className="text-lg font-semibold text-gray-800 mb-4">{title}</h3>
+    <div className={title ? "bg-white rounded-xl shadow p-6" : ""}>
+      {title && <h3 className="text-lg font-semibold text-gray-800 mb-4">{title}</h3>}
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -614,6 +614,11 @@ export default function Insights() {
   const [dateTo, setDateTo] = useState(initialDates.dateTo);
   const [useDateRange, setUseDateRange] = useState(true); // Start with date range to match 30-day API default
   const [metricsView, setMetricsView] = useState('category'); // 'category', 'brand', 'product'
+
+  // Filters for detailed fast movers table
+  const [detailFilterProduct, setDetailFilterProduct] = useState('');
+  const [detailFilterCategory, setDetailFilterCategory] = useState('');
+  const [detailFilterBrand, setDetailFilterBrand] = useState('');
 
   const fmtNumber = new Intl.NumberFormat('th-TH');
 
@@ -710,7 +715,8 @@ export default function Insights() {
   const reorderData = (data?.reorderSuggestions || []).map(item => ({
     ...item,
     // ✅ currentStock จาก API เป็น availableStock (รวม purchaseRemaining แล้ว)
-    stockOnHand: item.currentStock || 0,
+    // stockOnHand ต้องเป็นสต็อกจริง = currentStock - purchaseRemaining
+    stockOnHand: (item.currentStock || 0) - (item.purchaseRemaining || 0),
     urgency: item.daysUntilStockOut <= 7 ? 'ด่วนมาก' : item.daysUntilStockOut <= 14 ? 'ด่วน' : 'ปกติ',
     urgencyColor: item.daysUntilStockOut <= 7 ? 'bg-red-100 text-red-700' : item.daysUntilStockOut <= 14 ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700',
   }))
@@ -1144,7 +1150,7 @@ export default function Insights() {
                     <th className="py-3 px-3 text-right font-semibold text-gray-700">รวม</th>
                     <th className="py-3 px-3 text-right font-semibold text-gray-700">ขาย/วัน</th>
                     <th className="py-3 px-3 text-right font-semibold text-gray-700">เหลือใช้</th>
-                    <th className="py-3 px-3 text-right font-semibold text-gray-700">Lead Time</th>
+                    <th className="py-3 px-3 text-center font-semibold text-gray-700">Lead Time+Buffer</th>
                     <th className="py-3 px-3 text-right font-semibold text-gray-700">จุดสั่ง</th>
                     <th className="py-3 px-3 text-right font-semibold text-gray-700">แนะนำสั่ง</th>
                   </tr>
@@ -1160,13 +1166,13 @@ export default function Insights() {
                       <td className="py-3 px-3 text-gray-700 font-medium">{item.productName}</td>
                       <td className="py-3 px-3 font-mono text-gray-500 text-xs">{item.sku}</td>
                       <td className="py-3 px-3 text-right text-gray-700">{fmtNumber.format(item.stockOnHand || 0)}</td>
-                      <td className="py-3 px-3 text-right text-gray-700">{fmtNumber.format(item.incoming || 0)}</td>
+                      <td className="py-3 px-3 text-right text-gray-700">{fmtNumber.format(item.purchaseRemaining || 0)}</td>
                       <td className="py-3 px-3 text-right text-gray-700 font-medium" style={{color: (item.currentStock || item.availableStock) >= item.suggestedReorderPoint ? '#10B981' : '#EF4444'}}>{fmtNumber.format(item.currentStock || item.availableStock || 0)}</td>
                       <td className="py-3 px-3 text-right text-gray-700">{item.dailySalesRate.toFixed(1)}</td>
                       <td className={`py-3 px-3 text-right font-semibold ${item.daysUntilStockOut <= 7 ? 'text-red-600' : item.daysUntilStockOut <= 14 ? 'text-amber-600' : 'text-gray-600'}`}>
                         {Math.round(item.daysUntilStockOut)} วัน
                       </td>
-                      <td className="py-3 px-3 text-right text-gray-700">{item.leadTimeDays} วัน</td>
+                      <td className="py-3 px-3 text-center text-gray-700">{item.leadTimeDays}+{item.bufferDays} = {item.leadTimeDays+item.bufferDays} วัน</td>
                       <td className="py-3 px-3 text-right text-gray-700 font-medium">{fmtNumber.format(item.suggestedReorderPoint)}</td>
                       <td className={`py-3 px-3 text-right font-bold ${item.daysUntilStockOut <= 7 ? 'text-red-600' : item.daysUntilStockOut <= 14 ? 'text-amber-600' : 'text-gray-600'}`}>
                         <span className={item.urgencyColor}>{fmtNumber.format(item.recommendedOrderQty)}</span>
@@ -1183,24 +1189,75 @@ export default function Insights() {
       {/* Detailed Analysis Table */}
       {loading ? (
         <LoadingSection height="h-96" />
-      ) : (
-        <DataTable
-          data={fastMoversData.slice(0, 25)}
-          title="📋 รายละเอียดสินค้าขายดี"
-          columns={[
-            { key: 'productName', label: 'สินค้า' },
-            { key: 'sku', label: 'SKU' },
-            { key: 'categoryName', label: 'หมวดหมู่' },
-            { key: 'brandName', label: 'แบรนด์' },
-            { key: 'quantitySold', label: 'ขายแล้ว', format: 'number', align: 'right' },
-            { key: 'dailySalesRate', label: '/วัน', format: 'number', align: 'right' },
-            { key: 'stockOnHand', label: 'มีอยู่', format: 'number', align: 'right' },
-            { key: 'purchaseRemaining', label: 'ค้างรับ', format: 'number', align: 'right' },
-            { key: 'currentStock', label: 'รวม', format: 'number', align: 'right' },
-            { key: 'daysRemaining', label: 'เหลือใช้', format: 'days', align: 'right', highlight: true, highlightThreshold: 14 },
-          ]}
-        />
-      )}
+      ) : (() => {
+        // Unique filter options
+        const uniqueCategories = [...new Set(fastMoversData.map(f => f.categoryName).filter(Boolean))].sort();
+        const uniqueBrands = [...new Set(fastMoversData.map(f => f.brandName).filter(Boolean))].sort();
+
+        // Apply filters
+        const filteredFastMovers = fastMoversData.filter(item => {
+          if (detailFilterProduct && !item.productName?.toLowerCase().includes(detailFilterProduct.toLowerCase()) && !item.sku?.toLowerCase().includes(detailFilterProduct.toLowerCase())) return false;
+          if (detailFilterCategory && item.categoryName !== detailFilterCategory) return false;
+          if (detailFilterBrand && item.brandName !== detailFilterBrand) return false;
+          return true;
+        });
+
+        return (
+          <div className="bg-white rounded-xl shadow p-6">
+            <h3 className="text-lg font-semibold text-gray-800 mb-4">📋 รายละเอียดสินค้าขายดี ({filteredFastMovers.length} รายการ)</h3>
+            {/* Filters */}
+            <div className="flex flex-wrap gap-3 mb-4">
+              <input
+                type="text"
+                placeholder="ค้นหาสินค้า / SKU..."
+                value={detailFilterProduct}
+                onChange={e => setDetailFilterProduct(e.target.value)}
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm w-56 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              />
+              <select
+                value={detailFilterCategory}
+                onChange={e => setDetailFilterCategory(e.target.value)}
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              >
+                <option value="">ทุกหมวดหมู่</option>
+                {uniqueCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+              </select>
+              <select
+                value={detailFilterBrand}
+                onChange={e => setDetailFilterBrand(e.target.value)}
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              >
+                <option value="">ทุกแบรนด์</option>
+                {uniqueBrands.map(brand => <option key={brand} value={brand}>{brand}</option>)}
+              </select>
+              {(detailFilterProduct || detailFilterCategory || detailFilterBrand) && (
+                <button
+                  onClick={() => { setDetailFilterProduct(''); setDetailFilterCategory(''); setDetailFilterBrand(''); }}
+                  className="px-3 py-2 text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition font-medium"
+                >
+                  ล้างตัวกรอง
+                </button>
+              )}
+            </div>
+            <DataTable
+              data={filteredFastMovers}
+              title=""
+              columns={[
+                { key: 'productName', label: 'สินค้า' },
+                { key: 'sku', label: 'SKU' },
+                { key: 'categoryName', label: 'หมวดหมู่' },
+                { key: 'brandName', label: 'แบรนด์' },
+                { key: 'quantitySold', label: 'ขายแล้ว', format: 'number', align: 'right' },
+                { key: 'dailySalesRate', label: '/วัน', format: 'number', align: 'right' },
+                { key: 'stockOnHand', label: 'มีอยู่', format: 'number', align: 'right' },
+                { key: 'purchaseRemaining', label: 'ค้างรับ', format: 'number', align: 'right' },
+                { key: 'currentStock', label: 'รวม', format: 'number', align: 'right' },
+                { key: 'daysRemaining', label: 'เหลือใช้', format: 'days', align: 'right', highlight: true, highlightThreshold: 14 },
+              ]}
+            />
+          </div>
+        );
+      })()}
     </div>
   );
 }

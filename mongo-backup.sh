@@ -2,7 +2,7 @@
 
 # --- ตั้งค่า ---
 # ใส่ URL จาก Railway (ห้ามลืมเปลี่ยนตรงนี้!)
-MONGO_URI="mongodb://mongo:YOUR_PASSWORD@roundhouse.proxy.rlwy.net:54321"
+MONGO_URI="mongodb://mongo:<PASSWORD>@containers-us-west-123.railway.app:5432/dbname"
 
 # โฟลเดอร์ที่จะเก็บไฟล์ backup
 BACKUP_DIR="/root/mongo-backups"
@@ -23,18 +23,3 @@ mongodump --uri="$MONGO_URI" --gzip --archive="$FILENAME"
 find $BACKUP_DIR -type f -name "*.gz" -mtime +7 -delete
 
 echo "Backup finished and old files cleaned."
-
-
-##### crontab on ubuntu
-crontab -e
-
-# เลื่อนลงไปบรรทัดล่างสุด แล้วเพิ่มบรรทัดนี้:
-0 3 * * * /root/backup-mongo.sh >> /root/backup.log 2>&1
-
-
-
-# mongodump
-# รูปแบบคำสั่ง
-mongorestore --uri="MONGO_URI_ของ_RAILWAY" --gzip --archive="/root/mongo-backups/ชื่อไฟล์.gz" --drop
-
-mongorestore --uri="mongodb://localhost:27017/test" --gzip --archive="db-2026-03-23_0300.gz" --drop
