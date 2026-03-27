@@ -129,7 +129,7 @@ const consumeBatches = (variant, product, quantity, metadata = {}) => {
  * @param {string} type - Order type: 'purchase' | 'sale' | 'adjustment'
  * @param {object} metadata - Metadata for batch tracking {orderId, orderReference}
  */
-const applyStockChange = (variant, product, item, type, metadata = {}) => {
+const applyStockChange = async (variant, product, item, type, metadata = {}) => {
   const qty = Number(item.quantity) || 0;
   
   // ✅ สำหรับ adjustment/damage/expired อนุญาตให้ qty เป็น 0 หรือลบได้ (delta อาจลดสต็อก)
@@ -197,10 +197,23 @@ const applyStockChange = (variant, product, item, type, metadata = {}) => {
             throw new Error(`Batch consumption mismatch for SKU ${variant.sku}: remain ${remaining}`);
           }
           // ✅ allowBackorder: สร้าง backorder batch (quantity ลบ) เพื่อให้ stockOnHand ติดลบได้
+          // ดึงต้นทุนจาก PO pending (สั่งซื้อแล้วรอรับ) → ถูกต้องกว่า variant.cost เดิม
+          let backorderCost = item.unitCost || 0;
+          if (!backorderCost) {
+            const pendingPO = await InventoryOrder.findOne({
+              type: 'purchase', status: 'pending',
+              'items.variantId': variant._id,
+            }).sort({ _id: -1 });
+            if (pendingPO) {
+              const poItem = pendingPO.items.find(it => String(it.variantId) === String(variant._id));
+              backorderCost = poItem?.unitCost || poItem?.unitPrice || 0;
+            }
+          }
+          if (!backorderCost) backorderCost = variant.cost || 0;
           variant.batches.push({
             batchRef: `BACKORDER-${Date.now()}`,
             supplier: 'Backorder (Pre-order)',
-            cost: item.unitCost || item.unitPrice || 0,
+            cost: backorderCost,
             quantity: -remaining,
             receivedAt: new Date(),
             orderId: metadata.orderId,
@@ -226,10 +239,22 @@ const applyStockChange = (variant, product, item, type, metadata = {}) => {
           // ✅ allowBackorder: สร้าง backorder batch (quantity ลบ) สำหรับส่วนที่ขาด
           const deficit = remaining - Math.max(0, unbatchedQty);
           if (deficit > 0) {
+            let backorderCost2 = item.unitCost || 0;
+            if (!backorderCost2) {
+              const pendingPO = await InventoryOrder.findOne({
+                type: 'purchase', status: 'pending',
+                'items.variantId': variant._id,
+              }).sort({ _id: -1 });
+              if (pendingPO) {
+                const poItem = pendingPO.items.find(it => String(it.variantId) === String(variant._id));
+                backorderCost2 = poItem?.unitCost || poItem?.unitPrice || 0;
+              }
+            }
+            if (!backorderCost2) backorderCost2 = variant.cost || 0;
             variant.batches.push({
               batchRef: `BACKORDER-${Date.now()}`,
               supplier: 'Backorder (Pre-order)',
-              cost: item.unitCost || item.unitPrice || 0,
+              cost: backorderCost2,
               quantity: -deficit,
               receivedAt: new Date(),
               orderId: metadata.orderId,
@@ -244,10 +269,22 @@ const applyStockChange = (variant, product, item, type, metadata = {}) => {
       // ✅ stockOnHand เป็น virtual field - คำนวณจาก batches อัตโนมัติ
     } else if (variant.allowBackorder) {
       // ✅ ไม่มี batches เลย แต่เปิด allowBackorder → สร้าง backorder batch (quantity ลบ)
+      let backorderCost3 = item.unitCost || 0;
+      if (!backorderCost3) {
+        const pendingPO = await InventoryOrder.findOne({
+          type: 'purchase', status: 'pending',
+          'items.variantId': variant._id,
+        }).sort({ _id: -1 });
+        if (pendingPO) {
+          const poItem = pendingPO.items.find(it => String(it.variantId) === String(variant._id));
+          backorderCost3 = poItem?.unitCost || poItem?.unitPrice || 0;
+        }
+      }
+      if (!backorderCost3) backorderCost3 = variant.cost || 0;
       variant.batches.push({
         batchRef: `BACKORDER-${Date.now()}`,
         supplier: 'Backorder (Pre-order)',
-        cost: item.unitCost || item.unitPrice || 0,
+        cost: backorderCost3,
         quantity: -qty,
         receivedAt: new Date(),
         orderId: metadata.orderId,
@@ -393,24 +430,43 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
         if (variant.batches && variant.batches.length > 0) {
           const costingMethod = product.costingMethod || 'FIFO';
           
-          // หา batch ที่จะ consume ตาม costingMethod
-          let batchToConsume;
-          if (costingMethod === 'LIFO') {
-            // LIFO: ใหม่สุด (descending receivedAt)
-            batchToConsume = variant.batches.reduce((latest, b) => 
-              (new Date(b.receivedAt || 0) > new Date(latest.receivedAt || 0)) ? b : latest
-            );
-          } else {
-            // FIFO (default): เก่าสุด (ascending receivedAt)
-            batchToConsume = variant.batches.reduce((oldest, b) => 
-              (new Date(b.receivedAt || 0) < new Date(oldest.receivedAt || 0)) ? b : oldest
-            );
-          }
+          // ✅ FIX: กรอง BACKORDER batches และ batch ที่ quantity <= 0 ออก
+          const validBatches = variant.batches.filter(b => 
+            (b.quantity || 0) > 0 && !b.batchRef?.startsWith('BACKORDER-')
+          );
           
-          unitCostFromBatch = batchToConsume?.cost || 0;
+          if (validBatches.length > 0) {
+            // หา batch ที่จะ consume ตาม costingMethod
+            let batchToConsume;
+            if (costingMethod === 'LIFO') {
+              // LIFO: ใหม่สุด (descending receivedAt)
+              batchToConsume = validBatches.reduce((latest, b) => 
+                (new Date(b.receivedAt || 0) > new Date(latest.receivedAt || 0)) ? b : latest
+              );
+            } else {
+              // FIFO (default): เก่าสุด (ascending receivedAt)
+              batchToConsume = validBatches.reduce((oldest, b) => 
+                (new Date(b.receivedAt || 0) < new Date(oldest.receivedAt || 0)) ? b : oldest
+              );
+            }
+            
+            unitCostFromBatch = batchToConsume?.cost || 0;
+          }
         }
         
-        itemData.unitCost = unitCostFromBatch || variant.cost || 0;
+        // ✅ Fallback chain: batch cost → variant.cost → ล่าสุดจาก purchase order
+        let finalUnitCost = unitCostFromBatch || variant.cost || 0;
+        if (!finalUnitCost) {
+          const lastPO = await InventoryOrder.findOne({
+            type: 'purchase',
+            'items.variantId': variant._id,
+          }).sort({ _id: -1 });
+          if (lastPO) {
+            const poItem = lastPO.items.find(it => String(it.variantId) === String(variant._id));
+            finalUnitCost = poItem?.unitCost || poItem?.unitPrice || 0;
+          }
+        }
+        itemData.unitCost = finalUnitCost;
       } else if (type === 'adjustment') {
         // ✅ Adjustment: บันทึก actualDelta สำหรับใช้ตอน cancel
         const currentStock = variant.stockOnHand || 0;
@@ -542,7 +598,7 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
           }
           
           // ✅ ส่ง actualType ให้ applyStockChange (damage/expired จะส่ง 'sale')
-          applyStockChange(
+          await applyStockChange(
             variant,
             product,
             { ...rawItem, quantity: actualQty },
@@ -748,8 +804,14 @@ router.patch('/orders/:id/receive', authenticateToken, authorizeRoles('owner', '
 
       const receiveData = receiveItemsData.get(key) || {};
       const createdBatchRef = receiveData.batchRef || generateBatchRef();
-      const batchCost = receiveData.unitCost || 0;
+      // ✅ FIX: ถ้า frontend ไม่ส่ง unitCost ให้ fallback ไปที่ order item's unitCost/unitPrice
+      const batchCost = receiveData.unitCost || item.unitCost || item.unitPrice || variant.cost || 0;
       const expiryDateFromRequest = expiryDateMap.get(key);
+      
+      // ✅ อัพเดต variant.cost เป็นต้นทุนล่าสุด (fallback เมื่อ batch ถูก consume หมด)
+      if (batchCost > 0) {
+        variant.cost = batchCost;
+      }
       
       // ✅ สร้าง batch ใหม่
       variant.batches.push({
@@ -778,7 +840,7 @@ router.patch('/orders/:id/receive', authenticateToken, authorizeRoles('owner', '
             variant.batches.push({
               batchRef: `BACKORDER-${Date.now()}`,
               supplier: 'Backorder (Pre-order)',
-              cost: 0,
+              cost: batchCost || variant.cost || 0,
               quantity: deficit,
               receivedAt: new Date(),
             });

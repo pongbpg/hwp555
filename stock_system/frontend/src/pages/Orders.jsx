@@ -321,6 +321,7 @@ export default function Orders() {
           variantId: it.variantId,
           receivedQuantity: edits[idx] !== undefined ? Number(edits[idx]) : 0,
           expiryDate: expiryDate ? expiryDate : undefined, // ✅ ส่ง expiryDate ไป API
+          unitCost: it.unitCost || it.unitPrice || 0, // ✅ ส่ง unitCost จาก order item เพื่อให้ batch ได้ cost ถูกต้อง
         };
       });
       await api.patch(`/inventory/orders/${order._id}/receive`, { items: payloadItems });

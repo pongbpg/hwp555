@@ -19,6 +19,7 @@ mkdir -p $BACKUP_DIR
 echo "Starting backup to $FILENAME..."
 mongodump --uri="$MONGO_URI" --gzip --archive="$FILENAME"
 
+
 # 3. ลบไฟล์ที่เก่ากว่า 7 วันทิ้ง (ป้องกัน Disk เต็ม)
 find $BACKUP_DIR -type f -name "*.gz" -mtime +7 -delete
 
@@ -33,8 +34,10 @@ crontab -e
 
 
 
-# mongodump
+
 # รูปแบบคำสั่ง
 mongorestore --uri="MONGO_URI_ของ_RAILWAY" --gzip --archive="/root/mongo-backups/ชื่อไฟล์.gz" --drop
 
-mongorestore --uri="mongodb://localhost:27017/test" --gzip --archive="db-2026-03-23_0300.gz" --drop
+
+mongodump --uri="mongodb://mongo:KTlBvUhGjEidMDEKLAzevAVCOATaiNsU@gondola.proxy.rlwy.net:33948/" --gzip --archive="db-2026-03-26_2010.gz"
+mongorestore --uri="mongodb://localhost:27017/test" --gzip --archive="db-2026-03-26_2010.gz" --drop
