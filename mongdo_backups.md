@@ -40,4 +40,6 @@ mongorestore --uri="MONGO_URI_ของ_RAILWAY" --gzip --archive="/root/mongo-b
 
 
 mongodump --uri="mongodb://mongo:KTlBvUhGjEidMDEKLAzevAVCOATaiNsU@gondola.proxy.rlwy.net:33948/" --gzip --archive="db-2026-03-26_2010.gz"
+mongodump --uri="mongodb://localhost:27017/test" --gzip --archive="db-2026-03-26_2010z.gz"
 mongorestore --uri="mongodb://localhost:27017/test" --gzip --archive="db-2026-03-26_2010.gz" --drop
+mongorestore --uri="mongodb://mongo:KTlBvUhGjEidMDEKLAzevAVCOATaiNsU@gondola.proxy.rlwy.net:33948/" --gzip --archive="db-2026-03-26_2010z.gz" --drop
