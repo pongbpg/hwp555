@@ -729,8 +729,10 @@ export default function Insights() {
     sku: ds.sku,
     quantitySold: ds.quantitySold || 0,
     dailySalesRate: ds.dailySalesRate || 0,
+    // currentStock (backend) = stockOnHand + purchaseRemaining (total)
     currentStock: ds.currentStock,
-    incoming: ds.incoming,
+    stockOnHand: (ds.currentStock || 0) - (ds.purchaseRemaining || 0),
+    purchaseRemaining: ds.purchaseRemaining || 0,
     categoryName: ds.categoryName,
     brandName: ds.brandName,
   }));

@@ -372,6 +372,7 @@ const applyStockChange = async (variant, product, item, type, metadata = {}) => 
       quantity: qty,
       expiryDate: item.expiryDate,
       receivedAt: new Date(),
+      orderId: metadata?.orderId,
     });
     // ✅ stockOnHand เป็น virtual field - คำนวณจาก batches อัตโนมัติ
     return;
@@ -499,6 +500,29 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
         previousStock: variant.stockOnHand || 0,
       });
     }
+
+    // ✅ Phase 1.5: Pre-validate stock BEFORE saving order to DB
+    // This prevents orphaned "completed" orders where the order is saved but stock wasn't reduced.
+    if (type === 'sale' || type === 'damage' || type === 'expired') {
+      // Accumulate required qty per variantId to handle multiple items for same variant
+      const requiredQtyMap = new Map();
+      for (const { variant, qty } of itemsToProcess) {
+        const vid = String(variant._id);
+        requiredQtyMap.set(vid, (requiredQtyMap.get(vid) || 0) + qty);
+      }
+      for (const { variant } of itemsToProcess) {
+        const vid = String(variant._id);
+        if (!requiredQtyMap.has(vid)) continue;
+        const neededQty = requiredQtyMap.get(vid);
+        requiredQtyMap.delete(vid); // check each variant only once
+        const availableStock = variant.stockOnHand || 0;
+        if (!variant.allowBackorder && availableStock < neededQty) {
+          return res.status(400).json({
+            error: `Insufficient stock for SKU ${variant.sku}: have ${availableStock}, need ${neededQty}`,
+          });
+        }
+      }
+    }
     
     // ✅ Phase 2: Create order FIRST so we have orderId to pass to applyStockChange
     const order = new InventoryOrder({
@@ -542,6 +566,10 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
         await order.save();
       }
     }
+
+    // ✅ Phase 3-4 wrapped: ถ้า stock/movement ล้มเหลว ให้ลบ order ที่ save ไปแล้วทิ้ง
+    // เพื่อป้องกัน "ghost orders" ที่ status=completed แต่ไม่ได้ตัดสต็อก
+    try {
     
     // ✅ Phase 3: Group items by product and apply stock changes
     // This prevents version conflicts when saving products with multiple variant changes
@@ -640,7 +668,7 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
             quantity: movementQty,
             previousStock: stockBeforeChange,
             newStock: actualNewStock,
-            reference,
+            reference: finalReference,
             batchRef: rawItem.batchRef,
             expiryDate: rawItem.expiryDate,
             unitCost: rawItem.unitCost || 0,
@@ -663,7 +691,17 @@ router.post('/orders', authenticateToken, authorizeRoles('owner', 'admin', 'hr',
         userName,
       });
     }
-    
+
+    } catch (stockError) {
+      // ❌ Phase 3/4 ล้มเหลว — ลบ order ที่ save ไปแล้วเพื่อป้องกัน ghost order
+      try {
+        await InventoryOrder.findByIdAndDelete(order._id);
+      } catch (deleteErr) {
+        console.error('Failed to rollback orphaned order:', order._id, deleteErr);
+      }
+      throw stockError; // re-throw ให้ outer catch จัดการ
+    }
+
     // ตรวจสอบและแจ้งเตือน LINE หากสินค้าใกล้หมด (สำหรับการขาย/damage/expired)
     let stockAlertResult = null;
     if (type === 'sale' || type === 'damage' || type === 'expired') {
@@ -1036,8 +1074,13 @@ router.patch('/orders/:id/cancel', authenticateToken, authorizeRoles('owner', 'a
           receivedAt: new Date(),
         });
       } else if (order.type === 'return') {
-        // ✅ Return: เดิมเพิ่มสต็อก (สร้าง batch) → ยกเลิกต้องลบ batch ที่เพิ่ม
-        variant.batches = (variant.batches || []).filter((b) => !b.batchRef?.startsWith('RTN'));
+        // ✅ Return: เดิมเพิ่มสต็อก (สร้าง batch) → ยกเลิกต้องลบ batch ของ order นี้เท่านั้น
+        variant.batches = (variant.batches || []).filter((b) => {
+          if (b.orderId && String(b.orderId) === String(order._id)) return false;
+          // fallback สำหรับ orders เก่าที่ไม่มี orderId: ลบเฉพาะ RTN batch ที่ตรงกับ item.batchRef
+          if (!b.orderId && b.batchRef && b.batchRef === item.batchRef) return false;
+          return true;
+        });
       } else if (order.type === 'adjustment') {
         // ✅ Adjustment: ใช้ actualDelta ที่บันทึกไว้ (ถ้ามี)
         const actualDelta = item.actualDelta; // delta ที่แท้จริง (+ = เพิ่ม, - = ลด)

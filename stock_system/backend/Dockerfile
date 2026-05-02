@@ -5,14 +5,14 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm install --production
+# Install dependencies (include dev for nodemon)
+RUN npm install
 
 # Copy app source
 COPY . .
 
 # Expose port
-EXPOSE 5002
+EXPOSE 3002
 
 # Start app
 CMD ["node", "server.js"]

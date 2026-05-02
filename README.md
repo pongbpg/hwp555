@@ -24,7 +24,7 @@ npm run dev
 - HR Backend → http://localhost:5000
 - HR Frontend → http://localhost:3000
 - Stock Backend → http://localhost:5001
-- Stock Frontend → http://localhost:5173
+- Stock Frontend → http://localhost:3001
 
 ### รันแค่ Backend หรือ Frontend
 

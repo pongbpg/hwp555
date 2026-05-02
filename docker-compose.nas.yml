@@ -1,0 +1,50 @@
+# docker-compose.nas.yml
+# Override สำหรับ deploy บน NAS
+# ใช้ร่วมกับ docker-compose.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.nas.yml up -d --build
+#
+# หรือถ้าใช้ deploy.sh จะ pick ไฟล์นี้อัตโนมัติถ้าตั้ง COMPOSE_FILE
+
+services:
+  hr-backend:
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  hr-frontend:
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  stock-backend:
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  stock-frontend:
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  mongodb:
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - hr-frontend
+      - stock-frontend
+    restart: unless-stopped

@@ -1,0 +1,100 @@
+services:
+  # MongoDB
+  mongodb:
+    image: mongo:latest
+    container_name: hwp555-mongodb
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: password
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/hwp555 --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # HR System Backend
+  hr-backend:
+    build: ./hr_system/backend
+    container_name: hr-backend
+    ports:
+      - "3001:3001"
+    environment:
+      MONGODB_URI: mongodb://root:password@mongodb:27017/hwp555?authSource=admin
+      JWT_SECRET: hwp555_jwt_secret_key_change_in_production
+      NODE_ENV: development
+      PORT: 3001
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # HR System Frontend
+  hr-frontend:
+    build:
+      context: ./hr_system/frontend
+      args:
+        VITE_HR_API_BASE_URL: https://hr-api.storewerk.com/api
+        VITE_STOCK_API_BASE_URL: https://stock-api.storewerk.com/api
+    container_name: hr-frontend
+    ports:
+      - "5001:5001"
+    depends_on:
+      - hr-backend
+    restart: unless-stopped
+
+  # Stock System Backend
+  stock-backend:
+    build: ./stock_system/backend
+    container_name: stock-backend
+    ports:
+      - "3002:3002"
+    environment:
+      MONGODB_URI: mongodb://root:password@mongodb:27017/hwp555?authSource=admin
+      JWT_SECRET: hwp555_jwt_secret_key_change_in_production
+      NODE_ENV: development
+      PORT: 3002
+      LINE_CHANNEL_ACCESS_TOKEN: your_line_token_here
+      DEBUG_STOCK_ALERTS: "true"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Stock System Frontend
+  stock-frontend:
+    build:
+      context: ./stock_system/frontend
+      args:
+        VITE_HR_API_BASE_URL: https://hr-api.storewerk.com/api
+        VITE_STOCK_API_BASE_URL: https://stock-api.storewerk.com/api
+    container_name: stock-frontend
+    ports:
+      - "5002:5002"
+    depends_on:
+      - stock-backend
+    restart: unless-stopped
+
+  # 5. Cloudflare Tunnel
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: hwp555-tunnel
+    restart: always
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    # สั่งให้ Tunnel ต้องรอให้ Frontend รันเสร็จก่อนถึงจะทำงาน
+    depends_on:
+      - hr-frontend
+      - stock-frontend
+
+volumes:
+  mongo_data:
+    driver: local
+
+networks:
+  default:
+    name: hwp555-network

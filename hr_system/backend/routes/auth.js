@@ -17,6 +17,8 @@ router.post('/register', async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    const employeeCount = await Employee.countDocuments();
+
     const employee = new Employee({
       firstName,
       lastName,
@@ -26,7 +28,7 @@ router.post('/register', async (req, res) => {
       department: 'General',
       salary: 0,
       hireDate: new Date(),
-      role: 'employee', // Default role
+      role: employeeCount === 0 ? 'owner' : 'employee',
     });
 
     await employee.save();

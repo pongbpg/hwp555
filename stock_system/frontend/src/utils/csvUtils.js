@@ -308,8 +308,9 @@ export const validateCSVRows = (rows, products, orderType = 'sale') => {
  * Generate CSV template as downloadable file
  * @param {string} orderType - 'sale' | 'purchase' | 'adjustment' | 'damage' | 'expired' | 'return'
  * @param {object[]} selectedProducts - Selected products with variants (optional)
+ * @param {string} reference - Reference number to use as filename (e.g. 'PO2569-0001')
  */
-export const downloadTemplate = (orderType = 'sale', selectedProducts = null) => {
+export const downloadTemplate = (orderType = 'sale', selectedProducts = null, reference = null) => {
   const typeLabel = {
     sale: 'SO',
     purchase: 'PO',
@@ -398,7 +399,10 @@ export const downloadTemplate = (orderType = 'sale', selectedProducts = null) =>
   const url = URL.createObjectURL(blob);
 
   link.setAttribute('href', url);
-  link.setAttribute('download', `template_${typeLabel}_${new Date().toISOString().split('T')[0]}.csv`);
+  const filename = reference
+    ? `${reference}.csv`
+    : `template_${typeLabel}_${new Date().toISOString().split('T')[0]}.csv`;
+  link.setAttribute('download', filename);
   link.style.visibility = 'hidden';
 
   document.body.appendChild(link);

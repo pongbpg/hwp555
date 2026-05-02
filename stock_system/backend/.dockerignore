@@ -1,0 +1,14 @@
+node_modules
+npm-debug.log
+.env
+.DS_Store
+.git
+.gitignore
+README.md
+*.md
+*.mjs
+check-*.mjs
+fix-*.mjs
+migrate-*.mjs
+test-*.mjs
+quick-test.sh

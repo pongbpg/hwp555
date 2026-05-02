@@ -1,0 +1,24 @@
+# docker-compose.dev.yml
+# Override สำหรับ local development เท่านั้น
+# ใช้คำสั่ง: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  hr-backend:
+    volumes:
+      - ./hr_system/backend:/app
+      - /app/node_modules
+    command: npm run dev
+
+  hr-frontend:
+    volumes:
+      - ./hr_system/frontend/src:/app/src
+
+  stock-backend:
+    volumes:
+      - ./stock_system/backend:/app
+      - /app/node_modules
+    command: npm run dev
+
+  stock-frontend:
+    volumes:
+      - ./stock_system/frontend/src:/app/src

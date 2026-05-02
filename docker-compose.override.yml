@@ -1,0 +1,14 @@
+# Local development overrides — applied automatically when running `docker compose up`
+# Do NOT use this file on production server
+services:
+  hr-frontend:
+    build:
+      args:
+        VITE_HR_API_BASE_URL: http://localhost:3001/api
+        VITE_STOCK_API_BASE_URL: http://localhost:3002/api
+
+  stock-frontend:
+    build:
+      args:
+        VITE_HR_API_BASE_URL: http://localhost:3001/api
+        VITE_STOCK_API_BASE_URL: http://localhost:3002/api

@@ -168,6 +168,13 @@ export const consumeBatchesByOrder = (variant, sortedBatches, quantity, costingM
   let remaining = quantity;
   const updated = [];
 
+  // ✅ Preserve BACKORDER batches — they are not in sortedBatches (filtered out by getBatchConsumptionOrder)
+  // Without this, BACKORDER batches (negative qty) would be silently dropped on every sale,
+  // causing stockOnHand to inflate and allowing overselling.
+  const backorderBatches = (variant.batches || []).filter(
+    (b) => b.batchRef && b.batchRef.startsWith('BACKORDER-')
+  );
+
   for (const batch of sortedBatches) {
     if (remaining <= 0) {
       updated.push(batch);
@@ -223,7 +230,11 @@ export const consumeBatchesByOrder = (variant, sortedBatches, quantity, costingM
     }
   }
 
-  variant.batches = updated.filter((b) => (b.quantity || 0) > 0 || (b.batchRef && b.batchRef.startsWith('BACKORDER-')));
+  // ✅ Re-include BACKORDER batches + keep only positive-qty regular batches
+  variant.batches = [
+    ...backorderBatches,
+    ...updated.filter((b) => (b.quantity || 0) > 0),
+  ];
   return remaining;
 };
 

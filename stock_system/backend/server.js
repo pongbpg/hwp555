@@ -25,10 +25,24 @@ app.use(cors());
 app.use(express.json());
 
 const mongoUri = process.env.MONGODB_URI;
-mongoose
-  .connect(mongoUri)
-  .then(() => console.log('MongoDB connected for stock system'))
-  .catch((err) => console.error('Mongo connection error:', err));
+
+const connectWithRetry = (attempt = 1) => {
+  const maxDelay = 30000;
+  mongoose.connect(mongoUri)
+    .then(() => console.log('MongoDB connected for stock system'))
+    .catch((err) => {
+      const delay = Math.min(1000 * 2 ** attempt, maxDelay);
+      console.error(`Mongo connection error (attempt ${attempt}), retrying in ${delay / 1000}s:`, err.message);
+      setTimeout(() => connectWithRetry(attempt + 1), delay);
+    });
+};
+
+connectWithRetry();
+
+mongoose.connection.on('disconnected', () => {
+  console.warn('MongoDB disconnected — attempting reconnect...');
+  connectWithRetry();
+});
 
 app.use('/api/products', productRoutes);
 app.use('/api/inventory', inventoryRoutes);
@@ -48,7 +62,9 @@ app.use((err, _req, res, _next) => {
 });
 
 const PORT = process.env.PORT || 5001;
-const HOST = process.env.HOST || '0.0.0.0';
+const HOST = '0.0.0.0'; // Listen on all interfaces for Docker
 app.listen(PORT, HOST, () => {
+  console.log(`🚀 Stock System Backend running on http://0.0.0.0:${PORT}`);
+  console.log(`📊 Stock Dashboard: http://localhost:${process.env.FRONTEND_PORT || PORT - 1000}/dashboard`);
   console.log(`🚀 Stock System Backend running on http://${HOST}:${PORT}`);
 });

@@ -495,12 +495,41 @@ export default function Orders() {
   };
 
   // CSV Import Handlers
-  const handleCSVFileSelect = (file) => {
+  const handleCSVFileSelect = async (file) => {
     if (!file) return;
-    if (!file.name.endsWith('.csv')) {
-      setError('❌ ต้องเป็นไฟล์ CSV');
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (!['csv', 'xlsx', 'xls'].includes(ext)) {
+      setCsvErrors(['❌ ต้องเป็นไฟล์ CSV หรือ XLSX']);
+      setCsvFile(null);
+      setCsvPreview([]);
       return;
     }
+
+    // ✅ Validate filename matches current reference number
+    const fileBaseName = file.name.replace(/\.(csv|xlsx|xls)$/i, '');
+    if (csvGeneratedReference && fileBaseName !== csvGeneratedReference) {
+      setCsvErrors([
+        `❌ ชื่อไฟล์ "${fileBaseName}" ไม่ตรงกับเลข Reference "${csvGeneratedReference}"`,
+        `💡 กรุณาดาวน์โหลด Template จากระบบ แล้วใช้ไฟล์ชื่อ "${csvGeneratedReference}.csv" เท่านั้น`,
+      ]);
+      setCsvFile(null);
+      setCsvPreview([]);
+      return;
+    }
+
+    // ✅ Block if this reference already exists in the system (already uploaded)
+    const allOrders = await loadAllOrdersForRef();
+    const refAlreadyExists = allOrders.some((o) => o.reference === csvGeneratedReference);
+    if (refAlreadyExists) {
+      setCsvErrors([
+        `⚠️ เลข Reference "${csvGeneratedReference}" เคยบันทึกในระบบแล้ว`,
+        `🚫 ไม่สามารถอัพโหลดซ้ำได้ — เอกสารนี้ถูกบันทึกไปแล้ว`,
+      ]);
+      setCsvFile(null);
+      setCsvPreview([]);
+      return;
+    }
+
     setCsvFile(file);
     parseCSVFile(file);
   };
@@ -633,7 +662,7 @@ export default function Orders() {
       </div>
 
       {message && <div className="bg-green-50 border border-green-200 text-green-700 p-4 rounded-lg">{message}</div>}
-      {error && <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg">{error}</div>}
+      {error && !showImportTab && <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg">{error}</div>}
 
       {/* Tabs: Manual Entry vs Import CSV */}
       <div className="bg-white rounded-xl shadow p-6">
@@ -963,7 +992,7 @@ export default function Orders() {
                   <button
                     type="button"
                     className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition"
-                    onClick={() => downloadTemplate(type, selectedProductsForTemplate.length > 0 ? selectedProductsForTemplate : null)}
+                    onClick={() => downloadTemplate(type, selectedProductsForTemplate.length > 0 ? selectedProductsForTemplate : null, csvGeneratedReference || null)}
                   >
                     ⬇️ ดาวโหลด Template CSV
                   </button>
@@ -1108,19 +1137,7 @@ export default function Orders() {
               </div>
             )}
 
-            {/* Step 3: Show Errors */}
-            {csvErrors.length > 0 && (
-              <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
-                <h3 className="font-medium text-red-700 mb-2">❌ ข้อผิดพลาด:</h3>
-                <ul className="text-sm text-red-600 space-y-1">
-                  {csvErrors.map((err, idx) => (
-                    <li key={idx}>• {err}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {/* Step 4: Preview Data */}
+            {/* Step 3: Preview Data */}
             {csvPreview.length > 0 && (
               <div className="mb-6">
                 <h3 className="text-lg font-semibold text-gray-800 mb-3">👀 ตัวอย่างข้อมูล ({csvPreview.length} รายการ)</h3>
@@ -1195,6 +1212,19 @@ export default function Orders() {
                     )}
                   </div>
                 </div>
+              </div>
+            )}
+
+            {/* Step 4: Show Errors */}
+            {(csvErrors.length > 0 || (error && showImportTab)) && (
+              <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+                <h3 className="font-medium text-red-700 mb-2">❌ ข้อผิดพลาด:</h3>
+                <ul className="text-sm text-red-600 space-y-1">
+                  {error && showImportTab && <li>• {error}</li>}
+                  {csvErrors.map((err, idx) => (
+                    <li key={idx}>• {err}</li>
+                  ))}
+                </ul>
               </div>
             )}
 
@@ -1286,9 +1316,17 @@ export default function Orders() {
                     >
                       <td className="py-2 px-3 text-sm">
                         {o.orderDate
-                          ? new Date(o.orderDate).toLocaleDateString('th-TH')
+                          ? <>
+                              <div>{new Date(o.orderDate).toLocaleDateString('th-TH')}</div>
+                              {o.createdAt && (
+                                <div className="text-xs text-gray-400">{new Date(o.createdAt).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</div>
+                              )}
+                            </>
                           : o.createdAt
-                            ? new Date(o.createdAt).toLocaleDateString('th-TH')
+                            ? <>
+                                <div>{new Date(o.createdAt).toLocaleDateString('th-TH')}</div>
+                                <div className="text-xs text-gray-400">{new Date(o.createdAt).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</div>
+                              </>
                             : '-'}
                       </td>
                       <td className="py-2 px-3 text-sm capitalize">{o.type}</td>
