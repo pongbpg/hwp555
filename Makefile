@@ -2,7 +2,7 @@
 
 NAS_HOST   ?= 192.168.1.155
 NAS_USER   ?= tawatchaiw
-CONTEXT    ?= nas-tabienkub
+CONTEXT    ?= nas-hwp555
 
 .PHONY: help setup deploy logs down status pull
 
