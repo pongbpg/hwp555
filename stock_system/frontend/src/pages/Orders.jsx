@@ -658,18 +658,18 @@ export default function Orders() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-gray-800">📋 คำสั่งซื้อ / ขาย</h1>
+        <h1 className="text-xl sm:text-2xl font-bold text-gray-800">📋 คำสั่งซื้อ / ขาย</h1>
       </div>
 
-      {message && <div className="bg-green-50 border border-green-200 text-green-700 p-4 rounded-lg">{message}</div>}
-      {error && !showImportTab && <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg">{error}</div>}
+      {message && <div className="bg-green-50 border border-green-200 text-green-700 p-3 sm:p-4 rounded-lg text-sm">{message}</div>}
+      {error && !showImportTab && <div className="bg-red-50 border border-red-200 text-red-700 p-3 sm:p-4 rounded-lg text-sm">{error}</div>}
 
       {/* Tabs: Manual Entry vs Import CSV */}
-      <div className="bg-white rounded-xl shadow p-6">
-        <div className="flex gap-3 border-b border-gray-200 mb-4">
+      <div className="bg-white rounded-xl shadow p-3 sm:p-6">
+        <div className="flex border-b border-gray-200 mb-4 overflow-x-auto">
           <button
             type="button"
-            className={`px-6 py-3 font-medium border-b-2 transition ${!showImportTab
+            className={`flex-shrink-0 px-3 sm:px-6 py-2 sm:py-3 text-sm font-medium border-b-2 transition ${!showImportTab
                 ? 'border-blue-600 text-blue-600'
                 : 'border-transparent text-gray-600 hover:text-gray-800'
               }`}
@@ -679,7 +679,7 @@ export default function Orders() {
           </button>
           <button
             type="button"
-            className={`px-6 py-3 font-medium border-b-2 transition ${showImportTab
+            className={`flex-shrink-0 px-3 sm:px-6 py-2 sm:py-3 text-sm font-medium border-b-2 transition ${showImportTab
                 ? 'border-blue-600 text-blue-600'
                 : 'border-transparent text-gray-600 hover:text-gray-800'
               }`}
@@ -1255,15 +1255,15 @@ export default function Orders() {
           </div>
         )}
         {/* Orders List */}
-        <div className="bg-white rounded-xl shadow p-6">
+        <div className="bg-white rounded-xl shadow p-3 sm:p-6">
           <h2 className="text-lg font-semibold text-gray-800 mb-4">Order Records</h2>
 
           {/* Filters */}
-          <div className="flex flex-wrap gap-4 mb-4">
-            <div>
+          <div className="flex flex-wrap gap-3 mb-4">
+            <div className="flex-1 min-w-[140px]">
               <label className="block text-xs text-gray-500 mb-1">ประเภท</label>
               <select
-                className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
                 value={filterType}
                 onChange={(e) => handleFilterChange(e.target.value, filterStatus)}
               >
@@ -1273,10 +1273,10 @@ export default function Orders() {
                 <option value="adjustment">Adjustment (ปรับปรุง)</option>
               </select>
             </div>
-            <div>
+            <div className="flex-1 min-w-[140px]">
               <label className="block text-xs text-gray-500 mb-1">สถานะ</label>
               <select
-                className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
                 value={filterStatus}
                 onChange={(e) => handleFilterChange(filterType, e.target.value)}
               >
@@ -1291,7 +1291,123 @@ export default function Orders() {
           {ordersLoading && <p className="text-gray-600">Loading orders...</p>}
           {ordersError && <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-lg mb-4">{ordersError}</div>}
 
-          <div className="overflow-x-auto">
+          {/* Mobile Card View */}
+          <div className="block sm:hidden space-y-3 mb-4">
+            {orders.length === 0 && !ordersLoading && (
+              <div className="py-8 text-center text-gray-500">ไม่มี Order</div>
+            )}
+            {orders.map((o) => (
+              <div key={o._id} className={`border border-gray-200 rounded-lg p-3 ${o.status === 'cancelled' ? 'opacity-50' : ''}`}>
+                <div className="flex justify-between items-start gap-2 mb-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-mono text-sm text-blue-700 font-semibold truncate">{o.reference || '-'}</p>
+                    <p className="text-xs text-gray-500 mt-0.5 capitalize">
+                      {o.type} · {o.orderDate ? new Date(o.orderDate).toLocaleDateString('th-TH') : '-'}
+                    </p>
+                  </div>
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium flex-shrink-0 ${getStatusBadge(o.status)}`}>
+                    {o.status || '-'}
+                  </span>
+                </div>
+                <div className="text-xs text-gray-600 mb-2">
+                  {o.items?.slice(0, 2).map((it, i) => (
+                    <div key={i} className="truncate">{it.productName || it.sku || 'N/A'} ×{it.quantity}</div>
+                  ))}
+                  {(o.items?.length || 0) > 2 && <div className="text-gray-400">+{o.items.length - 2} รายการ</div>}
+                </div>
+                <div className="flex gap-2 mt-2">
+                  <button
+                    type="button"
+                    className="flex-1 px-2 py-1.5 text-xs bg-gray-200 hover:bg-gray-300 rounded"
+                    onClick={() => toggleExpand(o._id)}
+                  >
+                    {expandedOrders.has(o._id) ? 'ซ่อน' : 'ดูรายละเอียด'}
+                  </button>
+                  {o.status !== 'cancelled' && (
+                    <>
+                      <button
+                        type="button"
+                        className="flex-1 px-2 py-1.5 text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 rounded"
+                        onClick={() => editOrder(o)}
+                      >
+                        ✏️
+                      </button>
+                      <button
+                        type="button"
+                        className="flex-1 px-2 py-1.5 text-xs bg-red-100 hover:bg-red-200 text-red-700 rounded"
+                        onClick={() => cancelOrder(o)}
+                      >
+                        ❌
+                      </button>
+                    </>
+                  )}
+                </div>
+                {expandedOrders.has(o._id) && (
+                  <div className="mt-3 overflow-x-auto">
+                    <table className="w-full text-xs border border-gray-200 rounded">
+                      <thead>
+                        <tr className="bg-gray-100 border-b border-gray-200">
+                          <th className="text-left py-1.5 px-2">สินค้า / SKU</th>
+                          <th className="text-right py-1.5 px-2">จำนวน</th>
+                          <th className="text-right py-1.5 px-2">ราคา</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(o.items || []).map((it, idx) => (
+                          <tr key={idx} className="border-b border-gray-100">
+                            <td className="py-1.5 px-2">
+                              <div className="font-medium">{it.productName || '-'}</div>
+                              <div className="font-mono text-gray-500">{it.sku || '-'}</div>
+                            </td>
+                            <td className="py-1.5 px-2 text-right">{it.quantity}</td>
+                            <td className="py-1.5 px-2 text-right">
+                              {o.type === 'sale'
+                                ? `฿${((Number(it.unitPrice) || 0) * (Number(it.quantity) || 0)).toLocaleString()}`
+                                : `฿${((Number(it.unitCost) || 0) * (Number(it.quantity) || 0)).toLocaleString()}`
+                              }
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {o.type === 'purchase' && (() => {
+                      const allReceived = (o.items || []).every((_, idx) => calculateReceivedQuantity(o.receipts, idx) >= (o.items[idx].quantity ?? 0));
+                      return !allReceived && (
+                        <div className="mt-2 flex gap-2">
+                          <button
+                            type="button"
+                            className="flex-1 bg-gray-400 hover:bg-gray-500 text-white px-3 py-1.5 rounded text-xs font-medium"
+                            onClick={() => {
+                              const newEdits = {};
+                              newEdits[o._id] = (o.items || []).map((it, i) => {
+                                const alreadyReceived = calculateReceivedQuantity(o.receipts, i);
+                                return Math.max(0, (it.quantity ?? 0) - alreadyReceived);
+                              });
+                              setReceiveEdits((prev) => ({ ...prev, ...newEdits }));
+                            }}
+                            disabled={receiving}
+                          >
+                            ✓ รับทั้งหมด
+                          </button>
+                          <button
+                            type="button"
+                            className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-xs font-medium disabled:opacity-50"
+                            onClick={() => submitReceive(o)}
+                            disabled={receiving}
+                          >
+                            {receiving ? '...' : 'บันทึกรับของ'}
+                          </button>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop Table View */}
+          <div className="hidden sm:block overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-gray-200">

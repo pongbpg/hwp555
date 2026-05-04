@@ -65,10 +65,105 @@ deploy() {
 
 # ── Sub-commands ─────────────────────────────────────────
 COMPOSE_FILES="-f docker-compose.yml -f docker-compose.nas.yml"
+BACKUP_DIR="${STACK_DIR}/backups"
+MONGO_CONTAINER="hwp555-mongodb"
+
 cmd_logs()   { docker --context "${CONTEXT_NAME}" compose ${COMPOSE_FILES} logs -f; }
 cmd_down()   { docker --context "${CONTEXT_NAME}" compose ${COMPOSE_FILES} down; info "Stack หยุดแล้ว"; }
 cmd_status() { docker --context "${CONTEXT_NAME}" compose ${COMPOSE_FILES} ps; }
 cmd_pull()   { docker --context "${CONTEXT_NAME}" compose ${COMPOSE_FILES} pull; }
+
+cmd_backup() {
+  info "สั่ง backup ทันทีบน NAS..."
+  MONGO_USER="${MONGO_ROOT_USERNAME:-root}"
+  MONGO_PASS="${MONGO_ROOT_PASSWORD:-password}"
+  DATE_VAL=$(date +"%Y-%m-%d_%H%M")
+  OUTFILE="${BACKUP_DIR}/db-${DATE_VAL}.gz"
+  ssh -p "${NAS_SSH_PORT}" "${NAS_USER}@${NAS_HOST}" \
+    "mkdir -p '${BACKUP_DIR}' && \
+     docker exec ${MONGO_CONTAINER} mongodump \
+       --uri='mongodb://${MONGO_USER}:${MONGO_PASS}@localhost:27017/?authSource=admin' \
+       --gzip --archive \
+     > '${OUTFILE}' \
+     && echo 'Backup สำเร็จ: ${OUTFILE}' \
+     || echo 'Backup ล้มเหลว!'"
+}
+
+cmd_restore() {
+  MONGO_USER="${MONGO_ROOT_USERNAME:-root}"
+  MONGO_PASS="${MONGO_ROOT_PASSWORD:-password}"
+  SELECTED_FILE="${2:-}"
+
+  if [ -n "${SELECTED_FILE}" ]; then
+    # ── กรณีระบุชื่อไฟล์มาโดยตรง ──────────────────────────
+    # รองรับทั้ง: ชื่อไฟล์สั้น (db-2026-05-04_0300.gz) หรือ full path
+    if [[ "${SELECTED_FILE}" != /* ]]; then
+      SELECTED_FILE="${BACKUP_DIR}/${SELECTED_FILE}"
+    fi
+    # ตรวจสอบว่าไฟล์มีอยู่บน NAS
+    ssh -p "${NAS_SSH_PORT}" "${NAS_USER}@${NAS_HOST}" \
+      "test -f '${SELECTED_FILE}'" \
+      || error "ไม่พบไฟล์: ${SELECTED_FILE} บน NAS"
+    TARGET_FILE="${SELECTED_FILE}"
+  else
+    # ── กรณีไม่ระบุ → แสดง list ให้เลือก ─────────────────
+    info "กำลังดึงรายการ backup จาก NAS (${BACKUP_DIR})..."
+    FILES=$(ssh -p "${NAS_SSH_PORT}" "${NAS_USER}@${NAS_HOST}" \
+      "ls -1t '${BACKUP_DIR}'/db-*.gz 2>/dev/null")
+
+    if [ -z "${FILES}" ]; then
+      error "ไม่พบไฟล์ backup ใน ${BACKUP_DIR} บน NAS"
+    fi
+
+    echo ""
+    echo "  รายการ backup ที่มี:"
+    echo "  ─────────────────────────────────────────"
+    i=1
+    declare -a FILE_LIST
+    while IFS= read -r f; do
+      SIZE=$(ssh -p "${NAS_SSH_PORT}" "${NAS_USER}@${NAS_HOST}" \
+        "du -sh '${f}' 2>/dev/null | cut -f1")
+      printf "  [%2d] %-40s %s\n" "$i" "$(basename ${f})" "(${SIZE})"
+      FILE_LIST[$i]="${f}"
+      ((i++))
+    done <<< "${FILES}"
+    echo "  ─────────────────────────────────────────"
+    echo ""
+    echo -n "  เลือกหมายเลข (กด Enter เพื่อใช้ล่าสุด [1]): "
+    read -r CHOICE
+    CHOICE="${CHOICE:-1}"
+
+    if ! [[ "${CHOICE}" =~ ^[0-9]+$ ]] || [ "${CHOICE}" -lt 1 ] || [ "${CHOICE}" -ge "${i}" ]; then
+      error "หมายเลขไม่ถูกต้อง: ${CHOICE}"
+    fi
+    TARGET_FILE="${FILE_LIST[${CHOICE}]}"
+  fi
+
+  echo ""
+  warn "จะ restore จากไฟล์: $(basename ${TARGET_FILE})"
+  warn "⚠️  ข้อมูลปัจจุบันใน MongoDB จะถูกแทนที่ด้วยข้อมูลจาก backup!"
+  echo -n "พิมพ์ 'yes' เพื่อยืนยัน: "
+  read -r CONFIRM
+  if [ "${CONFIRM}" != "yes" ]; then
+    warn "ยกเลิกการ restore"
+    return 0
+  fi
+
+  info "กำลัง restore จาก ${TARGET_FILE} ..."
+  ssh -p "${NAS_SSH_PORT}" "${NAS_USER}@${NAS_HOST}" \
+    "cat '${TARGET_FILE}' | docker exec -i ${MONGO_CONTAINER} mongorestore \
+       --uri='mongodb://${MONGO_USER}:${MONGO_PASS}@localhost:27017/?authSource=admin' \
+       --gzip --archive --drop \
+     && echo 'Restore สำเร็จ!' \
+     || echo 'Restore ล้มเหลว!'"
+  info "Restore เสร็จสิ้น ✓"
+}
+
+cmd_list_backups() {
+  info "รายการ backup บน NAS (${BACKUP_DIR}):"
+  ssh -p "${NAS_SSH_PORT}" "${NAS_USER}@${NAS_HOST}" \
+    "ls -lht '${BACKUP_DIR}'/db-*.gz 2>/dev/null || echo 'ไม่พบไฟล์ backup'"
+}
 
 # ── Main ─────────────────────────────────────────────────
 case "${1:-deploy}" in
@@ -77,13 +172,24 @@ case "${1:-deploy}" in
     sync_env
     deploy
     ;;
-  logs)    setup_context; cmd_logs ;;
-  down)    setup_context; cmd_down ;;
-  status)  setup_context; cmd_status ;;
-  pull)    setup_context; cmd_pull ;;
-  context) setup_context ;;
+  logs)         setup_context; cmd_logs ;;
+  down)         setup_context; cmd_down ;;
+  status)       setup_context; cmd_status ;;
+  pull)         setup_context; cmd_pull ;;
+  context)      setup_context ;;
+  backup)       setup_context; cmd_backup ;;
+  restore)      setup_context; cmd_restore "$@" ;;
+  backups)      setup_context; cmd_list_backups ;;
   *)
-    echo "Usage: $0 [deploy|logs|down|status|pull|context]"
+    echo "Usage: $0 [deploy|logs|down|status|pull|context|backup|restore|backups]"
+    echo ""
+    echo "  deploy   — build & deploy ไปที่ NAS"
+    echo "  logs     — ดู logs ทุก service"
+    echo "  down     — หยุด stack"
+    echo "  status   — ดูสถานะ containers"
+    echo "  backup   — สั่ง backup ทันทีบน NAS"
+    echo "  restore  — restore จาก backup ล่าสุด หรือระบุชื่อไฟล์ได้ เช่น: restore db-2026-05-04_0300.gz"
+    echo "  backups  — ดูรายการ backup ทั้งหมดบน NAS"
     exit 1
     ;;
 esac

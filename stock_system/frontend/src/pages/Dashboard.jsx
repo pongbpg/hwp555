@@ -399,18 +399,18 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold text-gray-800">📊 Dashboard</h1>
+          <h1 className="text-xl sm:text-3xl font-bold text-gray-800">📊 Dashboard</h1>
           <p className="text-gray-500 text-sm mt-1">ภาพรวมระบบสต็อก</p>
         </div>
         <button
           onClick={loadData}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors flex items-center gap-2 font-medium"
+          className="bg-blue-600 hover:bg-blue-700 text-white px-3 sm:px-4 py-2 rounded-lg transition-colors flex items-center gap-2 font-medium text-sm"
         >
-          🔄 รีเฟรช
+          🔄 <span className="hidden sm:inline">รีเฟรช</span>
         </button>
       </div>
 

@@ -1287,9 +1287,83 @@ export default function Products() {
       )}
 
       {/* Products List */}
-      <div className="bg-white rounded-xl shadow p-6">
+      <div className="bg-white rounded-xl shadow p-3 sm:p-6">
         <h2 className="text-lg font-semibold text-gray-800 mb-4">📋 รายการสินค้า</h2>
-        <div className="overflow-x-auto">
+
+        {/* Mobile Card View */}
+        <div className="block sm:hidden space-y-3">
+          {products.length === 0 && !loading && (
+            <div className="py-8 text-center text-gray-500">ไม่มีสินค้า</div>
+          )}
+          {products.map((p) => (
+            <div key={p._id} className={`border border-gray-200 rounded-lg p-3 ${p.status === 'archived' ? 'opacity-60' : ''}`}>
+              <div className="flex justify-between items-start gap-2 mb-2">
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium text-gray-800 truncate">{p.name}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">{getBrandName(p.brand)} · {getCategoryName(p.category)}</p>
+                </div>
+                <span className={`inline-block px-2 py-1 rounded text-xs font-medium flex-shrink-0 ${
+                  p.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
+                }`}>
+                  {p.status === 'active' ? '✅' : '📦'}
+                </span>
+              </div>
+              <p className="text-xs text-gray-500 mb-3">{p.variants?.length || 0} variants</p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setExpandedProductId(expandedProductId === p._id ? null : p._id)}
+                  className={`flex-1 px-2 py-1.5 text-white text-xs rounded transition-colors ${
+                    expandedProductId === p._id ? 'bg-orange-600' : 'bg-gray-600'
+                  }`}
+                >
+                  {expandedProductId === p._id ? '▼ ยุบ' : '▶ รายละเอียด'}
+                </button>
+                <button
+                  onClick={() => handleEdit(p)}
+                  className="flex-1 px-2 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded"
+                >
+                  แก้ไข
+                </button>
+              </div>
+              {expandedProductId === p._id && (
+                <div className="mt-3 space-y-3">
+                  <div>
+                    <h4 className="font-semibold text-gray-700 text-sm mb-2">📦 Variants</h4>
+                    <div className="space-y-2">
+                      {p.variants?.map((v, idx) => (
+                        <div key={v._id || idx} className={`border border-gray-200 rounded p-2 text-xs ${v.stockOnHand <= 0 ? 'bg-red-50 border-red-200' : 'bg-gray-50'}`}>
+                          <p className="font-mono text-blue-700 font-semibold">{v.sku}</p>
+                          <div className="flex justify-between mt-1">
+                            <span className="text-gray-500">{v.model || '-'}</span>
+                            <span className={v.stockOnHand <= 0 ? 'text-red-600 font-semibold' : 'text-gray-700'}>
+                              คงคลัง: {v.stockOnHand ?? 0}
+                            </span>
+                          </div>
+                          <div className="flex gap-3 mt-1 text-gray-500">
+                            <span>฿{v.price}</span>
+                            {v.reorderPoint && <span>Reorder: {v.reorderPoint}</span>}
+                            {v.allowBackorder && <span className="text-orange-600">📦พรีออเดอร์</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  {(p.reorderBufferDays || p.minOrderQty || p.leadTimeDays || p.costingMethod) && (
+                    <div className="grid grid-cols-2 gap-2 bg-gray-50 p-2 rounded border border-gray-200 text-xs">
+                      {p.leadTimeDays && <div><span className="text-gray-500">Lead Time:</span> <span className="text-blue-700">{p.leadTimeDays}วัน</span></div>}
+                      {p.reorderBufferDays && <div><span className="text-gray-500">Buffer:</span> <span className="text-blue-700">{p.reorderBufferDays}วัน</span></div>}
+                      {p.minOrderQty && <div><span className="text-gray-500">MOQ:</span> <span className="text-blue-700">{p.minOrderQty}ชิ้น</span></div>}
+                      {p.costingMethod && <div><span className="text-gray-500">Costing:</span> <span className="text-blue-700">{p.costingMethod}</span></div>}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Desktop Table View */}
+        <div className="hidden sm:block overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-gray-200">

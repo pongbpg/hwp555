@@ -41,6 +41,49 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # MongoDB Daily Backup
+  # - บันทึก backup ไปที่ /Shared/docker/hwp555/backups/ บน host
+  # - เก็บไว้ 7 วัน แล้วลบอัตโนมัติ
+  # - backup ครั้งแรกทันทีที่ container start และทุก 24 ชั่วโมงหลังจากนั้น
+  mongo-backup:
+    image: mongo:latest
+    container_name: hwp555-mongo-backup
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    volumes:
+      - /volume1/docker/hwp555/backups:/backups
+    environment:
+      MONGO_USER: ${MONGO_ROOT_USERNAME:-root}
+      MONGO_PASS: ${MONGO_ROOT_PASSWORD:-password}
+    entrypoint: >
+      bash -c '
+        do_backup() {
+          DATE=$$(date +"%Y-%m-%d_%H%M")
+          OUTFILE="/backups/db-$$DATE.gz"
+          echo "[$(date)] HWP555 Backup → $$OUTFILE"
+          mongodump \
+            --uri="mongodb://$$MONGO_USER:$$MONGO_PASS@mongodb:27017/?authSource=admin" \
+            --gzip --archive="$$OUTFILE" \
+            && echo "[$(date)] Backup สำเร็จ: $$OUTFILE" \
+            || echo "[$(date)] Backup ล้มเหลว!"
+          find /backups -name "db-*.gz" -mtime +7 -delete
+          echo "[$(date)] ลบ backup เก่ากว่า 7 วันแล้ว"
+        }
+        mkdir -p /backups
+        do_backup
+        while true; do
+          sleep 86400
+          do_backup
+        done
+      '
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
+
   cloudflared:
     image: cloudflare/cloudflared:latest
     command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}

@@ -29,7 +29,7 @@ const AnalyticsRoute = ({ children, user }) => {
 };
 
 export default function App() {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(window.innerWidth >= 1024);
   const [token, setToken] = useState(localStorage.getItem('token'));
   const [user, setUser] = useState(() => {
     const saved = localStorage.getItem('user');
@@ -65,11 +65,11 @@ export default function App() {
         path="/*"
         element={
           <Protected>
-            <div className="flex h-screen bg-gray-100">
+            <div className="flex h-screen bg-gray-100 overflow-hidden">
               <Sidebar isOpen={sidebarOpen} onLogout={handleLogout} user={user} onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
-              <div className="flex-1 flex flex-col overflow-hidden">
+              <div className="flex-1 flex flex-col overflow-hidden min-w-0">
                 <Header onSidebarToggle={() => setSidebarOpen(!sidebarOpen)} onLogout={handleLogout} user={user} />
-                <main className="flex-1 overflow-auto p-6">
+                <main className="flex-1 overflow-auto p-3 sm:p-6">
                   <Routes>
                     <Route index element={<Navigate to={defaultRoute} replace />} />
                     <Route path="/dashboard" element={
