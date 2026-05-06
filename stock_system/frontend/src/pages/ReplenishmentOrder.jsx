@@ -160,6 +160,7 @@ export default function ReplenishmentOrder() {
 
           product.totalRecommended += finalAllocation;
           product.totalNetOrder += finalAllocation;
+          product.totalCurrentStock += fastMover.currentStock || 0;
           remainingDeficit -= finalAllocation;
 
           console.log(`  ✅ Added ${fastMover.sku}: ${finalAllocation} units to meet MOQ`);

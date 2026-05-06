@@ -70,11 +70,21 @@ services:
           find /backups -name "db-*.gz" -mtime +7 -delete
           echo "[$(date)] ลบ backup เก่ากว่า 7 วันแล้ว"
         }
+        seconds_until_3am() {
+          NOW=$$(date +%s)
+          TARGET=$$(date -d "03:00" +%s 2>/dev/null || date -j -f "%H:%M" "03:00" +%s 2>/dev/null || echo 0)
+          if [ "$$TARGET" -le "$$NOW" ]; then
+            TARGET=$$((TARGET + 86400))
+          fi
+          echo $$((TARGET - NOW))
+        }
         mkdir -p /backups
-        do_backup
+        WAIT=$$(seconds_until_3am)
+        echo "[$(date)] รอจนถึงตี 3 (อีก $$(( WAIT / 3600 )) ชม. $$(( (WAIT % 3600) / 60 )) นาที)..."
+        sleep $$WAIT
         while true; do
-          sleep 86400
           do_backup
+          sleep 86400
         done
       '
     restart: unless-stopped

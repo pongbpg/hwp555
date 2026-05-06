@@ -69,6 +69,7 @@ BACKUP_DIR="${STACK_DIR}/backups"
 MONGO_CONTAINER="hwp555-mongodb"
 
 cmd_logs()   { docker --context "${CONTEXT_NAME}" compose ${COMPOSE_FILES} logs -f; }
+cmd_up()     { docker --context "${CONTEXT_NAME}" compose ${COMPOSE_FILES} up -d; info "Stack เริ่มทำงานแล้ว ✓"; }
 cmd_down()   { docker --context "${CONTEXT_NAME}" compose ${COMPOSE_FILES} down; info "Stack หยุดแล้ว"; }
 cmd_status() { docker --context "${CONTEXT_NAME}" compose ${COMPOSE_FILES} ps; }
 cmd_pull()   { docker --context "${CONTEXT_NAME}" compose ${COMPOSE_FILES} pull; }
@@ -173,7 +174,8 @@ case "${1:-deploy}" in
     deploy
     ;;
   logs)         setup_context; cmd_logs ;;
-  down)         setup_context; cmd_down ;;
+  up|start)     setup_context; cmd_up ;;
+  down|stop)    setup_context; cmd_down ;;
   status)       setup_context; cmd_status ;;
   pull)         setup_context; cmd_pull ;;
   context)      setup_context ;;
@@ -181,11 +183,12 @@ case "${1:-deploy}" in
   restore)      setup_context; cmd_restore "$@" ;;
   backups)      setup_context; cmd_list_backups ;;
   *)
-    echo "Usage: $0 [deploy|logs|down|status|pull|context|backup|restore|backups]"
+    echo "Usage: $0 [deploy|up|down|logs|status|pull|context|backup|restore|backups]"
     echo ""
-    echo "  deploy   — build & deploy ไปที่ NAS"
-    echo "  logs     — ดู logs ทุก service"
+    echo "  deploy   — build images ใหม่ & deploy ไปที่ NAS"
+    echo "  up       — start stack (ไม่ build ใหม่ เร็วกว่า deploy)"
     echo "  down     — หยุด stack"
+    echo "  logs     — ดู logs ทุก service"
     echo "  status   — ดูสถานะ containers"
     echo "  backup   — สั่ง backup ทันทีบน NAS"
     echo "  restore  — restore จาก backup ล่าสุด หรือระบุชื่อไฟล์ได้ เช่น: restore db-2026-05-04_0300.gz"
