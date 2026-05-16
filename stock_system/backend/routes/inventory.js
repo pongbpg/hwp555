@@ -862,27 +862,33 @@ router.patch('/orders/:id/receive', authenticateToken, authorizeRoles('owner', '
         orderId: order._id,
       });
       
-      // ✅ Clear BACKORDER batches if stock is now positive after receiving
-      const totalStockAfterReceive = (variant.batches || []).reduce((sum, b) => sum + (b.quantity || 0), 0);
-      if (totalStockAfterReceive >= 0) {
+      // ✅ Absorb BACKORDER batches into the newly received stock.
+      // BACKORDER batches (negative qty) represent pre-sold stock that this receipt now fulfills.
+      // Bug fix: previously removing BACKORDER batches without adjusting the new batch quantity
+      // left stockOnHand = full delta (e.g. 355) instead of delta - preorders (e.g. 241).
+      const backorderTotal = (variant.batches || [])
+        .filter(b => b.batchRef?.startsWith('BACKORDER-'))
+        .reduce((sum, b) => sum + (b.quantity || 0), 0); // e.g. -114
+
+      if (backorderTotal < 0) {
+        // Remove all BACKORDER batches (they are fulfilled by this receipt)
         variant.batches = (variant.batches || []).filter(b => !b.batchRef?.startsWith('BACKORDER-'));
-      } else {
-        // ✅ ยังติดลบอยู่ — ปรับ BACKORDER batch ให้เหลือเฉพาะส่วนที่ยังขาด
-        const positiveSum = (variant.batches || []).filter(b => (b.quantity || 0) > 0).reduce((sum, b) => sum + (b.quantity || 0), 0);
-        variant.batches = (variant.batches || []).filter(b => !b.batchRef?.startsWith('BACKORDER-'));
-        if (positiveSum < 0) {
-          // should not happen, but safe fallback
-        } else {
-          const deficit = totalStockAfterReceive; // negative value
-          if (deficit < 0) {
-            variant.batches.push({
-              batchRef: `BACKORDER-${Date.now()}`,
-              supplier: 'Backorder (Pre-order)',
-              cost: batchCost || variant.cost || 0,
-              quantity: deficit,
-              receivedAt: new Date(),
-            });
+
+        // Reduce the new batch quantity by the pre-order deficit
+        // e.g. delta=355, backorderTotal=-114 → newBatch.quantity = 241
+        const newBatch = variant.batches.find(b => b.batchRef === createdBatchRef);
+        if (newBatch) {
+          newBatch.quantity += backorderTotal;
+
+          if (newBatch.quantity < 0) {
+            // Receipt did not cover all pre-orders → convert to a remaining BACKORDER batch
+            newBatch.batchRef = `BACKORDER-${Date.now()}`;
+            newBatch.supplier = 'Backorder (Pre-order)';
+          } else if (newBatch.quantity === 0) {
+            // Receipt exactly matched pre-orders → remove zero-qty batch
+            variant.batches = variant.batches.filter(b => b.batchRef !== createdBatchRef);
           }
+          // if newBatch.quantity > 0: normal case, batch stays with reduced quantity
         }
       }
       

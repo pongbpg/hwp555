@@ -62,14 +62,15 @@ Product (name, category, brand, leadTimeDays, reorderBufferDays, costingMethod, 
 
 **Costing Methods** (Product.costingMethod):
 - `FIFO` (default): First In, First Out - oldest batches consumed first
-- `LIFO`: Last In, First Out - newest batches consumed first  
-- `WAC`: Weighted Average Cost - treats batches as homogeneous pool
-- Used in: `calculateInventoryValue()`, `getBatchConsumptionOrder()`, `consumeBatchesByOrder()`
+- `LIFO`: Last In, First Out - newest batches consumed first
+- `WAC`: Enum value exists but no separate WAC logic — treated as FIFO in costingService
+- Used in: `calculateInventoryValue()`, `getBatchConsumptionOrder()`, `consumeBatchesByOrder()` — **all in `/services/costingService.js`**
 
 **SKU Generation** (automatic in POST /products/:id/variants):
 - Formula: `{Brand} - {Category} - {Model} - {Color} - {Size} - {Material}`
 - Example: `APPLE - ELECTRONICS - IPHONE15 - BLACK - 256GB - GLASS`
-- Parts assembled from `product.brand.name`, `product.category.name`, `variant.model`, and other attributes
+- Parts assembled from `product.brand` (String), `product.category` (String), `variant.model`, and `variant.attributes` Map
+- **Note**: `category` and `brand` are plain strings in Product schema (not ObjectId refs)
 - **Auto-generation**: If SKU field left empty in POST/PATCH, backend auto-generates using formula
 - See [SKU_NAMING_FORMULA.md](../SKU_NAMING_FORMULA.md) for full formula rules and examples
 
@@ -153,20 +154,27 @@ npm run dev                  # Start all systems with concurrently
 ### Mongoose Schemas (Backend Models)
 
 **Product Schema Structure:**
-- Top-level fields: name, category, brand, unit, status ('active'|'archived'), enableStockAlerts (boolean), leadTimeDays, reorderBufferDays, minOrderQty, costingMethod
+- Top-level fields: name, category (String), brand (String), unit, status ('active'|'archived'), enableStockAlerts (boolean), leadTimeDays, reorderBufferDays, minOrderQty, costingMethod ('FIFO'|'LIFO'|'WAC'), skuProduct, attributesSchema[]
+- `attributesSchema[]`: Dynamic attribute definitions for product-specific variant fields `{ key, label, inputType, options[] }`
 - `variants[]` (subdocument array): Each product can have multiple SKUs with independent stock
-- `variantSchema` includes: sku, model, price, cost, committed, incoming, reorderPoint, batches[], status, allowBackorder
-- `batchSchema`: batchRef, supplier, cost, quantity, expiryDate, receivedAt, orderId (reference to InventoryOrder for cancelled order tracking)
+- `variantSchema` includes: sku, name, barcode, model, price, cost, committed, incoming, reorderPoint, reorderQty, batches[], status ('active'|'inactive'), allowBackorder, enableStockAlerts
+  - `attributes`: Map of String (flexible key-value for product-specific attributes like color, size)
+  - `enableStockAlerts`: `undefined` = inherit from product, `true`/`false` = SKU-level override
+  - `allowBackorder`: When true, allows negative stock via BACKORDER batches
+- `batchSchema`: batchRef, supplier, cost, quantity, expiryDate, receivedAt, orderId (reference to InventoryOrder)
+  - Batch history fields: `quantityConsumed`, `lastConsumedAt`, `consumptionOrder[]` (each entry: orderId, orderReference, quantityConsumedThisTime, consumedAt)
+  - BACKORDER batches: `batchRef` starts with `'BACKORDER-'`, quantity is negative (represents pre-sold stock)
 - **Virtual fields** (computed from batches, always up-to-date):
-  - `stockOnHand`: Sum of all batch quantities (read-only, computed from `batches` array)
+  - `stockOnHand`: Sum of all batch quantities (read-only, computed from `batches` array — including BACKORDER negatives)
   - `available`: `stockOnHand - committed` (available for new sales)
-  - `totalBatchQuantity`: Total quantity across all batches (diagnostic)
+  - `totalBatchQuantity`, `totalConsumed`: Diagnostic fields
   - `isLowStock`, `stockStatus`: Computed alert indicators
 - **Important**: Virtuals require `.set('toJSON', { virtuals: true })` to serialize in responses; `stockOnHand` is **never directly written** - update through batch mutations
 
 **Product Status & Alerts:**
 - `status: 'active' | 'archived'` - Archive products without data loss (archived products hidden from order entry)
-- `enableStockAlerts: boolean` - Toggle alerts per product (when false, variant is skipped in checkAndAlertAfterSale and alerts APIs)
+- `enableStockAlerts: boolean` (product level) - Toggle alerts per product
+- `variant.enableStockAlerts: boolean | undefined` - Per-SKU override: `undefined` inherits from product, `true`/`false` overrides
 
 **InventoryOrder Schema:**
 - `type`: 'sale' | 'purchase' | 'adjustment'
@@ -203,32 +211,33 @@ PATCH /orders/:id/cancel
   └─ Set order.status = 'cancelled'
 ```
 
-**Batch Consumption Logic** (core to stock accuracy):
-- Function `consumeBatches(variant, product, quantity)`: Uses `getBatchConsumptionOrder()` to sort batches, then `consumeBatchesByOrder()` to consume
-- `getBatchConsumptionOrder()`: Returns batches sorted by `receivedAt` based on `costingMethod`
+**Batch Consumption Logic** (core to stock accuracy, in `/services/costingService.js`):
+- `getBatchConsumptionOrder(batches, costingMethod)`: Returns consumable batches sorted by `receivedAt`; **automatically excludes BACKORDER batches** (negative qty, batchRef starts with 'BACKORDER-')
   - FIFO: ascending (oldest first)
   - LIFO: descending (newest first)
-  - WAC: unsorted (treat as pool)
-- `consumeBatchesByOrder()`: Iterates sorted batches, subtracts from each until quantity satisfied, removes zero-qty batches
-- **Returns**: unconsumed quantity (should be 0 for normal sales, >0 if insufficient stock or backorder allowed)
-- Called in: POST /orders (sale/adjustment types), used by applyStockChange() before updating stockOnHand
+- `consumeBatchesByOrder(variant, sortedBatches, quantity, costingMethod, metadata)`: Consumes batches in order, records history (`consumptionOrder[]`, `quantityConsumed`, `lastConsumedAt`); sets qty to 0 (does NOT delete) for history preservation; **preserves BACKORDER batches** in variant.batches after consumption
+- **Returns**: unconsumed quantity (0 for normal sales, >0 if insufficient stock)
+- **BACKORDER batches**: When `variant.allowBackorder = true` and stock is insufficient, creates a batch with `batchRef: 'BACKORDER-{timestamp}'` and negative quantity; absorbed/cancelled when new purchase received
+- Called in: POST /orders (sale/adjustment types), via `applyStockChange()` in inventory.js
 
 **Reorder Alerts Flow** (stockAlertService.js):
 1. After sale, `checkAndAlertAfterSale()` called with soldItems array
-2. **Calculation window**: Uses `leadTimeDays + bufferDays` sales period (✅ NOT 30 days - allows per-product customization)
+2. **Calculation window**: Uses `leadTimeDays + bufferDays` sales period (✅ NOT 30 days)
 3. For each item, `calculateAverageDailySalesFromOrders(variantId, salesPeriodDays)` queries InventoryOrder aggregation
-4. `checkVariantStockRisk()` determines if alert needed using `calculateReorderMetrics()`, respects `product.enableStockAlerts`
-5. If alert triggered, sends via `sendStockAlertFlexMessage()` (LINE Messaging API) or `sendStockAlertText()` (LINE Notify)
-6. Optional MOQ optimization: `optimizeOrderWithMOQ()` distributes deficit proportionally if product.minOrderQty > total suggested order
+4. `checkVariantStockRisk()` determines if alert needed using `calculateReorderMetrics()`, checks `variant.enableStockAlerts` (falls back to `product.enableStockAlerts`)
+5. **Alert `availableStock`** = `currentStock + purchaseRemaining` — purchaseRemaining calculated from pending purchase order receipts (NOT `variant.incoming`)
+6. If alert triggered, sends via `sendStockAlertFlexMessage()` (LINE Messaging API) or `sendStockAlertText()` (LINE Notify)
+7. Optional MOQ optimization: `optimizeOrderWithMOQ()` distributes deficit proportionally if product.minOrderQty > total suggested order
 
 ### Stock Valuation & Costing
 
-**calculateInventoryValue(variant, costingMethod)** returns total stock value:
-- **FIFO**: Latest batch cost × stock quantity (assumes latest batches remain)
-- **LIFO**: Oldest batch cost × stock quantity (assumes oldest batches remain)
-- **WAC**: Weighted average of all batch costs based on quantities
+**`calculateInventoryValue(variant, costingMethod)`** (in `/services/costingService.js`) returns total stock value:
+- **FIFO**: Walks batches newest→oldest (assumes oldest sold first); remaining stock has newest cost
+- **LIFO**: Walks batches oldest→oldest (assumes newest sold first); remaining stock has oldest cost
+- Returns 0 and warns if stock exists but no batches tracked (no fallback to `variant.cost`)
 - Used in: Dashboard summary, Stock value reporting
-- Falls back to `stockOnHand × variant.cost` if no batches tracked
+
+**`getBatchConsumptionOrder(batches, costingMethod)`** + **`consumeBatchesByOrder(variant, sortedBatches, quantity, costingMethod, metadata)`**: Extracted helpers for consuming batches with history tracking. Both live in `/services/costingService.js`.
 
 ### Stock Movement & Audit Trail
 
@@ -293,18 +302,22 @@ PATCH /orders/:id/cancel
 ## Essential Patterns & Workflow
 
 **When modifying inventory logic (applyStockChange, consumeBatches):**
-1. Consider both batch-tracked and non-tracked stock flows
-2. Validate sufficient stock BEFORE mutation (unless allowBackorder set)
-3. Return unconsumed quantity for backorder scenarios
-4. Call recordMovement() for audit trail
-5. Handle virtual `available` field in calculations (stockOnHand - committed)
+1. Import costing functions from `../services/costingService.js` (not inline in inventory.js)
+2. `getBatchConsumptionOrder()` already excludes BACKORDER batches — don't filter manually
+3. Validate sufficient stock BEFORE mutation (unless `variant.allowBackorder = true`)
+4. When `allowBackorder = true` and stock insufficient → create BACKORDER batch with negative qty (format: `BACKORDER-{Date.now()}`)
+5. When new purchase received → absorb/cancel BACKORDER batches (add incoming to reduce negative)
+6. Call recordMovement() for audit trail
+7. `stockOnHand` is virtual (sum of batches) — never write it directly
 
 **When adding new alerts or metrics:**
 1. Always query InventoryOrder with type: 'sale', status: { $ne: 'cancelled' }
-2. Use 30-day window minimum (even if parameterized)
+2. Use `leadTimeDays + bufferDays` window (not hardcoded 30 days)
 3. Get leadTimeDays and bufferDays from Product level, not hardcoded
 4. Filter out cancelled batches using getCancelledBatchRefs() + isBatchFromCancelledOrder()
 5. Call calculateReorderMetrics() for consistent formulas across endpoints
+6. Check `variant.enableStockAlerts` first, fall back to `product.enableStockAlerts`
+7. Compute `availableStock = currentStock + purchaseRemaining` (not just `stockOnHand - committed`)
 
 **When adding reorder-related features:**
 1. Use `calculateReorderMetrics(dailySalesRate, leadTimeDays, bufferDays)` from stockAlertService
@@ -317,8 +330,11 @@ PATCH /orders/:id/cancel
 
 - **Workflow orchestration**: [root package.json](../package.json)
 - **Shared models**: [Employee.js](../stock_system/backend/models/Employee.js)
+- **Product schema**: [stock_system/backend/models/Product.js](../stock_system/backend/models/Product.js)
 - **Inventory logic**: [stock_system/backend/routes/inventory.js](../stock_system/backend/routes/inventory.js)
+- **Costing service**: [stock_system/backend/services/costingService.js](../stock_system/backend/services/costingService.js) — `calculateInventoryValue`, `getBatchConsumptionOrder`, `consumeBatchesByOrder`
 - **Reorder service**: [stock_system/backend/services/stockAlertService.js](../stock_system/backend/services/stockAlertService.js)
+- **Replenishment page**: [stock_system/frontend/src/pages/ReplenishmentOrder.jsx](../stock_system/frontend/src/pages/ReplenishmentOrder.jsx)
 - **Frontend routing**: [stock_system/frontend/src/App.jsx](../stock_system/frontend/src/App.jsx)
 - **Frontend API client**: [stock_system/frontend/src/api.js](../stock_system/frontend/src/api.js)
 - **Standardization notes**: [STOCK_ALERT_FIX.md](../STOCK_ALERT_FIX.md)
