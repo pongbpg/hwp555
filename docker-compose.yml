@@ -15,6 +15,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # HR System Backend
   hr-backend:
@@ -31,6 +36,11 @@ services:
       mongodb:
         condition: service_healthy
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # HR System Frontend
   hr-frontend:
@@ -45,6 +55,11 @@ services:
     depends_on:
       - hr-backend
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # Stock System Backend
   stock-backend:
@@ -64,6 +79,11 @@ services:
       mongodb:
         condition: service_healthy
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # Stock System Frontend
   stock-frontend:
@@ -78,19 +98,83 @@ services:
     depends_on:
       - stock-backend
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-  # 5. Cloudflare Tunnel
+  # MongoDB Daily Backup
+  # - บันทึก backup ไปที่ ${BACKUP_DIR} บน host (NAS) — ต้องอยู่ "นอก" NAS_PATH
+  #   ไม่งั้น staging swap ตอน deploy จะลบทิ้ง (ดู nas-docker-deploy ข้อ 10)
+  # - เก็บไว้ 7 วัน แล้วลบอัตโนมัติ
+  # - backup ครั้งแรกตอนตี 3 แล้วทุก 24 ชั่วโมงหลังจากนั้น
+  mongo-backup:
+    image: mongo:latest
+    container_name: hwp555-mongo-backup
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    volumes:
+      - ${BACKUP_DIR:-/volume1/docker/backups/hwp555}:/backups
+    environment:
+    # ตั้ง timezone ให้ตรงเวลา NAS (UTC+7) — ไม่งั้น "02:00" จะกลายเป็น 02:00 UTC = 09:00 ไทย
+      TZ: Asia/Bangkok
+      MONGO_USER: ${MONGO_ROOT_USERNAME:-root}
+      MONGO_PASS: ${MONGO_ROOT_PASSWORD:-password}
+    entrypoint: >
+      bash -c '
+        do_backup() {
+          DATE=$$(date +"%Y-%m-%d_%H%M")
+          OUTFILE="/backups/db-$$DATE.gz"
+          echo "[$(date)] HWP555 Backup → $$OUTFILE"
+          mongodump \
+            --uri="mongodb://$$MONGO_USER:$$MONGO_PASS@mongodb:27017/?authSource=admin" \
+            --gzip --archive="$$OUTFILE" \
+            && echo "[$(date)] Backup สำเร็จ: $$OUTFILE" \
+            || echo "[$(date)] Backup ล้มเหลว!"
+          find /backups -name "db-*.gz" -mtime +7 -delete
+          echo "[$(date)] ลบ backup เก่ากว่า 7 วันแล้ว"
+        }
+        seconds_until_3am() {
+          NOW=$$(date +%s)
+          TARGET=$$(date -d "03:00" +%s 2>/dev/null || date -j -f "%H:%M" "03:00" +%s 2>/dev/null || echo 0)
+          if [ "$$TARGET" -le "$$NOW" ]; then
+            TARGET=$$((TARGET + 86400))
+          fi
+          echo $$((TARGET - NOW))
+        }
+        mkdir -p /backups
+        WAIT=$$(seconds_until_3am)
+        echo "[$(date)] รอจนถึงตี 3 (อีก $$(( WAIT / 3600 )) ชม. $$(( (WAIT % 3600) / 60 )) นาที)..."
+        sleep $$WAIT
+        while true; do
+          do_backup
+          sleep 86400
+        done
+      '
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+  # Cloudflare Tunnel
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: hwp555-tunnel
-    restart: always
-    command: tunnel run
-    environment:
-      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
     # สั่งให้ Tunnel ต้องรอให้ Frontend รันเสร็จก่อนถึงจะทำงาน
     depends_on:
       - hr-frontend
       - stock-frontend
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   mongo_data:

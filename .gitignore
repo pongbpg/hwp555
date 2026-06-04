@@ -55,3 +55,6 @@ temp/
 *.db
 *.sqlite
 *.sqlite3
+
+# Generated บน NAS เท่านั้น (สำหรับ Container Manager/Portainer) — ต้นฉบับคือ docker-compose.yml
+docker-compose.yaml
