@@ -142,19 +142,18 @@ export const checkVariantStockRisk = async (product, variant, avgDailySales = nu
   // ✅ ตรวจสอบว่าต้องแจ้งเตือนหรือไม่ (ใช้ availableStock รวม incoming)
   const shouldAlert =
     availableStock <= 0 || // หมดสต็อก (รวม incoming แล้ว)
-    availableStock <= reorderPoint || // ถึงจุดสั่งซื้อ
-    availableStock <= safetyStock || // ต่ำกว่า safety stock
-    daysOfStock <= leadTimeDays; // สต็อกเหลือไม่พอช่วง lead time
+    availableStock <= reorderPoint || // จุดสั่งที่ user กำหนดที่ variant (ถ้ามี)
+    availableStock <= computedReorderPoint; // ✅ จุดสั่งคำนวณ (Min = ยอดขายช่วง lead+buffer) — ตรงกับหน้า Replenishment/Insights
 
   if (!shouldAlert) {
     return null;
   }
 
-  // ✅ คำนวณจำนวนที่แนะนำให้สั่งซื้อ (ใช้ availableStock รวม incoming)
-  const suggestedOrder = Math.max(
-    0,
-    computedReorderQty - availableStock
-  );
+  // ✅ คำนวณจำนวนที่แนะนำให้สั่งซื้อ — Min-Max (order-up-to) ให้ตรงกับหน้า Replenishment/Insights
+  //    computedReorderQty = ยอดขาย 1 คาบ (Min) ; Max = demand × multiplier (default 2)
+  const coverageMultiplier = product.orderCoverageMultiplier ?? 2;
+  const orderUpToLevel = Math.ceil(computedReorderQty * coverageMultiplier);
+  const suggestedOrder = Math.max(0, orderUpToLevel - availableStock);
 
   // กำหนด stock status (ใช้ availableStock)
   let stockStatus = 'low-stock';
@@ -178,6 +177,8 @@ export const checkVariantStockRisk = async (product, variant, avgDailySales = nu
     // ส่งค่าที่คำนวณแนะนำด้วยเพื่อให้ client/notifications แสดงค่าเดียวกับการคำนวณ
     suggestedReorderPoint: Math.ceil(computedReorderPoint),
     leadTimeDays,
+    bufferDays,
+    minOrderQty: product.minOrderQty || 0,
     avgDailySales: finalAvgDailySales,
     daysOfStock,
     safetyStock: Math.ceil(safetyStock),
@@ -303,10 +304,10 @@ export const checkAllStockRisks = async (options = {}) => {
       }
     }
 
-    // Apply MOQ optimization if there are alerts
+    // ✅ LINE alert แสดงยอด order-up-to "ดิบ" ต่อ SKU (ไม่ใส่ MOQ ถัว)
+    //    MOQ เป็นการตัดสินใจตอนวางแผนสั่งซื้อในหน้า Replenishment ไม่ใช่ต่อ SKU ในการแจ้งเตือน
     if (productAlerts.length > 0) {
-      const optimizedAlerts = optimizeOrderWithMOQ(product, productAlerts);
-      alerts.push(...optimizedAlerts);
+      alerts.push(...productAlerts);
     }
   }
 

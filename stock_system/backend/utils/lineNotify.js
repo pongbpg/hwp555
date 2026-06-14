@@ -13,7 +13,7 @@ import https from 'https';
  */
 export const sendLineNotify = async (message, token = null) => {
   const accessToken = token || process.env.LINE_NOTIFY_TOKEN;
-  
+
   if (!accessToken) {
     console.warn('LINE_NOTIFY_TOKEN is not configured');
     return { success: false, error: 'LINE_NOTIFY_TOKEN not configured' };
@@ -87,7 +87,7 @@ export const sendLineMessage = async (userId, message, channelToken = null) => {
   }
 
   // สร้าง message object
-  const messages = typeof message === 'string' 
+  const messages = typeof message === 'string'
     ? [{ type: 'text', text: message }]
     : Array.isArray(message) ? message : [message];
 
@@ -141,7 +141,32 @@ export const sendLineMessage = async (userId, message, channelToken = null) => {
 };
 
 /**
- * ส่ง Flex Message สำหรับแจ้งเตือนสต็อกต่ำ
+ * จัดกลุ่ม alert ตามสินค้า (productId)
+ * @param {Array} alerts
+ * @returns {Array} [{ productName, leadTimeDays, bufferDays, minOrderQty, items: [...] }]
+ */
+const groupAlertsByProduct = (alerts) => {
+  const groups = new Map();
+  for (const a of alerts) {
+    const key = String(a.productId);
+    if (!groups.has(key)) {
+      groups.set(key, {
+        productName: a.productName,
+        leadTimeDays: a.leadTimeDays || 0,
+        bufferDays: a.bufferDays || 0,
+        minOrderQty: a.minOrderQty || 0,
+        items: [],
+      });
+    }
+    groups.get(key).items.push(a);
+  }
+  return Array.from(groups.values());
+};
+
+const fmtNum = (n) => Number(n || 0).toLocaleString('th-TH');
+
+/**
+ * ส่ง Flex Message สำหรับแจ้งเตือนสต็อกต่ำ — 1 การ์ด = 1 กลุ่มสินค้า, list SKU ข้างในเป็นตาราง
  * @param {Array} alerts - รายการแจ้งเตือน
  * @param {string} userId - LINE User ID หรือ Group ID
  * @returns {Promise<object>}
@@ -151,189 +176,98 @@ export const sendStockAlertFlexMessage = async (alerts, userId = null) => {
     return { success: false, error: 'No alerts to send' };
   }
 
-  // สร้าง bubble สำหรับแต่ละรายการ (จำกัด 5 รายการแรก)
-  const bubbles = alerts.slice(0, 5).map((alert) => ({
-    type: 'bubble',
-    size: 'kilo',
-    header: {
+  const groups = groupAlertsByProduct(alerts);
+
+  // 1 bubble ต่อ 1 กลุ่มสินค้า (carousel สูงสุด 12 ใบ)
+  const bubbles = groups.slice(0, 12).map((g) => {
+    const hasOut = g.items.some((i) => i.stockStatus === 'out-of-stock');
+    const headerColor = hasOut ? '#FF4444' : '#FFA500';
+    const headerLabel = hasOut ? '🚨 สินค้าหมด/ใกล้หมด' : '⚠️ สินค้าใกล้หมด';
+    const period = g.leadTimeDays + g.bufferDays;
+    const totalSuggested = g.items.reduce((s, i) => s + (i.suggestedOrder || 0), 0);
+
+    // แถวหัวตาราง
+    const tableHeader = {
       type: 'box',
-      layout: 'vertical',
-      backgroundColor: alert.stockStatus === 'out-of-stock' ? '#FF4444' : '#FFA500',
-      paddingAll: '10px',
+      layout: 'horizontal',
+      margin: 'md',
       contents: [
-        {
-          type: 'text',
-          text: alert.stockStatus === 'out-of-stock' ? '🚨 สินค้าหมด' : '⚠️ สินค้าใกล้หมด',
-          color: '#FFFFFF',
-          weight: 'bold',
-          size: 'sm',
-        },
+        { type: 'text', text: 'SKU', size: 'xs', color: '#999999', flex: 5 },
+        { type: 'text', text: 'เหลือ·พอ', size: 'xs', color: '#999999', flex: 4, align: 'end' },
+        { type: 'text', text: 'แนะนำสั่ง', size: 'xs', color: '#999999', flex: 3, align: 'end' },
       ],
-    },
-    body: {
+    };
+
+    // แถวข้อมูลแต่ละ SKU
+    const rows = g.items.map((i) => ({
       type: 'box',
-      layout: 'vertical',
-      spacing: 'sm',
-      paddingAll: '12px',
+      layout: 'horizontal',
       contents: [
+        { type: 'text', text: i.sku, size: 'xs', color: '#333333', flex: 5, wrap: true },
         {
           type: 'text',
-          text: alert.productName,
-          weight: 'bold',
-          size: 'md',
-          wrap: true,
+          text: `${fmtNum(i.availableStock)}·${i.daysOfStock}ว`,
+          size: 'xs',
+          color: i.stockStatus === 'out-of-stock' ? '#FF0000' : '#FF6600',
+          flex: 4,
+          align: 'end',
         },
-        {
-          type: 'text',
-          text: `SKU: ${alert.sku}`,
-          size: 'sm',
-          color: '#888888',
-        },
-        {
-          type: 'separator',
-          margin: 'md',
-        },
-        {
-          type: 'box',
-          layout: 'horizontal',
-          margin: 'md',
-          contents: [
-            {
-              type: 'text',
-              text: 'คงเหลือ',
-              size: 'sm',
-              color: '#555555',
-              flex: 1,
-            },
-            {
-              type: 'text',
-              text: `${alert.currentStock} ชิ้น`,
-              size: 'sm',
-              weight: 'bold',
-              color: alert.currentStock <= 0 ? '#FF0000' : '#FF6600',
-              align: 'end',
-            },
-          ],
-        },
-        ...(alert.incoming > 0 ? [{
-          type: 'box',
-          layout: 'horizontal',
-          contents: [
-            {
-              type: 'text',
-              text: 'ค้างรับ (PO)',
-              size: 'sm',
-              color: '#555555',
-              flex: 1,
-            },
-            {
-              type: 'text',
-              text: `+${alert.incoming} ชิ้น`,
-              size: 'sm',
-              weight: 'bold',
-              color: '#10B981',
-              align: 'end',
-            },
-          ],
-        }] : []),
-        {
-          type: 'box',
-          layout: 'horizontal',
-          contents: [
-            {
-              type: 'text',
-              text: 'จุดสั่งซื้อ',
-              size: 'sm',
-              color: '#555555',
-              flex: 1,
-            },
-            {
-              type: 'text',
-              text: `${alert.suggestedReorderPoint ?? alert.reorderPoint ?? 0} ชิ้น`,
-              size: 'sm',
-              align: 'end',
-            },
-          ],
-        },
-        {
-          type: 'box',
-          layout: 'horizontal',
-          contents: [
-            {
-              type: 'text',
-              text: 'ขายเฉลี่ย/วัน',
-              size: 'sm',
-              color: '#555555',
-              flex: 1,
-            },
-            {
-              type: 'text',
-              text: `${alert.avgDailySales.toFixed(1)} ชิ้น`,
-              size: 'sm',
-              align: 'end',
-            },
-          ],
-        },
-        {
-          type: 'box',
-          layout: 'horizontal',
-          contents: [
-            {
-              type: 'text',
-              text: 'สต็อกเพียงพอ',
-              size: 'sm',
-              color: '#555555',
-              flex: 1,
-            },
-            {
-              type: 'text',
-              text: `~${alert.daysOfStock} วัน`,
-              size: 'sm',
-              weight: 'bold',
-              color: alert.daysOfStock <= 3 ? '#FF0000' : '#FF6600',
-              align: 'end',
-            },
-          ],
-        },
-        {
-          type: 'box',
-          layout: 'horizontal',
-          contents: [
-            {
-              type: 'text',
-              text: 'แนะนำสั่งซื้อ',
-              size: 'sm',
-              color: '#555555',
-              flex: 1,
-            },
-            {
-              type: 'text',
-              text: `${alert.suggestedOrder} ชิ้น`,
-              size: 'sm',
-              weight: 'bold',
-              color: '#0066CC',
-              align: 'end',
-            },
-          ],
-        },
+        { type: 'text', text: fmtNum(i.suggestedOrder), size: 'xs', weight: 'bold', color: '#0066CC', flex: 3, align: 'end' },
       ],
-    },
-  }));
+    }));
+
+    const summary = [
+      { type: 'separator', margin: 'md' },
+      {
+        type: 'box',
+        layout: 'horizontal',
+        margin: 'sm',
+        contents: [
+          { type: 'text', text: 'รวมแนะนำสั่ง', size: 'sm', color: '#555555', flex: 1 },
+          { type: 'text', text: `${fmtNum(totalSuggested)} ชิ้น`, size: 'sm', weight: 'bold', color: '#0066CC', align: 'end' },
+        ],
+      },
+    ];
+    if (g.minOrderQty > 0) {
+      summary.push({ type: 'text', text: `📦 MOQ ขั้นต่ำ ${fmtNum(g.minOrderQty)} ชิ้น`, size: 'xs', color: '#999999', margin: 'sm' });
+    }
+
+    return {
+      type: 'bubble',
+      size: 'mega',
+      header: {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: headerColor,
+        paddingAll: '10px',
+        spacing: 'xs',
+        contents: [
+          { type: 'text', text: headerLabel, color: '#FFFFFF', weight: 'bold', size: 'xs' },
+          { type: 'text', text: `${g.productName} · ${g.items.length} SKU`, color: '#FFFFFF', weight: 'bold', size: 'md', wrap: true },
+          { type: 'text', text: `Lead+Buffer: ${g.leadTimeDays}+${g.bufferDays} = ${period} วัน`, color: '#FFFFFF', size: 'xs' },
+        ],
+      },
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'sm',
+        paddingAll: '12px',
+        contents: [tableHeader, { type: 'separator', margin: 'sm' }, ...rows, ...summary],
+      },
+    };
+  });
 
   const flexMessage = {
     type: 'flex',
-    altText: `🔔 แจ้งเตือนสินค้าใกล้หมด ${alerts.length} รายการ`,
-    contents: bubbles.length === 1 ? bubbles[0] : {
-      type: 'carousel',
-      contents: bubbles,
-    },
+    altText: `🔔 แจ้งเตือนสินค้าใกล้หมด ${groups.length} กลุ่ม (${alerts.length} SKU)`,
+    contents: bubbles.length === 1 ? bubbles[0] : { type: 'carousel', contents: bubbles },
   };
 
   return sendLineMessage(userId, [flexMessage]);
 };
 
 /**
- * ส่งข้อความแจ้งเตือนสต็อกต่ำแบบ Text
+ * ส่งข้อความแจ้งเตือนสต็อกต่ำแบบ Text (fallback) — group ตามสินค้าเช่นกัน
  * @param {Array} alerts - รายการแจ้งเตือน
  * @param {string} userId - LINE User ID หรือ Group ID
  * @returns {Promise<object>}
@@ -344,25 +278,30 @@ export const sendStockAlertText = async (alerts, userId = null) => {
   }
 
   const now = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
+  const groups = groupAlertsByProduct(alerts);
+
   let message = `🔔 แจ้งเตือนสินค้าใกล้หมด\n📅 ${now}\n`;
   message += '━━━━━━━━━━━━━━━━\n';
 
-  for (const alert of alerts.slice(0, 10)) {
-    const icon = alert.stockStatus === 'out-of-stock' ? '🚨' : '⚠️';
-    message += `\n${icon} ${alert.productName}\n`;
-    message += `   SKU: ${alert.sku}\n`;
-    message += `   คงเหลือ: ${alert.currentStock} ชิ้น\n`;
-    if (alert.incoming > 0) {
-      message += `   ค้างรับ (PO): +${alert.incoming} ชิ้น\n`;
+  for (const g of groups.slice(0, 15)) {
+    const hasOut = g.items.some((i) => i.stockStatus === 'out-of-stock');
+    const period = g.leadTimeDays + g.bufferDays;
+    const totalSuggested = g.items.reduce((s, i) => s + (i.suggestedOrder || 0), 0);
+
+    message += `\n${hasOut ? '🚨' : '⚠️'} ${g.productName} · ${g.items.length} SKU\n`;
+    message += `Lead+Buffer: ${g.leadTimeDays}+${g.bufferDays} = ${period} วัน\n`;
+    for (const i of g.items) {
+      const dot = i.stockStatus === 'out-of-stock' ? '🔴' : '🟠';
+      message += `  ${dot} ${i.sku}\n`;
+      message += `     เหลือ ${fmtNum(i.availableStock)} · พอ ~${i.daysOfStock}ว · แนะนำสั่ง ${fmtNum(i.suggestedOrder)}\n`;
     }
-    message += `   ขายเฉลี่ย/วัน: ${alert.avgDailySales.toFixed(1)}\n`;
-    message += `   สต็อกเพียงพอ: ~${alert.daysOfStock} วัน\n`;
-    message += `   จุดสั่งซื้อ: ${alert.suggestedReorderPoint ?? alert.reorderPoint ?? 0} ชิ้น\n`;
-    message += `   แนะนำสั่งซื้อ: ${alert.suggestedOrder} ชิ้น\n`;
+    message += `  รวมแนะนำสั่ง ${fmtNum(totalSuggested)} ชิ้น`;
+    if (g.minOrderQty > 0) message += ` (MOQ ${fmtNum(g.minOrderQty)})`;
+    message += '\n';
   }
 
-  if (alerts.length > 10) {
-    message += `\n... และอีก ${alerts.length - 10} รายการ`;
+  if (groups.length > 15) {
+    message += `\n... และอีก ${groups.length - 15} กลุ่ม`;
   }
 
   // ลองใช้ LINE Messaging API ก่อน ถ้าไม่ได้ ใช้ LINE Notify
