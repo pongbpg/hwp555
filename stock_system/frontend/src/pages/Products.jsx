@@ -10,6 +10,7 @@ const emptyProduct = {
   leadTimeDays: 7,
   reorderBufferDays: 7,
   minOrderQty: 0,
+  orderCoverageMultiplier: 2,
   status: 'active',
   enableStockAlerts: true,
   skuProduct: '',
@@ -281,6 +282,7 @@ export default function Products() {
       leadTimeDays: product.leadTimeDays ?? 7,
       reorderBufferDays: product.reorderBufferDays ?? 7,
       minOrderQty: product.minOrderQty ?? 0,
+      orderCoverageMultiplier: product.orderCoverageMultiplier ?? 2,
       status: product.status || 'active',
       enableStockAlerts: product.enableStockAlerts ?? true,
       skuProduct: product.skuProduct || '',
@@ -395,6 +397,7 @@ export default function Products() {
         leadTimeDays: Number(newProduct.leadTimeDays) || 7,
         reorderBufferDays: Number(newProduct.reorderBufferDays) || 7,
         minOrderQty: Number(newProduct.minOrderQty) || 0,
+        orderCoverageMultiplier: Number(newProduct.orderCoverageMultiplier) || 2,
         status: newProduct.status || 'active',
         enableStockAlerts: newProduct.enableStockAlerts ?? true,
       };
@@ -454,6 +457,7 @@ export default function Products() {
         leadTimeDays: Number(newProduct.leadTimeDays) || 7,
         reorderBufferDays: Number(newProduct.reorderBufferDays) || 7,
         minOrderQty: Number(newProduct.minOrderQty) || 0,
+        orderCoverageMultiplier: Number(newProduct.orderCoverageMultiplier) || 2,
         status: newProduct.status || 'active',
         enableStockAlerts: newProduct.enableStockAlerts ?? true,
       };
@@ -1250,6 +1254,23 @@ export default function Products() {
                   min="0"
                 />
                 <p className="text-xs text-gray-500 mt-1">วันที่คัดแยกเพื่อความปลอดภัยในการสั่งซื้อ</p>
+              </div>
+            </div>
+
+            {/* Row 4: Order Coverage Multiplier (เพดานเติม Min-Max) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">ตัวคูณเพดานเติม (Order-up-to)</label>
+                <input
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                  type="number"
+                  step="0.5"
+                  placeholder="เท่าของ demand (default: 2)"
+                  value={newProduct.orderCoverageMultiplier ?? 2}
+                  onChange={(e) => setNewProduct({ ...newProduct, orderCoverageMultiplier: parseFloat(e.target.value) || 1 })}
+                  min="1"
+                />
+                <p className="text-xs text-gray-500 mt-1">เติมสต็อกให้ถึง = ยอดขาย 1 คาบ × ตัวคูณนี้ (2 = เผื่อขายต่ออีก 1 คาบ)</p>
               </div>
             </div>
           </div>

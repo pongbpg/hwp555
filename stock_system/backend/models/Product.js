@@ -112,6 +112,7 @@ const productSchema = new Schema(
     leadTimeDays: { type: Number, default: 7 },
     reorderBufferDays: { type: Number, default: 7 },
     minOrderQty: { type: Number, default: 0 },
+    orderCoverageMultiplier: { type: Number, default: 2, min: 1, description: 'เพดานเติม (Max) = demand × ตัวคูณนี้ (order-up-to). 2 = เติมเผื่อ 2 คาบ' },
     enableStockAlerts: { type: Boolean, default: true, description: 'เปิดปิดการแจ้งเตือนสต็อกต่ำ' },
     createdBy: { type: Schema.Types.ObjectId, ref: 'Employee' },
     updatedBy: { type: Schema.Types.ObjectId, ref: 'Employee' },

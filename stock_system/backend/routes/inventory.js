@@ -1695,6 +1695,14 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
             sku: variant.sku,
             quantitySold,
             dailySalesRate: Math.round(dailySalesRate * 100) / 100,
+            // ✅ ข้อมูลช่วง (lead+buffer) + order-up-to เพื่อให้ frontend ดึง fast mover มาเติมด้วยฐานเดียวกัน
+            reorderDailySalesRate: Math.round(reorderDailySalesRate * 100) / 100,
+            demandForecast: Math.ceil(reorderDailySalesRate * (leadTimeDays + bufferDays)),
+            orderUpToLevel: Math.ceil(reorderDailySalesRate * (leadTimeDays + bufferDays) * (product.orderCoverageMultiplier ?? 2)),
+            coverageMultiplier: product.orderCoverageMultiplier ?? 2,
+            leadTimeDays,
+            bufferDays,
+            minOrderQty: product.minOrderQty || 0,
             currentStock: availableStock,
             purchaseRemaining,
             daysRemaining: Math.round(daysUntilStockOut * 10) / 10,
@@ -1734,10 +1742,14 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
         const isLowStock = availableStock <= suggestedReorderPoint;
         
         if (isOutOfStock || isLowStock) {
-          const recommendedOrderQty = Math.max(
-            suggestedOrderQty,  // ✅ ถ้า out-of-stock ไม่มีการขาย ให้ใช้ suggestedOrderQty (minOrderQty หรือ lead time * buffer)
-            Math.max(0, suggestedOrderQty - availableStock)
-          );
+          // Min-Max (order-up-to) policy
+          // demandForecast = ยอดขาย 1 คาบ (lead+buffer) = Min/ROP จุดเตือน
+          const demandForecast = suggestedOrderQty;
+          // M = เพดานเติม (default 2) → Max = demand × M
+          const coverageMultiplier = product.orderCoverageMultiplier ?? 2;
+          const orderUpToLevel = Math.ceil(demandForecast * coverageMultiplier);
+          // ✅ "แนะนำสั่ง" = เติมให้ถึง Max − ของที่มี/กำลังเข้า
+          const recommendedOrderQty = Math.max(0, orderUpToLevel - availableStock);
 
           // ✅ สั่งซื้อแม้ recommendedOrderQty = 0 ถ้าเป็น out-of-stock
           if (recommendedOrderQty > 0 || isOutOfStock) {
@@ -1776,7 +1788,10 @@ router.get('/insights', authenticateToken, authorizeRoles('owner', 'stock'), asy
               daysUntilStockOut: isOutOfStock ? 0 : Math.round(reorderDaysUntilStockOut * 10) / 10,
               suggestedReorderPoint: Math.ceil(suggestedReorderPoint),
               suggestedOrderQty: Math.ceil(suggestedOrderQty),
-              recommendedOrderQty: Math.ceil(recommendedOrderQty),
+              demandForecast: Math.ceil(demandForecast), // Min/ROP = ยอดขาย 1 คาบ
+              orderUpToLevel, // Max = demand × multiplier
+              coverageMultiplier, // M
+              recommendedOrderQty: Math.ceil(recommendedOrderQty), // ✅ order-up-to = max(0, Max − availableStock)
               leadTimeDays,
               bufferDays,
               minOrderQty: product.minOrderQty || 0,
@@ -2457,7 +2472,10 @@ router.get('/alerts', authenticateToken, authorizeRoles('owner', 'stock'), async
         const reorderMetrics = calculateReorderMetrics(dailySalesRate, leadTimeDays, bufferDays);
         const computedReorderPoint = Math.ceil(reorderMetrics.suggestedReorderPoint);
         const suggestedOrderQty = Math.ceil(reorderMetrics.suggestedReorderQty);
-        const suggestedOrder = Math.max(0, suggestedOrderQty - availableStock);
+        // Min-Max (order-up-to) ให้ตรงกับ Replenishment/Insights/LINE
+        const coverageMultiplier = product.orderCoverageMultiplier ?? 2;
+        const orderUpToLevel = Math.ceil(suggestedOrderQty * coverageMultiplier);
+        const suggestedOrder = Math.max(0, orderUpToLevel - availableStock);
         
         // ใช้ค่าที่ user กำหนด หากไม่มี ให้ใช้ค่าที่คำนวณ
         const reorderPoint = rawReorderPoint || computedReorderPoint;

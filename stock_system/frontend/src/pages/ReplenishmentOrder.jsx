@@ -80,6 +80,7 @@ export default function ReplenishmentOrder() {
       setProductVariantsMap(variantsMap);
       
       // Group reorder suggestions by product
+      // ✅ recommendedOrderQty จาก backend = net แล้ว (= max(0, demand − availableStock)) ไม่ต้องหักสต็อกซ้ำ
       const productMap = new Map();
       (res.data.reorderSuggestions || []).forEach((item) => {
         const key = String(item.productId);
@@ -91,17 +92,13 @@ export default function ReplenishmentOrder() {
             variants: [],
             totalRecommended: 0,
             totalCurrentStock: 0,
-            totalNetOrder: 0,
             totalOrder: 0,
           });
         }
         const product = productMap.get(key);
         product.variants.push(item);
-        product.totalRecommended += item.recommendedOrderQty || 0;
+        product.totalRecommended += item.recommendedOrderQty || 0; // = net
         product.totalCurrentStock += item.currentStock || 0;
-        // คำนวณจำนวนที่ต้องสั่งจริง (แนะนำ - คงเหลือ)
-        const netOrder = Math.max(0, (item.recommendedOrderQty || 0) - (item.currentStock || 0));
-        product.totalNetOrder += netOrder;
       });
 
       // ✅ BUILD FAST MOVERS MAP
@@ -114,104 +111,74 @@ export default function ReplenishmentOrder() {
         fastMoversByProduct.get(key).push(item);
       });
 
-      // ✅ FOR PRODUCTS WITH MOQ DEFICIT: ADD FAST MOVERS TO FILL GAP
+      // ✅ ดึง fast mover ที่ยังไม่อยู่ในลิสต์ แต่ availableStock < demand เข้ามาเป็น net reorder
+      //    (เติมล่วงหน้าได้เฉพาะตัวที่สต็อกต่ำกว่า demand ของมันเอง — ห้ามดึงตัวที่ของพอ/ล้น)
       for (const [productId, product] of productMap) {
-        const minOrderQty = product.minOrderQty || 0;
-        if (minOrderQty === 0) continue; // No MOQ constraint
-
-        if (product.totalNetOrder >= minOrderQty) continue; // Already meets MOQ
-
-        const deficit = minOrderQty - product.totalNetOrder;
-        const productFastMovers = fastMoversByProduct.get(productId) || [];
-        
-        // Find fast movers not already in reorder list
+        if ((product.minOrderQty || 0) === 0) continue; // ไม่มี MOQ ไม่ต้องดึงเติม
         const existingSkus = new Set(product.variants.map(v => v.sku));
-        const availableFastMovers = productFastMovers
+        const candidates = (fastMoversByProduct.get(productId) || [])
           .filter(fm => !existingSkus.has(fm.sku))
-          .sort((a, b) => b.quantitySold - a.quantitySold); // Sort by sales (highest first)
+          .filter(fm => (fm.currentStock || 0) < (fm.demandForecast || 0));
 
-        console.log(`🔍 Adding Fast Movers for ${product.productName}:`, {
-          minOrderQty,
-          currentTotal: product.totalNetOrder,
-          deficit,
-          availableFastMovers: availableFastMovers.length,
-          skus: availableFastMovers.slice(0, 5).map(fm => fm.sku)
-        });
-
-        // Add fast movers to fill deficit (proportional by sales rate)
-        let remainingDeficit = deficit;
-        const totalSalesRate = productFastMovers.reduce((sum, fm) => sum + (fm.dailySalesRate || 0), 0) || 1;
-
-        for (const fastMover of availableFastMovers) {
-          if (remainingDeficit <= 0) break;
-
-          // Allocate proportional to daily sales rate
-          const salesProportion = (fastMover.dailySalesRate || 0) / totalSalesRate;
-          const allocation = Math.ceil(remainingDeficit * salesProportion);
-          const finalAllocation = Math.min(allocation, remainingDeficit);
-
+        for (const fm of candidates) {
+          // เติมให้ถึง order-up-to (Max) ด้วยฐานเดียวกับ SKU ปกติ
+          const net = Math.max(0, (fm.orderUpToLevel || 0) - (fm.currentStock || 0));
+          if (net <= 0) continue;
           product.variants.push({
-            ...fastMover,
-            recommendedOrderQty: finalAllocation,
-            currentStock: fastMover.currentStock || 0,
-            dailySalesRate: fastMover.dailySalesRate || 0,
-            _isFastMoverAddedForMOQ: true, // Flag ให้ UI ระบุว่านี่ถูก add เพื่อครบ MOQ
+            ...fm,
+            recommendedOrderQty: net,
+            currentStock: fm.currentStock || 0,
+            dailySalesRate: fm.reorderDailySalesRate ?? fm.dailySalesRate ?? 0,
+            _isFastMoverAddedForMOQ: true,
           });
-
-          product.totalRecommended += finalAllocation;
-          product.totalNetOrder += finalAllocation;
-          product.totalCurrentStock += fastMover.currentStock || 0;
-          remainingDeficit -= finalAllocation;
-
-          console.log(`  ✅ Added ${fastMover.sku}: ${finalAllocation} units to meet MOQ`);
+          product.totalRecommended += net;
+          product.totalCurrentStock += fm.currentStock || 0;
         }
       }
 
-      // Allocate MOQ using Largest Remainder Method for accuracy
+      // ✅ คำนวณ allocation: net + เติม MOQ (ชั้นเดียว, กระจายตามสัดส่วนยอดขายด้วย Largest Remainder)
       const groupedOrders = Array.from(productMap.values()).map((product) => {
-        // ใช้ totalNetOrder (จำนวนที่ต้องสั่งเพิ่ม) เป็นพื้นฐาน
-        const baseOrderQty = Math.max(product.totalNetOrder, product.minOrderQty > 0 ? product.minOrderQty : 0);
-        
-        if (product.minOrderQty > 0 && product.minOrderQty > product.totalNetOrder) {
-          // ต้องเพิ่มเพื่อให้ครบ MOQ
-          const allocations = product.variants.map((v) => {
-            // ใช้ recommendedOrderQty แต่คำนวณสัดส่วนเทียบกับยอดขาย ไม่ใช่สต็อก
-            const netOrder = Math.max(0, (v.recommendedOrderQty || 0) - (v.currentStock || 0));
-            const percentage = product.totalRecommended > 0
-              ? (v.recommendedOrderQty || 0) / product.totalRecommended
-              : 0;
-            const baseAllocation = Math.floor(product.minOrderQty * percentage);
-            const remainder = product.minOrderQty * percentage - baseAllocation;
-            return { variant: v, netOrder, baseAllocation, remainder };
-          });
+        const minOrderQty = product.minOrderQty || 0;
+        const totalNet = product.variants.reduce((s, v) => s + (v.recommendedOrderQty || 0), 0);
+        // eligible = SKU ที่ availableStock < demand (net > 0)
+        const eligible = product.variants.filter(v => (v.recommendedOrderQty || 0) > 0);
 
-          const sorted = allocations.sort((a, b) => b.remainder - a.remainder);
-          const remainderUnits = product.minOrderQty - allocations.reduce((sum, a) => sum + a.baseAllocation, 0);
-          
-          // ✅ แก้ไข: distribute remainder units แม้ว่ามี variants ไม่กี่ตัว
-          for (let i = 0; i < remainderUnits; i++) {
-            sorted[i % sorted.length].baseAllocation += 1;
+        if (minOrderQty > 0 && totalNet > 0 && totalNet < minOrderQty && eligible.length > 0) {
+          // ต้อง "ถัว" ส่วนที่ขาดให้ครบ MOQ
+          const deficit = minOrderQty - totalNet;
+          const totalWeight = eligible.reduce((s, v) => s + (v.dailySalesRate || 0), 0);
+
+          const allocs = eligible.map((v) => {
+            const weight = totalWeight > 0
+              ? (v.dailySalesRate || 0) / totalWeight
+              : 1 / eligible.length;
+            const base = Math.floor(deficit * weight);
+            return { sku: v.sku, base, remainder: deficit * weight - base };
+          });
+          let distributed = allocs.reduce((s, a) => s + a.base, 0);
+          allocs.sort((a, b) => b.remainder - a.remainder);
+          for (let i = 0; distributed < deficit; i++, distributed++) {
+            allocs[i % allocs.length].base += 1;
           }
+          const extraBySku = new Map(allocs.map(a => [a.sku, a.base]));
 
-          product.variants = sorted.map(a => ({
-            ...a.variant,
-            _allocatedQty: a.baseAllocation,
-            _netOrder: a.netOrder
-          }));
-          product.totalOrder = product.minOrderQty;
-        } else {
-          // ไม่ต้องเพิ่มเพื่อ MOQ ใช้ totalNetOrder เลย
           product.variants = product.variants.map(v => {
-            const netOrder = Math.max(0, (v.recommendedOrderQty || 0) - (v.currentStock || 0));
-            return {
-              ...v,
-              _allocatedQty: Math.max(0, (v.recommendedOrderQty || 0) - (v.currentStock || 0)),
-              _netOrder: netOrder
-            };
+            const net = v.recommendedOrderQty || 0;
+            const extra = extraBySku.get(v.sku) || 0;
+            return { ...v, _netOrder: net, _allocatedQty: net + extra };
           });
-          product.totalOrder = product.totalNetOrder;
+          product.totalRecommended = totalNet;
+          product.totalOrder = minOrderQty;
+        } else {
+          // ไม่ต้องเติม MOQ — สั่งตาม net จริง
+          product.variants = product.variants.map(v => {
+            const net = v.recommendedOrderQty || 0;
+            return { ...v, _netOrder: net, _allocatedQty: net };
+          });
+          product.totalRecommended = totalNet;
+          product.totalOrder = totalNet;
         }
-        
+
         return product;
       });
 
@@ -357,7 +324,7 @@ export default function ReplenishmentOrder() {
                     <div className="text-right min-w-[220px]">
                       <div className="flex items-center gap-2 justify-end mb-1">
                         <p className="text-xs text-gray-500">ต้องสั่งเพิ่ม</p>
-                        {product.minOrderQty > 0 && product.minOrderQty > product.totalNetOrder && (
+                        {product.minOrderQty > 0 && product.minOrderQty > product.totalRecommended && (
                           <span className="px-2 py-0.5 bg-amber-100 text-amber-700 text-xs rounded font-medium">
                             📦 MOQ {fmtNumber.format(product.minOrderQty)}
                           </span>
@@ -386,11 +353,11 @@ export default function ReplenishmentOrder() {
                       </p>
                       <div className="space-y-2">
                         {product.variants.map((variant, idx) => {
+                          const allocatedQty = variant._allocatedQty ?? (variant.recommendedOrderQty || 0);
                           const percentageOfTotal = product.totalOrder > 0
-                            ? ((variant.recommendedOrderQty || 0) / product.totalRecommended) * 100
+                            ? (allocatedQty / product.totalOrder) * 100
                             : 0;
-                          const allocatedQty = variant._allocatedQty || (variant.recommendedOrderQty || 0);
-                          const moqAdjustment = allocatedQty - (variant._netOrder || 0);
+                          const moqAdjustment = allocatedQty - (variant._netOrder ?? 0);
                           const currentStock = variant.currentStock || 0;
                           const isFastMoverForMOQ = variant._isFastMoverAddedForMOQ;
 
@@ -452,11 +419,11 @@ export default function ReplenishmentOrder() {
                         </div>
                       )}
 
-                      {product.minOrderQty > 0 && !product.variants.some(v => v._isFastMoverAddedForMOQ) && product.minOrderQty > product.totalNetOrder && (
+                      {product.minOrderQty > 0 && !product.variants.some(v => v._isFastMoverAddedForMOQ) && product.minOrderQty > product.totalRecommended && (
                         <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded">
                           <p className="text-xs text-amber-700">
                             <strong>💡 MOQ Adjustment:</strong> เพิ่ม{' '}
-                            <strong>{fmtNumber.format(product.minOrderQty - product.totalNetOrder)}</strong> ชิ้นเพื่อให้ครบขั้นต่ำการสั่ง ({fmtNumber.format(product.minOrderQty)} ชิ้น)
+                            <strong>{fmtNumber.format(product.minOrderQty - product.totalRecommended)}</strong> ชิ้นเพื่อให้ครบขั้นต่ำการสั่ง ({fmtNumber.format(product.minOrderQty)} ชิ้น)
                             โดยแบ่งตามสัดส่วนยอดขายของแต่ละ Variant
                           </p>
                         </div>

@@ -171,6 +171,7 @@ router.put('/:id', authenticateToken, authorizeRoles('owner', 'admin', 'hr'), as
       'leadTimeDays',
       'reorderBufferDays',
       'minOrderQty',
+      'orderCoverageMultiplier',
     ];
 
     updatableFields.forEach((field) => {
