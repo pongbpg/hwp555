@@ -165,6 +165,13 @@ const groupAlertsByProduct = (alerts) => {
 
 const fmtNum = (n) => Number(n || 0).toLocaleString('th-TH');
 
+// แสดงเฉพาะ 2 ส่วนท้ายของ SKU (Color-Size) — ตัด prefix สินค้าที่ซ้ำกันออก
+// เช่น XSR-MOM-PG-N-2XL → N-2XL
+const shortSku = (sku) => {
+  const parts = String(sku || '').split('-');
+  return parts.length > 2 ? parts.slice(-2).join('-') : String(sku || '');
+};
+
 /**
  * ส่ง Flex Message สำหรับแจ้งเตือนสต็อกต่ำ — 1 การ์ด = 1 กลุ่มสินค้า, list SKU ข้างในเป็นตาราง
  * @param {Array} alerts - รายการแจ้งเตือน
@@ -192,9 +199,10 @@ export const sendStockAlertFlexMessage = async (alerts, userId = null) => {
       layout: 'horizontal',
       margin: 'md',
       contents: [
-        { type: 'text', text: 'SKU', size: 'xs', color: '#999999', flex: 5 },
-        { type: 'text', text: 'เหลือ·พอ', size: 'xs', color: '#999999', flex: 4, align: 'end' },
-        { type: 'text', text: 'แนะนำสั่ง', size: 'xs', color: '#999999', flex: 3, align: 'end' },
+        { type: 'text', text: 'SKU', size: 'xs', color: '#999999', flex: 4 },
+        { type: 'text', text: 'เหลือ', size: 'xs', color: '#999999', flex: 3, align: 'end' },
+        { type: 'text', text: 'พอ', size: 'xs', color: '#999999', flex: 4, align: 'end' },
+        { type: 'text', text: 'แนะนำสั่ง', size: 'xs', color: '#999999', flex: 4, align: 'end' },
       ],
     };
 
@@ -203,16 +211,17 @@ export const sendStockAlertFlexMessage = async (alerts, userId = null) => {
       type: 'box',
       layout: 'horizontal',
       contents: [
-        { type: 'text', text: i.sku, size: 'xs', color: '#333333', flex: 5, wrap: true },
+        { type: 'text', text: shortSku(i.sku), size: 'xs', color: '#333333', flex: 4, wrap: true },
         {
           type: 'text',
-          text: `${fmtNum(i.availableStock)}·${i.daysOfStock}ว`,
+          text: fmtNum(i.availableStock),
           size: 'xs',
           color: i.stockStatus === 'out-of-stock' ? '#FF0000' : '#FF6600',
-          flex: 4,
+          flex: 3,
           align: 'end',
         },
-        { type: 'text', text: fmtNum(i.suggestedOrder), size: 'xs', weight: 'bold', color: '#0066CC', flex: 3, align: 'end' },
+        { type: 'text', text: `${i.daysOfStock} วัน`, size: 'xs', color: '#555555', flex: 4, align: 'end' },
+        { type: 'text', text: fmtNum(i.suggestedOrder), size: 'xs', weight: 'bold', color: '#0066CC', flex: 4, align: 'end' },
       ],
     }));
 
@@ -292,8 +301,8 @@ export const sendStockAlertText = async (alerts, userId = null) => {
     message += `Lead+Buffer: ${g.leadTimeDays}+${g.bufferDays} = ${period} วัน\n`;
     for (const i of g.items) {
       const dot = i.stockStatus === 'out-of-stock' ? '🔴' : '🟠';
-      message += `  ${dot} ${i.sku}\n`;
-      message += `     เหลือ ${fmtNum(i.availableStock)} · พอ ~${i.daysOfStock}ว · แนะนำสั่ง ${fmtNum(i.suggestedOrder)}\n`;
+      message += `  ${dot} ${shortSku(i.sku)}\n`;
+      message += `     เหลือ ${fmtNum(i.availableStock)}   ·   พอ ${i.daysOfStock} วัน   ·   แนะนำสั่ง ${fmtNum(i.suggestedOrder)}\n`;
     }
     message += `  รวมแนะนำสั่ง ${fmtNum(totalSuggested)} ชิ้น`;
     if (g.minOrderQty > 0) message += ` (MOQ ${fmtNum(g.minOrderQty)})`;
