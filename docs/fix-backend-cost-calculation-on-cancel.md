@@ -38,43 +38,61 @@ Frontend                    Backend                        Database
 
 ## Changes Made
 
-### 1. Backend: inventory.js (Lines 248-290)
+### 1. Backend: inventory.js (ราว ๆ Lines 425-470)
 
 **What:** Calculate `unitCost` from batch when creating sale orders
 
 **How:** 
 - Get product's `costingMethod` (FIFO or LIFO)
-- Find the batch that will be consumed
-- Extract batch.cost and use as unitCost
+- กรอง BACKORDER batches และ batch ที่ `quantity <= 0` ออกก่อน
+- Find the batch that will be consumed (จาก validBatches)
+- Extract batch.cost และใช้เป็น unitCost พร้อม fallback chain → `variant.cost` → unitCost ของ purchase order ล่าสุด
 
 ```javascript
 // ✅ Sale order: ดึงต้นทุนจาก batch ตาม costingMethod
 if (type === 'sale') {
   itemData.unitPrice = rawItem.unitPrice ?? variant.price ?? 0;
-  
+
   // 🔹 คิดต้นทุนจาก batch ที่จะ consume
   let unitCostFromBatch = 0;
   if (variant.batches && variant.batches.length > 0) {
     const costingMethod = product.costingMethod || 'FIFO';
-    
-    // หา batch ที่จะ consume ตาม costingMethod
-    let batchToConsume;
-    if (costingMethod === 'LIFO') {
-      // LIFO: ใหม่สุด (descending receivedAt)
-      batchToConsume = variant.batches.reduce((latest, b) => 
-        (new Date(b.receivedAt || 0) > new Date(latest.receivedAt || 0)) ? b : latest
-      );
-    } else {
-      // FIFO (default): เก่าสุด (ascending receivedAt)
-      batchToConsume = variant.batches.reduce((oldest, b) => 
-        (new Date(b.receivedAt || 0) < new Date(oldest.receivedAt || 0)) ? b : oldest
-      );
+
+    // ✅ FIX: กรอง BACKORDER batches และ batch ที่ quantity <= 0 ออก
+    const validBatches = variant.batches.filter(b =>
+      (b.quantity || 0) > 0 && !b.batchRef?.startsWith('BACKORDER-')
+    );
+
+    if (validBatches.length > 0) {
+      let batchToConsume;
+      if (costingMethod === 'LIFO') {
+        // LIFO: ใหม่สุด (descending receivedAt)
+        batchToConsume = validBatches.reduce((latest, b) =>
+          (new Date(b.receivedAt || 0) > new Date(latest.receivedAt || 0)) ? b : latest
+        );
+      } else {
+        // FIFO (default): เก่าสุด (ascending receivedAt)
+        batchToConsume = validBatches.reduce((oldest, b) =>
+          (new Date(b.receivedAt || 0) < new Date(oldest.receivedAt || 0)) ? b : oldest
+        );
+      }
+      unitCostFromBatch = batchToConsume?.cost || 0;
     }
-    
-    unitCostFromBatch = batchToConsume?.cost || 0;
   }
-  
-  itemData.unitCost = unitCostFromBatch || variant.cost || 0;
+
+  // ✅ Fallback chain: batch cost → variant.cost → unitCost ของ purchase order ล่าสุด
+  let finalUnitCost = unitCostFromBatch || variant.cost || 0;
+  if (!finalUnitCost) {
+    const lastPO = await InventoryOrder.findOne({
+      type: 'purchase',
+      'items.variantId': variant._id,
+    }).sort({ _id: -1 });
+    if (lastPO) {
+      const poItem = lastPO.items.find(it => String(it.variantId) === String(variant._id));
+      finalUnitCost = poItem?.unitCost || poItem?.unitPrice || 0;
+    }
+  }
+  itemData.unitCost = finalUnitCost;
 }
 ```
 
@@ -86,27 +104,17 @@ if (type === 'sale') {
 
 ---
 
-### 2. Frontend: Orders.jsx (Lines 360-370)
+### 2. Frontend: Orders.jsx
 
-**What:** Remove unitCost from frontend, send only unitPrice
+> 🔄 **อัปเดตให้ตรงโค้ดปัจจุบัน (2026-06-08):** ปัจจุบัน frontend **ยังคงส่ง `unitCost`** มาด้วย
+> (`stock_system/frontend/src/pages/Orders.jsx` ~บรรทัด 324: `unitCost: it.unitCost || it.unitPrice || 0`)
+> เพื่อให้ order ประเภท purchase/return ได้ cost ลง batch ถูกต้อง
+>
+> สำหรับ **sale order ค่าที่ frontend ส่งมาไม่มีผล** เพราะ backend คำนวณ `itemData.unitCost`
+> ทับใหม่จาก batch ตาม costingMethod เสมอ (ดูข้อ 1) — แนวคิด "batch เป็น source of truth"
+> ยังคงถูกต้อง เพียงแต่ backend เป็นฝ่าย override ไม่ใช่ frontend เป็นฝ่ายงดส่ง
 
-**Before:**
-```javascript
-if (type === 'sale') {
-  item.unitPrice = Number(it.unitPrice) || 0;
-  item.unitCost = Number(it.cost) || Number(variant?.cost) || 0;  // ❌ Send cost
-}
-```
-
-**After:**
-```javascript
-if (type === 'sale') {
-  item.unitPrice = Number(it.unitPrice) || 0;
-  // ✅ Don't send unitCost - backend will calculate it!
-}
-```
-
-**Why:** Backend has all the info it needs (costingMethod, batches). Frontend shouldn't send cost.
+**Why:** Backend มีข้อมูลครบ (costingMethod, batches) จึงคำนวณ cost ของ sale เองและไม่เชื่อค่าที่ frontend ส่งมา
 
 ---
 
@@ -333,8 +341,8 @@ variant.batches.push({
 
 | File | Changes | Status |
 |------|---------|--------|
-| [stock_system/backend/routes/inventory.js](../stock_system/backend/routes/inventory.js#L248) | Added batch-based cost calculation (lines 248-290) | ✅ |
-| [stock_system/frontend/src/pages/Orders.jsx](../stock_system/frontend/src/pages/Orders.jsx#L360) | Removed unitCost from frontend (lines 360-370) | ✅ |
+| [stock_system/backend/routes/inventory.js](../stock_system/backend/routes/inventory.js#L425) | Added batch-based cost calculation (ราว ๆ lines 425-470) | ✅ |
+| [stock_system/frontend/src/pages/Orders.jsx](../stock_system/frontend/src/pages/Orders.jsx#L324) | ปัจจุบันยังส่ง unitCost (backend override สำหรับ sale) | 🔄 |
 | [stock_system/backend/models/Product.js](../stock_system/backend/models/Product.js) | Added cost field to variantSchema (fallback) | ✅ |
 
 ---

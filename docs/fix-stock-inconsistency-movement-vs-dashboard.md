@@ -37,60 +37,50 @@ await product.save(); // save แต่ไม่ได้แก้ batches
 
 ## ✅ วิธีแก้ไข
 
-### เปลี่ยนใน `movements.js` ให้จัดการ batches อย่างถูกต้อง:
+> 🔄 **อัปเดตให้ตรงโค้ดปัจจุบัน (2026-06-08):** การปรับสต็อกผ่านหน้า Movements **ไม่ได้ทำใน `movements.js` แล้ว**
+> ปัจจุบัน `routes/movements.js` เหลือเฉพาะ endpoint แบบ **GET** (อ่านอย่างเดียว: `/`, `/product/:id`, `/summary`)
+> ส่วน "+ ปรับปรุงสต็อก" บนหน้าจอจะยิงไปสร้าง **InventoryOrder ชนิด `adjustment`** แล้วเข้าสู่ฟังก์ชัน
+> `applyStockChange()` ใน `routes/inventory.js` (ราว ๆ บรรทัด 299-327) ซึ่งจัดการ batch ให้อยู่แล้ว
+> โค้ดด้านล่างคือ logic ที่ใช้จริงในปัจจุบัน
+
+### `inventory.js` → `applyStockChange()` จัดการ batches สำหรับ adjustment:
 
 ```javascript
-// ✅ โค้ดใหม่ - ถูกต้อง
-if (adjustQty > 0) {
-  // เพิ่มสต็อก - สร้าง batch ใหม่
-  const newBatch = {
-    batchRef: batchRef || `MANUAL-${Date.now()}`,
-    supplier: `Manual ${movementType}`,
-    cost: unitCost || variant.cost || 0,
-    quantity: adjustQty,
-    expiryDate: expiryDate || null,
-    receivedAt: new Date(),
-  };
-  variant.batches.push(newBatch);
-} else if (adjustQty < 0) {
-  // ลดสต็อก - consume จาก batches (ตาม FIFO/LIFO)
-  let remainingToConsume = Math.abs(adjustQty);
-  const costingMethod = product.costingMethod || 'FIFO';
-  
-  // เรียง batches
-  const sortedBatches = [...(variant.batches || [])].sort((a, b) => {
-    if (costingMethod === 'LIFO') {
-      return new Date(b.receivedAt) - new Date(a.receivedAt);
+if (type === 'adjustment') {
+  const currentStock = variant.stockOnHand || 0;
+
+  if (qty > 0) {
+    // เพิ่มสต็อก - สร้าง batch ใหม่ (ADJ-)
+    const batchCost = item.unitCost || item.unitPrice || variant.cost || 0;
+    variant.batches.push({
+      batchRef: item.batchRef || `ADJ-${Date.now()}`,
+      supplier: item.supplier || `Adjustment`,
+      cost: batchCost,
+      quantity: qty,
+      expiryDate: item.expiryDate,
+      receivedAt: new Date(),
+    });
+    // ✅ stockOnHand เป็น virtual field - คำนวณจาก batches อัตโนมัติ
+  } else if (qty < 0) {
+    // ลดสต็อก - consume จาก batches (ตาม FIFO/LIFO ผ่าน consumeBatches)
+    const remaining = consumeBatches(variant, product, Math.abs(qty), metadata);
+    if (remaining > 0 && !variant.allowBackorder) {
+      throw new Error(`Insufficient stock for adjustment on SKU ${variant.sku}`);
     }
-    return new Date(a.receivedAt) - new Date(b.receivedAt);
-  });
-
-  // Consume batches
-  for (const batch of sortedBatches) {
-    if (remainingToConsume <= 0) break;
-    const batchQty = batch.quantity || 0;
-    if (batchQty <= 0) continue;
-    
-    const consumeFromThisBatch = Math.min(batchQty, remainingToConsume);
-    batch.quantity -= consumeFromThisBatch;
-    remainingToConsume -= consumeFromThisBatch;
   }
-
-  // ลบ batches ที่เหลือ 0
-  variant.batches = variant.batches.filter(b => (b.quantity || 0) > 0);
+  return;
 }
-
-// บันทึกและอ่าน virtual field ใหม่
-product.markModified('variants');
-await product.save();
-const newStock = variant.stockOnHand || 0; // อ่านจาก virtual field หลัง update
 ```
+
+> หมายเหตุ: `consumeBatches()` (ใน inventory.js) เรียก `getBatchConsumptionOrder()`/`consumeBatchesByOrder()`
+> จาก `services/costingService.js` เพื่อหัก batch ตาม costingMethod และลบ batch ที่เหลือ 0 ออก
+> จากนั้นชั้นนอกจะ `product.markModified('variants')` + `product.save()` แล้วอ่าน `variant.stockOnHand` (virtual) ใหม่
 
 ## 📋 สิ่งที่เปลี่ยน
 
 | จุดที่แก้ | เดิม | ใหม่ |
 |----------|------|------|
-| **movements.js** | คำนวณ newStock = previousStock + adjustQty แล้ว save เฉยๆ | จัดการ batches: เพิ่ม/ลด batch.quantity ก่อน save |
+| **inventory.js → applyStockChange (type='adjustment')** | คำนวณ newStock = previousStock + adjustQty แล้ว save เฉยๆ | จัดการ batches: เพิ่ม batch ADJ- / consume batch ก่อน save |
 | **การเพิ่มสต็อก** | ไม่ทำอะไร | สร้าง batch ใหม่ด้วย quantity ที่เพิ่ม |
 | **การลดสต็อก** | ไม่ทำอะไร | consume batches ตาม FIFO/LIFO, ลบ batch ที่เหลือ 0 |
 | **newStock calculation** | คำนวณเอง | อ่านจาก virtual field หลัง save |

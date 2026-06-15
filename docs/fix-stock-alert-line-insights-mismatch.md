@@ -13,35 +13,42 @@
 
 ### การแก้ไข
 
-#### 1. รวมช่วงเวลาคำนวณยอดขายเป็น 30 วันคงที่ทุกจุด
+> 🔄 **อัปเดตให้ตรงโค้ดปัจจุบัน (2026-06-08):** เดิมเอกสารระบุว่า "ใช้ 30 วันคงที่ทุกจุด"
+> แต่โค้ดปัจจุบันคำนวณ avgDailySales สำหรับ reorder จากหน้าต่าง **`leadTimeDays + bufferDays`**
+> (ไม่ใช่ 30 วันตายตัว) ผ่าน `calculateAverageDailySalesFromOrders(variantId, leadTimeDays + bufferDays)`
+> ใน `services/stockAlertService.js` — ดู `checkVariantStockRisk` (~บรรทัด 102-105) และ `generateStockAlerts` (~บรรทัด 210-214)
+> ส่วนหน้า Insights ยังมีตัวเลข "ยอดขาย" ที่อิง `salesPeriodDays` แบบเลือกช่วงวันได้ (dateFrom/dateTo หรือ days)
+> แต่ **ตัวเลข reorder** ของทั้ง LINE และ Insights ถูกคำนวณด้วยหน้าต่าง `leadTimeDays + bufferDays` เดียวกัน
+> และส่งเข้า `calculateReorderMetrics` ตัวเดียวกัน → ผลลัพธ์ reorder จึงตรงกัน
+
+#### 1. ใช้หน้าต่างยอดขาย = `leadTimeDays + bufferDays` สำหรับการคำนวณ reorder
 ```javascript
-// inventory.js - Insights endpoint
-const salesPeriodDays = 30; // ใช้ 30 วันคงที่
-const salesSince = new Date(now.getTime() - salesPeriodDays * 24 * 60 * 60 * 1000);
-const dailySalesRate = quantitySold / salesPeriodDays; // แทน days parameter
+// services/stockAlertService.js
+const salesPeriodDays = leadTimeDays + bufferDays;
+const avgDailySales = await calculateAverageDailySalesFromOrders(variant._id, salesPeriodDays);
 ```
 
 #### 2. รวมการคำนวณทั้งหมดที่ calculateReorderMetrics (มาตรฐานเดียว)
 ```javascript
-// ทุก endpoint ใช้ function เดียวกัน
-const reorderMetrics = calculateReorderMetrics(dailySalesRate, leadTimeDays, bufferDays);
+// ทุก endpoint (LINE Alert / Alerts API / Insights API) ใช้ function เดียวกัน
+const reorderMetrics = calculateReorderMetrics(avgDailySales, leadTimeDays, bufferDays);
 ```
 
 #### 3. ใช้ค่า config จากแหล่งเดียวกัน
-- **Sales source**: InventoryOrder (30 วัน)
+- **Sales source**: InventoryOrder (หน้าต่าง = leadTimeDays + bufferDays)
 - **bufferDays**: `product.reorderBufferDays ?? 7`
 - **leadTimeDays**: `product.leadTimeDays || 7`
 
-### จุดที่ใช้คำนวณตัวเลขเหมือนกัน
+### จุดที่ใช้คำนวณ reorder เหมือนกัน
 
-| ตำแหน่ง | Sales Period | Buffer Source | Lead Time Source |
+| ตำแหน่ง | Sales Period (reorder) | Buffer Source | Lead Time Source |
 |---------|--------------|---------------|------------------|
-| LINE Alert | 30 วัน | product.reorderBufferDays ?? 7 | product.leadTimeDays \\|\\| 7 |
-| Alerts API | 30 วัน | product.reorderBufferDays ?? 7 | product.leadTimeDays \\|\\| 7 |
-| Insights API | 30 วัน | product.reorderBufferDays ?? 7 | product.leadTimeDays \\|\\| 7 |
+| LINE Alert | leadTimeDays + bufferDays | product.reorderBufferDays ?? 7 | product.leadTimeDays \\|\\| 7 |
+| Alerts API | leadTimeDays + bufferDays | product.reorderBufferDays ?? 7 | product.leadTimeDays \\|\\| 7 |
+| Insights API | leadTimeDays + bufferDays | product.reorderBufferDays ?? 7 | product.leadTimeDays \\|\\| 7 |
 
-### ตัวเลขที่จะตรงกันทุกที่
-- **avgDailySales** = totalSold / 30
+### ตัวเลขที่จะตรงกันทุกที่ (P = leadTimeDays + bufferDays)
+- **avgDailySales** = totalSold / P
 - **safetyStock** = ceil(avgDailySales × bufferDays)
 - **suggestedReorderPoint** = ceil(avgDailySales × leadTimeDays + safetyStock)
 - **suggestedReorderQty** = ceil(avgDailySales × (leadTimeDays + bufferDays))

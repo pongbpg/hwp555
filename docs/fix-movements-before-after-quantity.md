@@ -40,7 +40,7 @@ qty = 30
 ## Solution ✅
 
 ### Code Fix
-ไฟล์: [stock_system/backend/routes/inventory.js](../../stock_system/backend/routes/inventory.js#L320)
+ไฟล์: [stock_system/backend/routes/inventory.js](../stock_system/backend/routes/inventory.js#L641)
 
 **ตั้งแต่:**
 ```javascript
@@ -74,7 +74,7 @@ movementRecords.push({
 ## Impact
 
 ### Files Modified
-- ✅ [stock_system/backend/routes/inventory.js](../../stock_system/backend/routes/inventory.js#L320)
+- ✅ [stock_system/backend/routes/inventory.js](../stock_system/backend/routes/inventory.js#L641)
 
 ### Testing
 ทดสอบโดย:
@@ -113,7 +113,7 @@ Movement Type: out (จ่ายออก)
 ## Related Code Sections
 
 ### recordMovement Function
-**File:** [stock_system/backend/routes/movements.js](../../stock_system/backend/routes/movements.js#L213-L250)
+**File:** [stock_system/backend/routes/movements.js](../stock_system/backend/routes/movements.js#L185)
 
 ฟังก์ชัน `recordMovement()` รับพารามิเตอร์:
 ```javascript
@@ -129,7 +129,7 @@ Movement Type: out (จ่ายออก)
 ```
 
 ### applyStockChange Function
-**File:** [stock_system/backend/routes/inventory.js](../../stock_system/backend/routes/inventory.js#L87-L230)
+**File:** [stock_system/backend/routes/inventory.js](../stock_system/backend/routes/inventory.js#L132)
 
 ฟังก์ชันนี้แก้ไข `variant.stockOnHand` ตามลอจิก:
 - `type: 'purchase'` → increase `variant.incoming`

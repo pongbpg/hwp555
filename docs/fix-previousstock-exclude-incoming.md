@@ -177,6 +177,6 @@ movementRecords.push({
 
 ## ลิงก์ที่เกี่ยวข้อง
 
-- [MOVEMENTS_CANCELLED_FIX.md](../MOVEMENTS_CANCELLED_FIX.md) - การแก้ movements จาก cancelled orders
-- [STOCK_ALERT_FIX.md](../STOCK_ALERT_FIX.md) - การแก้ stock alert calculations
-- [inventory.js](./routes/inventory.js) - Order processing logic
+- [fix-movements-from-cancelled-orders.md](./fix-movements-from-cancelled-orders.md) - การแก้ movements จาก cancelled orders
+- [fix-stock-alert-line-insights-mismatch.md](./fix-stock-alert-line-insights-mismatch.md) - การแก้ stock alert calculations
+- [inventory.js](../stock_system/backend/routes/inventory.js) - Order processing logic
