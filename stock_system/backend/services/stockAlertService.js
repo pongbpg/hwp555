@@ -200,42 +200,43 @@ export const checkAndAlertAfterSale = async (soldItems, options = {}) => {
   const { sendNotification = true, notificationType = 'auto' } = options;
   const alerts = [];
 
-  for (const item of soldItems) {
+  // ✅ เช็คระดับ product: ขายสินค้าใดให้ตรวจทุก variant ของสินค้านั้น
+  //    เพื่อให้การ์ด LINE แสดง SKU สต็อกต่ำครบเหมือนหน้า Replenishment
+  const productIds = [...new Set(soldItems.map((item) => String(item.productId)))];
+
+  for (const productId of productIds) {
     try {
-      const product = await Product.findById(item.productId);
+      const product = await Product.findById(productId);
       if (!product) continue;
 
-      const variant = product.variants.id(item.variantId);
-      if (!variant) continue;
+      for (const variant of product.variants || []) {
+        if (variant.status !== 'active') continue;
 
-      // ✅ ใช้ leadTimeDays + bufferDays เพื่อให้การแจ้งเตือนแม่นยำกับช่วงเวลาสินค้า
-      const leadTimeDays = product.leadTimeDays || 7;
-      const bufferDays = product.reorderBufferDays ?? 7;
-      const salesPeriodDays = leadTimeDays + bufferDays;
-      const avgDailySales = await calculateAverageDailySalesFromOrders(variant._id, salesPeriodDays);
-
-      logDebug(`📊 [LINE Alert] Calculating for ${variant.sku}:`, {
-        variantId: variant._id,
-        currentStock: variant.stockOnHand,
-        avgDailySales: avgDailySales.toFixed(3),
-      });
-
-      // ตรวจสอบความเสี่ยง
-      const alert = await checkVariantStockRisk(product, variant, avgDailySales);
-      if (alert) {
-        logDebug(`🔔 [LINE Alert] Alert created for ${variant.sku}:`, {
-          suggestedReorderPoint: alert.suggestedReorderPoint,
-          suggestedOrder: alert.suggestedOrder,
-          avgDailySales: alert.avgDailySales.toFixed(3),
-          daysOfStock: alert.daysOfStock,
-          currentStock: alert.currentStock,
-        });
-        alerts.push(alert);
+        // ตรวจสอบความเสี่ยง (คำนวณ avgDailySales จากช่วง leadTime+buffer ภายใน)
+        const alert = await checkVariantStockRisk(product, variant);
+        if (alert) {
+          logDebug(`🔔 [LINE Alert] Alert created for ${variant.sku}:`, {
+            suggestedReorderPoint: alert.suggestedReorderPoint,
+            suggestedOrder: alert.suggestedOrder,
+            avgDailySales: alert.avgDailySales.toFixed(3),
+            daysOfStock: alert.daysOfStock,
+            currentStock: alert.currentStock,
+          });
+          alerts.push(alert);
+        }
       }
     } catch (error) {
-      console.error(`Error checking stock risk for variant ${item.variantId}:`, error);
+      console.error(`Error checking stock risk for product ${productId}:`, error);
     }
   }
+
+  // เรียงตามความเร่งด่วน (เหมือน checkAllStockRisks)
+  alerts.sort((a, b) => {
+    const statusOrder = { 'out-of-stock': 0, critical: 1, 'low-stock': 2 };
+    const statusDiff = (statusOrder[a.stockStatus] ?? 3) - (statusOrder[b.stockStatus] ?? 3);
+    if (statusDiff !== 0) return statusDiff;
+    return a.daysOfStock - b.daysOfStock;
+  });
 
   // ส่งการแจ้งเตือนถ้ามี
   let notificationResult = null;
@@ -315,7 +316,7 @@ export const checkAllStockRisks = async (options = {}) => {
   alerts.sort((a, b) => {
     // เรียงตาม stock status (out-of-stock > critical > low-stock)
     const statusOrder = { 'out-of-stock': 0, critical: 1, 'low-stock': 2 };
-    const statusDiff = (statusOrder[a.stockStatus] || 3) - (statusOrder[b.stockStatus] || 3);
+    const statusDiff = (statusOrder[a.stockStatus] ?? 3) - (statusOrder[b.stockStatus] ?? 3);
     if (statusDiff !== 0) return statusDiff;
 
     // เรียงตาม days of stock
