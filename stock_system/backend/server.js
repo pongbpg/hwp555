@@ -11,6 +11,7 @@ import brandRoutes from './routes/brands.js';
 import movementRoutes from './routes/movements.js';
 import lineRoutes from './routes/line.js';
 import debugInsightsRoutes from './routes/debug-insights.js';
+import publicApiRoutes from './routes/public-api.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -51,6 +52,9 @@ app.use('/api/brands', brandRoutes);
 app.use('/api/movements', movementRoutes);
 app.use('/api/line', lineRoutes);
 app.use('/api/debug', debugInsightsRoutes);
+
+// Public API (external, API-key auth) — versioned
+app.use('/api/public/v1', publicApiRoutes);
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', service: 'stock-system' });

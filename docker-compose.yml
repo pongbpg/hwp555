@@ -75,6 +75,7 @@ services:
       LINE_CHANNEL_ACCESS_TOKEN: ${LINE_CHANNEL_ACCESS_TOKEN}
       LINE_TARGET_ID: ${LINE_TARGET_ID}
       DEBUG_STOCK_ALERTS: "true"
+      PUBLIC_API_KEYS: ${PUBLIC_API_KEYS}
     depends_on:
       mongodb:
         condition: service_healthy
