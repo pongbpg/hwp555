@@ -239,34 +239,25 @@ export default function Products() {
   }, [newProduct.category, newProduct.brand, showVariants, categories, brands, products, editMode]);
 
   useEffect(() => {
-    if (showVariants && !editMode) {
-      // ✅ เฉพาะตอน create ใหม่ ไม่ใช่ตอนแก้ไข เพื่อไม่ให้ batches หาย
+    if (showVariants) {
+      // ✅ regenerate SKU ทุก variant ตามสูตร (ทั้ง create และ edit)
+      //    sku regen ไม่แตะ batches — spread ...variant + คง batches ไว้เสมอ
+      let changed = false;
       const updatedVariants = variants.map((variant) => {
-        const isNewVariant = !variant._id;
-        
-        // variant เก่า (มี _id) ให้คงไว้ ไม่ auto-generate
-        if (!isNewVariant && variant.sku) {
-          return variant;
-        }
-
-        // variant ใหม่ หรือไม่มี SKU ให้ generate
-        if (isNewVariant || !variant.sku) {
-          const sku = generateVariantSKU(
-            newProduct.brand,
-            newProduct.category,
-            skuProduct,
-            variant.model,
-            variant.color,
-            variant.size,
-            variant.material
-          );
-          // ✅ เมื่อ generate SKU ต้องรักษา batches ไว้
-          return { ...variant, sku: sku || variant.sku, batches: variant.batches };
-        }
-
-        return variant;
+        const sku = generateVariantSKU(
+          newProduct.brand,
+          newProduct.category,
+          skuProduct,
+          variant.model,
+          variant.color,
+          variant.size,
+          variant.material
+        );
+        const nextSku = sku || variant.sku;
+        if (nextSku !== variant.sku) changed = true;
+        return { ...variant, sku: nextSku, batches: variant.batches };
       });
-      setVariants(updatedVariants);
+      if (changed) setVariants(updatedVariants);
     }
   }, [newProduct.category, newProduct.brand, showVariants, editMode, skuProduct, brands, categories]);
 
@@ -533,11 +524,11 @@ export default function Products() {
     const updated = [...variants];
     updated[index] = { ...updated[index], [field]: value };
 
-    // เฉพาะ variant ใหม่เท่านั้นที่ให้ auto-generate SKU
-    const isNewVariant = !updated[index]._id;
+    // ✅ auto-generate SKU ใหม่ตามสูตรทุกครั้งที่แก้ field ที่ประกอบเป็น SKU
+    //    (ทั้ง variant ใหม่และเก่า — sku regen ไม่แตะ batches จึงปลอดภัย)
     const attributeFields = ['model', 'color', 'size', 'material'];
-    
-    if (isNewVariant && attributeFields.includes(field)) {
+
+    if (attributeFields.includes(field)) {
       const variant = updated[index];
       const sku = generateVariantSKU(
         newProduct.brand,
@@ -636,27 +627,23 @@ export default function Products() {
       }
     }
     
-    // อัพเดท variant SKU
+    // อัพเดท variant SKU — regenerate จาก field ตามสูตร (ไม่เก็บ suffix เก่า)
     if (showVariants && categoryId) {
-      const newBasePrefix = getBasePrefix(newProduct.brand, categoryId);
-      const oldBasePrefix = getBasePrefix(newProduct.brand, newProduct.category);
-      
       const updatedVariants = variants.map((variant) => {
-        const oldVariantSku = variant.sku || '';
-        
-        // เก็บ suffix จาก SKU เดิม
-        let suffix = '';
-        if (oldBasePrefix && oldVariantSku.startsWith(oldBasePrefix + '-')) {
-          suffix = oldVariantSku.substring(oldBasePrefix.length + 1);
-        }
-        
-        // สร้าง SKU ใหม่
-        const newSku = suffix ? `${newBasePrefix}-${suffix}` : oldVariantSku;
-        return { ...variant, sku: newSku };
+        const newSku = generateVariantSKU(
+          newProduct.brand,
+          categoryId,
+          skuProduct,
+          variant.model,
+          variant.color,
+          variant.size,
+          variant.material
+        );
+        return { ...variant, sku: newSku || variant.sku };
       });
       setVariants(updatedVariants);
     }
-    
+
     setNewProduct({ ...newProduct, ...updates });
   };
 
@@ -690,27 +677,23 @@ export default function Products() {
       }
     }
     
-    // อัพเดท variant SKU
+    // อัพเดท variant SKU — regenerate จาก field ตามสูตร (ไม่เก็บ suffix เก่า)
     if (showVariants && brandId) {
-      const newBasePrefix = getBasePrefix(brandId, newProduct.category);
-      const oldBasePrefix = getBasePrefix(newProduct.brand, newProduct.category);
-      
       const updatedVariants = variants.map((variant) => {
-        const oldVariantSku = variant.sku || '';
-        
-        // เก็บ suffix จาก SKU เดิม
-        let suffix = '';
-        if (oldBasePrefix && oldVariantSku.startsWith(oldBasePrefix + '-')) {
-          suffix = oldVariantSku.substring(oldBasePrefix.length + 1);
-        }
-        
-        // สร้าง SKU ใหม่
-        const newSku = suffix ? `${newBasePrefix}-${suffix}` : oldVariantSku;
-        return { ...variant, sku: newSku };
+        const newSku = generateVariantSKU(
+          brandId,
+          newProduct.category,
+          skuProduct,
+          variant.model,
+          variant.color,
+          variant.size,
+          variant.material
+        );
+        return { ...variant, sku: newSku || variant.sku };
       });
       setVariants(updatedVariants);
     }
-    
+
     setNewProduct({ ...newProduct, ...updates });
   };
 

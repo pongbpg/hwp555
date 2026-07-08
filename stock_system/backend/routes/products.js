@@ -2,33 +2,55 @@ import express from 'express';
 import Product from '../models/Product.js';
 import Category from '../models/Category.js';
 import Brand from '../models/Brand.js';
+import StockMovement from '../models/StockMovement.js';
+import InventoryOrder from '../models/InventoryOrder.js';
 import { authenticateToken, authorizeRoles } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Helper: Generate SKU based on new formula
-// Formula: {Brand} - {Category} - {Model} - {Color} - {Size} - {Material}
-const generateSKUFromVariant = async (product, variant) => {
-  // Get brand name
-  const brandDoc = await Brand.findById(product.brand);
-  const brandName = brandDoc?.name || 'UNKNOWN';
-  
-  // Get category name
-  const categoryDoc = await Category.findById(product.category);
-  const categoryName = categoryDoc?.name || 'UNKNOWN';
-  
-  // Collect parts
+// ดึงค่า attribute จาก variant (รองรับทั้ง Mongoose Map และ plain object)
+const getAttr = (variant, key) => {
+  const attrs = variant?.attributes;
+  if (!attrs) return variant?.[key];
+  const val = attrs.get ? attrs.get(key) : attrs[key];
+  return val ?? variant?.[key];
+};
+
+// โหลด prefix ของ brand + category ครั้งเดียวต่อ request
+const loadPrefixes = async (brandId, categoryId) => {
+  const [brandDoc, categoryDoc] = await Promise.all([
+    brandId ? Brand.findById(brandId) : null,
+    categoryId ? Category.findById(categoryId) : null,
+  ]);
+  return { brandPrefix: brandDoc?.prefix || '', categoryPrefix: categoryDoc?.prefix || '' };
+};
+
+// Helper: สร้าง SKU จากสูตรมาตรฐาน (ตรงกับ frontend generateVariantSKU)
+// Formula: brand.prefix - category.prefix - product.skuProduct - model - color - size - material
+const buildVariantSku = (brandPrefix, categoryPrefix, skuProduct, variant) => {
   const parts = [
-    brandName,
-    categoryName,
+    brandPrefix,
+    categoryPrefix,
+    skuProduct,
     variant.model,
-    variant.attributes?.color || variant.color,
-    variant.attributes?.size || variant.size,
-    variant.attributes?.material || variant.material,
-  ].filter(Boolean); // Remove empty parts
-  
-  // Join with ` - ` separator and convert to uppercase
-  return parts.join(' - ').toUpperCase();
+    getAttr(variant, 'color'),
+    getAttr(variant, 'size'),
+    getAttr(variant, 'material'),
+  ].map((s) => (s == null ? '' : String(s).trim())).filter(Boolean);
+  return parts.join('-').toUpperCase();
+};
+
+// Regenerate SKU ให้แต่ละ variant ตามสูตร (in-place)
+// เขียนทับเฉพาะเมื่อสูตรได้ >2 ส่วน (มี identity จริง) — ป้องกันการทับ SKU แบบ running-number ของ single product
+const applyGeneratedSkus = (variants, brandPrefix, categoryPrefix, skuProduct) => {
+  for (const v of variants) {
+    const generated = buildVariantSku(brandPrefix, categoryPrefix, skuProduct, v);
+    if (generated && generated.split('-').length > 2) {
+      v.sku = generated;
+    } else if (!v.sku && generated) {
+      v.sku = generated;
+    }
+  }
 };
 
 const buildFilters = (query) => {
@@ -73,23 +95,15 @@ router.post('/', authenticateToken, authorizeRoles('owner', 'admin', 'hr'), asyn
       return res.status(400).json({ error: 'At least one variant is required' });
     }
 
-    // Auto-generate SKU for each variant if not provided
-    const variantsWithSKU = await Promise.all(
-      body.variants.map(async (variant) => {
-        if (!variant.sku) {
-          // Create temporary product object to generate SKU
-          const tempProduct = { brand: body.brand, category: body.category };
-          variant.sku = await generateSKUFromVariant(tempProduct, variant);
-        }
-        return variant;
-      })
-    );
+    // Auto-generate SKU ให้ทุก variant จากสูตรมาตรฐาน (source of truth)
+    const { brandPrefix, categoryPrefix } = await loadPrefixes(body.brand, body.category);
+    applyGeneratedSkus(body.variants, brandPrefix, categoryPrefix, body.skuProduct || '');
 
-    const product = new Product({ 
-      ...body, 
-      variants: variantsWithSKU,
-      createdBy: req.user?._id, 
-      updatedBy: req.user?._id 
+    const product = new Product({
+      ...body,
+      variants: body.variants,
+      createdBy: req.user?._id,
+      updatedBy: req.user?._id
     });
     await product.save();
     res.status(201).json(product);
@@ -102,6 +116,9 @@ router.put('/:id', authenticateToken, authorizeRoles('owner', 'admin', 'hr'), as
   try {
     const product = await Product.findById(req.params.id);
     if (!product) return res.status(404).json({ error: 'Product not found' });
+
+    // เก็บ SKU เดิมของแต่ละ variant (ตาม _id) ไว้เทียบว่ามีการเปลี่ยน เพื่อ cascade ทีหลัง
+    const originalSkuByVid = new Map(product.variants.map((v) => [String(v._id), v.sku]));
 
     // ✅ CRITICAL: Merge variants with proper batch preservation
     // Strategy: Build NEW variant array by matching old variants with new data
@@ -182,8 +199,33 @@ router.put('/:id', authenticateToken, authorizeRoles('owner', 'admin', 'hr'), as
     
     product.updatedBy = req.user?._id;
 
+    // ✅ Regenerate SKU ให้ทุก variant จากสูตร (ใช้ค่า brand/category/skuProduct ล่าสุด)
+    const { brandPrefix, categoryPrefix } = await loadPrefixes(product.brand, product.category);
+    applyGeneratedSkus(product.variants, brandPrefix, categoryPrefix, product.skuProduct || '');
+
     // ✅ Use product.save() to ensure Mongoose handles subdocuments correctly
     await product.save();
+
+    // ✅ Cascade: variant ไหนที่ SKU เปลี่ยนไป → อัปเดตสำเนา sku ใน StockMovement + InventoryOrder
+    // (ผูกกันด้วย variantId ไม่ใช่ string sku จึงอัปเดตได้ปลอดภัย)
+    const skuChanges = [];
+    for (const v of product.variants) {
+      const oldSku = originalSkuByVid.get(String(v._id));
+      if (oldSku !== undefined && oldSku !== v.sku) {
+        skuChanges.push({ variantId: v._id, newSku: v.sku });
+      }
+    }
+    for (const c of skuChanges) {
+      await StockMovement.updateMany(
+        { variantId: c.variantId, sku: { $ne: c.newSku } },
+        { $set: { sku: c.newSku } }
+      );
+      await InventoryOrder.updateMany(
+        { 'items.variantId': c.variantId },
+        { $set: { 'items.$[e].sku': c.newSku } },
+        { arrayFilters: [{ 'e.variantId': c.variantId, 'e.sku': { $ne: c.newSku } }] }
+      );
+    }
 
     res.json(product);
   } catch (error) {
