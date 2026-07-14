@@ -24,8 +24,9 @@ https://stock-api.storewerk.com/api/public/v1
 X-API-Key: <your-api-key>
 ```
 
-- คีย์ถูกตั้งใน env `PUBLIC_API_KEYS` (คั่นหลายคีย์ด้วย comma รองรับหลาย partner)
-- gen คีย์ใหม่: `openssl rand -hex 32`
+- **การขอคีย์:** ติดต่อทีม HWP555 เพื่อขอออก API key ให้ (partner ไม่ต้องสร้างเอง — ทีมเป็นผู้ออกและลงทะเบียนคีย์ในระบบ)
+- ⚠️ **คีย์เป็นความลับ** — เก็บไว้ฝั่ง server เท่านั้น **ห้ามฝังในเว็บ/แอปฝั่ง client (browser, mobile)**
+  เพราะใครก็เปิดดูได้และนำคีย์ไปใช้ต่อ ให้เรียก API นี้จาก backend ของคุณแล้วส่งต่อข้อมูลเอง
 
 | สถานการณ์ | HTTP status | body |
 |---|---|---|
@@ -115,6 +116,14 @@ curl -H "X-API-Key: $KEY" \
 
 **ฟิลด์ระดับ variant:** `name`, `sku`, `barcode`, `model`, `attributes`, `price`, `status`,
 `stockOnHand`, `inStock`, `stockStatus`
+
+> `attributes` เป็น **object ที่ key ไม่ตายตัว** — แต่ละสินค้ากำหนดเอง (เช่น `color`, `size`, `material`)
+> อย่า hardcode ชื่อ key ให้วนอ่าน key/value ที่ได้มาจริง
+
+### ฟิลด์ที่อาจเป็นค่าว่างหรือไม่มี
+
+`description`, `barcode`, `model` อาจเป็นสตริงว่าง `""` หรือไม่ปรากฏใน response —
+ฝั่งผู้เรียกควรเผื่อกรณีนี้ (อย่า assume ว่ามีค่าเสมอ) `tags` อาจเป็น array ว่าง `[]`
 
 **ชื่อย่อ (alias):**
 
