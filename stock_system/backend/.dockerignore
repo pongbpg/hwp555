@@ -6,6 +6,8 @@ npm-debug.log
 .gitignore
 README.md
 *.md
+# แต่ต้อง copy คู่มือ Public API เข้า image เพื่อเสิร์ฟผ่าน GET /api/public/v1/docs
+!docs/PUBLIC_API.md
 *.mjs
 check-*.mjs
 fix-*.mjs

@@ -1,6 +1,9 @@
 import express from 'express';
 import mongoose from 'mongoose';
 import rateLimit from 'express-rate-limit';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import Product from '../models/Product.js';
 import Category from '../models/Category.js';
 import Brand from '../models/Brand.js';
@@ -8,6 +11,21 @@ import { requireApiKey } from '../middleware/apiKey.js';
 import { serializeProduct, parseFields } from '../utils/publicSerializer.js';
 
 const router = express.Router();
+
+// ---- คู่มือ (public — ไม่ต้องใช้ API key เพราะ partner ต้องอ่านก่อนขอ key) ----
+// อ่านไฟล์ครั้งเดียวตอน start แล้ว cache ไว้ (ไฟล์ถูก copy เข้า image ผ่าน .dockerignore !docs/PUBLIC_API.md)
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+let DOCS_MD = '';
+try {
+  DOCS_MD = fs.readFileSync(path.join(__dirname, '../docs/PUBLIC_API.md'), 'utf8');
+} catch {
+  DOCS_MD = '# Public Stock API\n\nคู่มือไม่พร้อมใช้งานชั่วคราว\n';
+}
+
+// ต้อง define ก่อน router.use(requireApiKey) ด้านล่าง — ไม่งั้นจะโดนบังคับใส่ key
+router.get('/docs', (_req, res) => {
+  res.type('text/markdown; charset=utf-8').send(DOCS_MD);
+});
 
 // escape regex special chars — public endpoint โดนยิงจากใครก็ได้ ต้องกัน ReDoS/injection
 const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
